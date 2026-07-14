@@ -155,6 +155,25 @@ export class Chunk {
   }
 
   /**
+   * Bulk-replaces every block in the chunk from a pre-built array using
+   * the same XZY layout as this class's own storage (see index()).
+   * Intended for world generators that build a full chunk's blocks
+   * off-array (e.g. from noise) more efficiently than CHUNK_VOLUME
+   * individual setBlock() calls. Always marks dirty, since this is only
+   * ever used to populate a freshly created (already-dirty) chunk.
+   */
+  public loadGeneratedBlocks(data: Uint8Array): void {
+    if (data.length !== CHUNK_VOLUME) {
+      throw new RangeError(
+        `Generated block array length ${data.length} does not match chunk volume ${CHUNK_VOLUME}.`,
+      );
+    }
+
+    this.blocks.set(data);
+    this.dirty = true;
+  }
+
+  /**
    * XZY flat index. Local coordinates must already be in bounds.
    */
   private index(localX: number, localY: number, localZ: number): number {

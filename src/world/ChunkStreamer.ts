@@ -1,6 +1,6 @@
 import type { ChunkRenderer } from '../rendering/ChunkRenderer';
 import type { ChunkManager } from './ChunkManager';
-import type { FlatWorldGenerator } from './FlatWorldGenerator';
+import type { WorldGenerator } from './WorldGenerator';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from './chunkConstants';
 
 /** Chebyshev radius (square) for loading chunks around the camera. */
@@ -22,7 +22,7 @@ const NEIGHBOUR_OFFSETS: ReadonlyArray<readonly [number, number]> = [
  */
 export class ChunkStreamer {
   private readonly chunkManager: ChunkManager;
-  private readonly generator: FlatWorldGenerator;
+  private readonly generator: WorldGenerator;
   private readonly chunkRenderer: ChunkRenderer;
 
   private lastChunkX: number | null = null;
@@ -31,7 +31,7 @@ export class ChunkStreamer {
 
   public constructor(
     chunkManager: ChunkManager,
-    generator: FlatWorldGenerator,
+    generator: WorldGenerator,
     chunkRenderer: ChunkRenderer,
   ) {
     this.chunkManager = chunkManager;

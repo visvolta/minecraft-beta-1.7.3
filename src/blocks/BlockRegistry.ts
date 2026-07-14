@@ -45,4 +45,9 @@ export class BlockRegistry {
   public get size(): number {
     return this.byId.size;
   }
+
+  /** All registered definitions, in registration order. */
+  public values(): IterableIterator<BlockDefinition> {
+    return this.byId.values();
+  }
 }

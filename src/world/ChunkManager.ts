@@ -50,6 +50,24 @@ export class ChunkManager {
     this.chunks.clear();
   }
 
+  /**
+   * Number of currently loaded chunks marked dirty (awaiting a mesh
+   * rebuild). Debug-overlay-only; iterates all loaded chunks, so it's
+   * O(loaded chunks) — fine at the small debug-overlay refresh rate,
+   * not intended for per-frame gameplay use.
+   */
+  public countDirtyChunks(): number {
+    let count = 0;
+
+    for (const chunk of this.chunks.values()) {
+      if (chunk.isDirty()) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
   public forEach(callback: (chunk: Chunk) => void): void {
     for (const chunk of this.chunks.values()) {
       callback(chunk);

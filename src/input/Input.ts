@@ -7,8 +7,7 @@ export type InputAction =
   | 'back'
   | 'left'
   | 'right'
-  | 'up'
-  | 'down';
+  | 'jump';
 
 /** Default keyboard bindings. Replace this map later for configurable keybinds. */
 const DEFAULT_BINDINGS: Record<InputAction, readonly string[]> = {
@@ -16,8 +15,56 @@ const DEFAULT_BINDINGS: Record<InputAction, readonly string[]> = {
   back: ['KeyS'],
   left: ['KeyA'],
   right: ['KeyD'],
-  up: ['Space'],
-  down: ['ShiftLeft', 'ShiftRight'],
+  jump: ['Space'],
+};
+
+/** Mouse buttons the game can query, by their MouseEvent.button index. */
+export type MouseButton = 'left' | 'right';
+
+const MOUSE_BUTTON_INDEX: Record<MouseButton, number> = {
+  left: 0,
+  right: 2,
+};
+
+/**
+ * Digit keys 1-6, reserved for simple block selection in this stage.
+ * Slot 6 has no block mapped to it yet; the binding still exists so the
+ * input API doesn't need to change again when a 6th slot is added later.
+ */
+export type DigitKey = '1' | '2' | '3' | '4' | '5' | '6';
+
+const DIGIT_KEY_CODES: Record<DigitKey, string> = {
+  '1': 'Digit1',
+  '2': 'Digit2',
+  '3': 'Digit3',
+  '4': 'Digit4',
+  '5': 'Digit5',
+  '6': 'Digit6',
+};
+
+/**
+ * Debug-only function keys (Stage 12D): F3 toggles the debug overlay, F6
+ * toggles debug no-clip. Edge-triggered like the digit keys above, not
+ * bound through the InputAction system since they control debug systems
+ * rather than gameplay.
+ */
+export type DebugKey = 'F3' | 'F6';
+
+const DEBUG_KEY_CODES: Record<DebugKey, string> = {
+  F3: 'F3',
+  F6: 'F6',
+};
+
+/**
+ * Modifier keys queried as simple held-state (not edge-triggered), used by
+ * debug no-clip (Shift = 2x speed) and left available generically. Checks
+ * both left/right variants of each modifier.
+ */
+export type ModifierKey = 'shift' | 'ctrl';
+
+const MODIFIER_KEY_CODES: Record<ModifierKey, readonly string[]> = {
+  shift: ['ShiftLeft', 'ShiftRight'],
+  ctrl: ['ControlLeft', 'ControlRight'],
 };
 
 /**
@@ -39,11 +86,38 @@ export class Input {
 
   private pointerLocked = false;
 
+  /** Mouse buttons currently held down, by MouseEvent.button index. */
+  private readonly mouseButtonsDown = new Set<number>();
+
+  /** Button-down events seen since the last beginFrame. */
+  private readonly pendingMousePresses = new Set<number>();
+
+  /** Snapshot of pendingMousePresses for this frame's consumers. */
+  private readonly frameMousePresses = new Set<number>();
+
+  /** Key codes with a (non-repeat) keydown event since the last beginFrame. */
+  private readonly pendingKeyPresses = new Set<string>();
+
+  /** Snapshot of pendingKeyPresses for this frame's consumers. */
+  private readonly frameKeyPresses = new Set<string>();
+
   private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (!event.repeat) {
+      this.pendingKeyPresses.add(event.code);
+    }
+
     this.keysDown.add(event.code);
 
-    // Prevent page scroll when free-flying with Space / arrows, etc.
+    // Prevent page scroll when jumping with Space / using arrows, etc.
     if (this.pointerLocked) {
+      event.preventDefault();
+    }
+
+    // F3/F6 are debug toggles that must reach the game even without
+    // pointer lock (e.g. right after page load, before the first click),
+    // and must never trigger the browser's own F3 (find-in-page, in some
+    // browsers) or F6 (address-bar focus) behaviour.
+    if (event.code === DEBUG_KEY_CODES.F3 || event.code === DEBUG_KEY_CODES.F6) {
       event.preventDefault();
     }
   };
@@ -61,6 +135,30 @@ export class Input {
     this.pendingMouseDeltaY += event.movementY;
   };
 
+  private readonly onMouseDown = (event: MouseEvent): void => {
+    if (!this.pointerLocked) {
+      // The very first click only requests Pointer Lock (see onClick);
+      // it should not also register as a gameplay break/place action.
+      return;
+    }
+
+    if (!this.mouseButtonsDown.has(event.button)) {
+      this.pendingMousePresses.add(event.button);
+    }
+
+    this.mouseButtonsDown.add(event.button);
+  };
+
+  private readonly onMouseUp = (event: MouseEvent): void => {
+    this.mouseButtonsDown.delete(event.button);
+  };
+
+  private readonly onContextMenu = (event: MouseEvent): void => {
+    // Right mouse button is used for placing blocks; never show the
+    // browser's context menu over the game canvas.
+    event.preventDefault();
+  };
+
   private readonly onClick = (): void => {
     if (!this.pointerLocked) {
       void this.target.requestPointerLock();
@@ -72,11 +170,19 @@ export class Input {
 
     if (!this.pointerLocked) {
       this.clearMouseDeltas();
+      this.mouseButtonsDown.clear();
+      this.pendingMousePresses.clear();
+      this.frameMousePresses.clear();
     }
   };
 
   private readonly onBlur = (): void => {
     this.keysDown.clear();
+    this.mouseButtonsDown.clear();
+    this.pendingMousePresses.clear();
+    this.frameMousePresses.clear();
+    this.pendingKeyPresses.clear();
+    this.frameKeyPresses.clear();
     this.clearMouseDeltas();
   };
 
@@ -94,6 +200,9 @@ export class Input {
     window.addEventListener('blur', this.onBlur);
     document.addEventListener('pointerlockchange', this.onPointerLockChange);
     this.target.addEventListener('mousemove', this.onMouseMove);
+    this.target.addEventListener('mousedown', this.onMouseDown);
+    this.target.addEventListener('mouseup', this.onMouseUp);
+    this.target.addEventListener('contextmenu', this.onContextMenu);
     this.target.addEventListener('click', this.onClick);
   }
 
@@ -103,6 +212,9 @@ export class Input {
     window.removeEventListener('blur', this.onBlur);
     document.removeEventListener('pointerlockchange', this.onPointerLockChange);
     this.target.removeEventListener('mousemove', this.onMouseMove);
+    this.target.removeEventListener('mousedown', this.onMouseDown);
+    this.target.removeEventListener('mouseup', this.onMouseUp);
+    this.target.removeEventListener('contextmenu', this.onContextMenu);
     this.target.removeEventListener('click', this.onClick);
 
     if (document.pointerLockElement === this.target) {
@@ -110,19 +222,37 @@ export class Input {
     }
 
     this.keysDown.clear();
+    this.mouseButtonsDown.clear();
+    this.pendingMousePresses.clear();
+    this.frameMousePresses.clear();
+    this.pendingKeyPresses.clear();
+    this.frameKeyPresses.clear();
     this.clearMouseDeltas();
     this.pointerLocked = false;
   }
 
   /**
    * Call once at the start of each frame before systems read input.
-   * Snapshots accumulated mouse movement for this frame.
+   * Snapshots accumulated mouse movement and edge-triggered presses for
+   * this frame's consumers.
    */
   public beginFrame(): void {
     this.frameMouseDeltaX = this.pendingMouseDeltaX;
     this.frameMouseDeltaY = this.pendingMouseDeltaY;
     this.pendingMouseDeltaX = 0;
     this.pendingMouseDeltaY = 0;
+
+    this.frameMousePresses.clear();
+    for (const button of this.pendingMousePresses) {
+      this.frameMousePresses.add(button);
+    }
+    this.pendingMousePresses.clear();
+
+    this.frameKeyPresses.clear();
+    for (const code of this.pendingKeyPresses) {
+      this.frameKeyPresses.add(code);
+    }
+    this.pendingKeyPresses.clear();
   }
 
   public isActionActive(action: InputAction): boolean {
@@ -139,6 +269,47 @@ export class Input {
 
   public isPointerLocked(): boolean {
     return this.pointerLocked;
+  }
+
+  /**
+   * True only on the frame a mouse button transitioned from up to down
+   * (edge-triggered), so a held button doesn't repeat the action every frame.
+   */
+  public isMouseButtonJustPressed(button: MouseButton): boolean {
+    return this.frameMousePresses.has(MOUSE_BUTTON_INDEX[button]);
+  }
+
+  /**
+   * True only on the frame a digit key transitioned from up to down
+   * (edge-triggered, ignores OS key-repeat).
+   */
+  public isDigitKeyJustPressed(key: DigitKey): boolean {
+    return this.frameKeyPresses.has(DIGIT_KEY_CODES[key]);
+  }
+
+  /**
+   * True only on the frame a debug key (F3/F6) transitioned from up to
+   * down (edge-triggered, ignores OS key-repeat) — same pattern as
+   * isDigitKeyJustPressed, kept separate since debug keys are not part
+   * of the InputAction binding table.
+   */
+  public isDebugKeyJustPressed(key: DebugKey): boolean {
+    return this.frameKeyPresses.has(DEBUG_KEY_CODES[key]);
+  }
+
+  /**
+   * True while either the left or right variant of a modifier key is
+   * held down. Not edge-triggered — used for continuous state like
+   * "Shift held = move faster", not one-shot toggles.
+   */
+  public isModifierKeyHeld(key: ModifierKey): boolean {
+    for (const code of MODIFIER_KEY_CODES[key]) {
+      if (this.keysDown.has(code)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**

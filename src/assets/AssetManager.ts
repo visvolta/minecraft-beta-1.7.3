@@ -1,0 +1,36 @@
+import type { BlockRegistry } from '../blocks/BlockRegistry';
+import { loadBlockTextureImages } from './TextureLoader';
+import { TextureAtlas } from './TextureAtlas';
+
+/**
+ * Orchestrates the asset-loading pipeline: figures out which block
+ * textures are needed, loads them, and builds the shared atlas.
+ *
+ * Rendering code only ever receives the finished TextureAtlas from here;
+ * it never loads images or knows about the asset pipeline.
+ */
+export class AssetManager {
+  /**
+   * Collects every distinct texture name referenced by the registry's
+   * block definitions (across all/top/bottom/side), loads them, and
+   * packs them into one TextureAtlas.
+   */
+  public static async loadBlockAtlas(
+    blockRegistry: BlockRegistry,
+  ): Promise<TextureAtlas> {
+    const textureNames = new Set<string>();
+
+    for (const definition of blockRegistry.values()) {
+      const { all, top, bottom, side } = definition.textures;
+
+      for (const name of [all, top, bottom, side]) {
+        if (name !== undefined) {
+          textureNames.add(name);
+        }
+      }
+    }
+
+    const images = await loadBlockTextureImages(textureNames);
+    return TextureAtlas.build(images);
+  }
+}
