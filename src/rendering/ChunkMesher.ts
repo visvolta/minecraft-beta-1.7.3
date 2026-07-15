@@ -236,10 +236,12 @@ class MeshBuffers {
 }
 
 /**
- * Builds culled face geometry for one chunk, in two separate passes:
- * opaque terrain (build) and still water (buildWater). Missing neighbour
- * chunks are treated as Air in both passes. Emits UVs (via the shared
- * atlas) and per-vertex tint colours instead of flat placeholder colours.
+ * Builds culled face geometry for one chunk, in three separate passes:
+ * opaque terrain (build), still fluids (buildFluids), and alpha-tested
+ * cutout blocks — Leaves/SpruceLeaves, Stage 12C (buildCutouts). Missing
+ * neighbour chunks are treated as Air in all passes. Emits UVs (via the
+ * shared atlas) and per-vertex tint colours instead of flat placeholder
+ * colours.
  */
 export class ChunkMesher {
   private readonly chunkManager: ChunkManager;
@@ -256,7 +258,11 @@ export class ChunkMesher {
     this.atlas = atlas;
   }
 
-  /** Builds opaque terrain geometry (every solid, non-transparent block). */
+  /**
+   * Builds opaque terrain geometry: every solid, non-transparent,
+   * non-cutout block (cutout blocks like Leaves are meshed separately by
+   * buildCutouts, even though they're also "solid" for culling purposes).
+   */
   public build(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
@@ -265,7 +271,7 @@ export class ChunkMesher {
         for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
 
-          if (blockId === AIR_BLOCK_ID || !this.isSolidOpaque(blockId)) {
+          if (blockId === AIR_BLOCK_ID || !this.isOpaqueMeshBlock(blockId)) {
             continue;
           }
 
@@ -283,6 +289,57 @@ export class ChunkMesher {
             );
 
             if (this.hidesOpaqueFace(neighbourId)) {
+              continue;
+            }
+
+            const textureName = resolveBlockTexture(definition, face.slot);
+            const uvRect =
+              textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+            const tint = resolveBlockTint(definition, face.slot);
+
+            buffers.pushFace(face, x, y, z, uvRect, tint);
+          }
+        }
+      }
+    }
+
+    return buffers.toGeometry();
+  }
+
+  /**
+   * Builds alpha-tested cutout geometry (Stage 12C: Leaves and
+   * SpruceLeaves). Cutout blocks are "solid" for face-culling purposes,
+   * exactly like real Beta leaves — a face is only emitted when the
+   * neighbour is NOT solid-for-culling (matching hidesOpaqueFace's own
+   * rule, reused here via isCullingSolid so opaque and cutout blocks
+   * consistently hide each other's shared faces in both directions).
+   */
+  public buildCutouts(chunk: Chunk): THREE.BufferGeometry {
+    const buffers = new MeshBuffers();
+
+    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
+      for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+        for (let x = 0; x < CHUNK_SIZE_X; x++) {
+          const blockId = chunk.getBlock(x, y, z);
+
+          if (blockId === AIR_BLOCK_ID || !this.isCutoutBlock(blockId)) {
+            continue;
+          }
+
+          const definition = this.blockRegistry.getById(blockId);
+          if (definition === undefined) {
+            continue;
+          }
+
+          for (const face of FACES) {
+            const neighbourId = this.getNeighbourBlock(
+              chunk,
+              x + face.dx,
+              y + face.dy,
+              z + face.dz,
+            );
+
+            if (this.isCullingSolid(neighbourId)) {
               continue;
             }
 
@@ -403,13 +460,18 @@ export class ChunkMesher {
     return neighbour.getBlock(x, localY, z);
   }
 
-  /** True if an opaque-terrain face should be culled against this neighbour. */
+  /**
+   * True if an opaque-terrain face should be culled against this
+   * neighbour. Cutout blocks (Leaves) count as culling-solid here too —
+   * an opaque block face fully hidden behind a leaf block is genuinely
+   * invisible and would be unnecessary geometry, matching real Beta.
+   */
   private hidesOpaqueFace(blockId: BlockId): boolean {
     if (blockId === AIR_BLOCK_ID) {
       return false;
     }
 
-    return this.isSolidOpaque(blockId);
+    return this.isCullingSolid(blockId);
   }
 
   /** True if a block ID is one of the still-fluid blocks meshed by buildFluids(). */
@@ -423,10 +485,10 @@ export class ChunkMesher {
    *  - The SAME fluid type hides the face (no internal faces between
    *    adjacent blocks of one fluid, per Stage 12D scope, generalized in
    *    Stage 12B to apply per-fluid-type rather than only to Water).
-   *  - A solid, opaque neighbour (e.g. the stone floor a lake sits on)
-   *    also hides the face: it can never be seen, so emitting it would be
-   *    unnecessary geometry, contrary to this stage's explicit
-   *    "avoid unnecessary geometry" requirement.
+   *  - A solid or cutout neighbour (e.g. the stone floor a lake sits on,
+   *    or Stage 12C's leaves) also hides the face: it can never be seen,
+   *    so emitting it would be unnecessary geometry, contrary to this
+   *    stage's explicit "avoid unnecessary geometry" requirement.
    *  - Air, the OTHER fluid type, and any other transparent block always
    *    expose the face (they are visually distinct from `fluidBlockId`).
    */
@@ -435,10 +497,34 @@ export class ChunkMesher {
       return true;
     }
 
-    return this.isSolidOpaque(neighbourId);
+    return this.isCullingSolid(neighbourId);
   }
 
-  private isSolidOpaque(blockId: BlockId): boolean {
+  /** True for blocks meshed in the opaque pass: solid, non-transparent, and NOT cutout. */
+  private isOpaqueMeshBlock(blockId: BlockId): boolean {
+    const definition = this.blockRegistry.getById(blockId);
+    if (definition === undefined) {
+      return false;
+    }
+
+    return definition.solid && !definition.transparent && !definition.cutout;
+  }
+
+  /** True for blocks meshed in the cutout pass (Stage 12C: Leaves, SpruceLeaves). */
+  private isCutoutBlock(blockId: BlockId): boolean {
+    const definition = this.blockRegistry.getById(blockId);
+    return definition?.cutout === true;
+  }
+
+  /**
+   * True if this block should hide a neighbouring face for culling
+   * purposes — solid+opaque terrain blocks AND cutout blocks (leaves)
+   * both count, matching real Beta (leaves are solid, opaque-for-culling
+   * blocks; only their *rendering* uses binary alpha, not their
+   * face-culling behaviour). This is the single shared "is this
+   * something a face can hide behind" rule used by every mesh pass.
+   */
+  private isCullingSolid(blockId: BlockId): boolean {
     const definition = this.blockRegistry.getById(blockId);
     if (definition === undefined) {
       return false;

@@ -10,21 +10,25 @@ import type { TextureAtlas } from '../assets/TextureAtlas';
 export const MESH_REBUILD_BUDGET = 4;
 
 /**
- * Owns Three.js meshes for loaded chunks: one opaque terrain mesh and one
- * still-fluid mesh (Water and, since Stage 12B, cave-generated Lava) per
- * chunk, both sharing a single material instance across the whole world
- * (never one material per chunk). Does not own chunk data or decide
- * streaming.
+ * Owns Three.js meshes for loaded chunks: one opaque terrain mesh, one
+ * still-fluid mesh (Water and, since Stage 12B, cave-generated Lava),
+ * and (since Stage 12C) one alpha-tested cutout mesh (Leaves,
+ * SpruceLeaves) per chunk — each sharing a single material instance
+ * across the whole world (never one material per chunk). Does not own
+ * chunk data or decide streaming.
  */
 export class ChunkRenderer {
   private readonly chunkManager: ChunkManager;
   private readonly mesher: ChunkMesher;
   private readonly terrainGroup: THREE.Group;
   private readonly fluidGroup: THREE.Group;
+  private readonly cutoutGroup: THREE.Group;
   private readonly terrainMaterial: THREE.MeshBasicMaterial;
   private readonly fluidMaterial: THREE.MeshBasicMaterial;
+  private readonly cutoutMaterial: THREE.MeshBasicMaterial;
   private readonly terrainMeshes = new Map<string, THREE.Mesh>();
   private readonly fluidMeshes = new Map<string, THREE.Mesh>();
+  private readonly cutoutMeshes = new Map<string, THREE.Mesh>();
 
   public constructor(
     scene: THREE.Scene,
@@ -64,6 +68,23 @@ export class ChunkRenderer {
       side: THREE.DoubleSide,
     });
 
+    // One shared, atlas-textured, alpha-tested ("cutout") material for
+    // every leaf mesh (Stage 12C). The supplied leaf textures are
+    // grayscale with a fully binary alpha channel (0 or 255, no partial
+    // values) — alphaTest discards fragments below the threshold
+    // entirely (no blending, no depthWrite disabling needed, unlike the
+    // fluid material), matching real Beta's leaf rendering exactly:
+    // each pixel is either fully opaque or fully invisible.
+    // vertexColors carries the temporary global leaf tint (see
+    // registerDefaultBlocks's LEAF_TINT) multiplied onto the grayscale
+    // texture at render time — the texture itself is never recoloured.
+    this.cutoutMaterial = new THREE.MeshBasicMaterial({
+      map: atlas.texture,
+      vertexColors: true,
+      alphaTest: 0.5,
+      side: THREE.DoubleSide,
+    });
+
     this.terrainGroup = new THREE.Group();
     this.terrainGroup.name = 'chunks-terrain';
     scene.add(this.terrainGroup);
@@ -77,6 +98,14 @@ export class ChunkRenderer {
     this.fluidGroup = new THREE.Group();
     this.fluidGroup.name = 'chunks-fluids';
     scene.add(this.fluidGroup);
+
+    // Cutout geometry is opaque-for-depth (alphaTest, not blended), so
+    // draw order relative to terrain/fluids doesn't matter for
+    // correctness the way it does for the blended fluid pass — added
+    // last simply to keep chunk group ordering readable/consistent.
+    this.cutoutGroup = new THREE.Group();
+    this.cutoutGroup.name = 'chunks-cutouts';
+    scene.add(this.cutoutGroup);
   }
 
   /**
@@ -116,6 +145,13 @@ export class ChunkRenderer {
       fluidMesh.geometry.dispose();
       this.fluidMeshes.delete(key);
     }
+
+    const cutoutMesh = this.cutoutMeshes.get(key);
+    if (cutoutMesh !== undefined) {
+      this.cutoutGroup.remove(cutoutMesh);
+      cutoutMesh.geometry.dispose();
+      this.cutoutMeshes.delete(key);
+    }
   }
 
   public dispose(): void {
@@ -131,15 +167,23 @@ export class ChunkRenderer {
     }
     this.fluidMeshes.clear();
 
+    for (const mesh of this.cutoutMeshes.values()) {
+      this.cutoutGroup.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this.cutoutMeshes.clear();
+
     this.terrainMaterial.dispose();
     this.fluidMaterial.dispose();
+    this.cutoutMaterial.dispose();
     this.terrainGroup.removeFromParent();
     this.fluidGroup.removeFromParent();
+    this.cutoutGroup.removeFromParent();
   }
 
   /** Number of currently loaded terrain chunk meshes (debug-overlay use). */
   public getVisibleMeshCount(): number {
-    return this.terrainMeshes.size + this.fluidMeshes.size;
+    return this.terrainMeshes.size + this.fluidMeshes.size + this.cutoutMeshes.size;
   }
 
   private rebuildChunk(chunk: Chunk): void {
@@ -150,6 +194,9 @@ export class ChunkRenderer {
 
     const fluidGeometry = this.mesher.buildFluids(chunk);
     this.upsertMesh(this.fluidMeshes, this.fluidGroup, this.fluidMaterial, chunk, key, fluidGeometry);
+
+    const cutoutGeometry = this.mesher.buildCutouts(chunk);
+    this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, cutoutGeometry);
 
     chunk.markClean();
   }

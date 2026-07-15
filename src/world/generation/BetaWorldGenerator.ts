@@ -4,6 +4,7 @@ import { BetaTerrainGenerator } from './BetaTerrainGenerator';
 import { SurfaceGenerator } from './SurfaceGenerator';
 import { JavaRandom } from './random/JavaRandom';
 import { BetaCaveGenerator } from './caves/BetaCaveGenerator';
+import { BetaTreeDecorator } from './trees/BetaTreeDecorator';
 
 /** Optional configuration for BetaWorldGenerator. */
 export interface BetaWorldGeneratorOptions {
@@ -15,16 +16,26 @@ export interface BetaWorldGeneratorOptions {
    * second generator implementation.
    */
   readonly enableCaves?: boolean;
+  /**
+   * Whether tree decoration (Stage 12C) runs after cave carving.
+   * Defaults to true (matching real Beta 1.7.3, which always decorates
+   * trees). Exposed for the same verification/debugging reasons as
+   * enableCaves.
+   */
+  readonly enableTrees?: boolean;
 }
 
 /**
  * Orchestrates Beta 1.7.3 terrain generation for one chunk, matching
- * ChunkProviderGenerate.b(i,j)'s exact call order: raw density terrain
+ * ChunkProviderGenerate's exact pipeline order: raw density terrain
  * (BetaTerrainGenerator) → surface replacement (SurfaceGenerator) →
- * cave carving (BetaCaveGenerator, Stage 12B) → write into a Chunk.
- * Caves run last, exactly as in the source (`u.a(this, world, i, j,
- * abyte0)` is the final step of chunk generation before the chunk is
- * marked populated).
+ * cave carving (BetaCaveGenerator, Stage 12B) → tree decoration
+ * (BetaTreeDecorator, Stage 12C) → write into a Chunk. Trees run last,
+ * matching the source's own decoration-after-generation-and-caves
+ * pipeline order (`ChunkProviderGenerate.b(i,j)` builds terrain+surface+
+ * caves; population/decoration, including trees, happens in a separate
+ * pass afterward — `ChunkProviderGenerate.a(IChunkProvider,i,j)` — once
+ * per chunk, only after the chunk itself is otherwise fully generated).
  *
  * This is the WorldGenerator implementation ChunkStreamer is given;
  * FlatWorldGenerator is fully replaced.
@@ -33,7 +44,9 @@ export class BetaWorldGenerator implements WorldGenerator {
   private readonly terrainGenerator: BetaTerrainGenerator;
   private readonly surfaceGenerator: SurfaceGenerator;
   private readonly caveGenerator: BetaCaveGenerator;
+  private readonly treeDecorator: BetaTreeDecorator;
   private readonly enableCaves: boolean;
+  private readonly enableTrees: boolean;
 
   public constructor(worldSeed: bigint, options: BetaWorldGeneratorOptions = {}) {
     this.terrainGenerator = new BetaTerrainGenerator(worldSeed);
@@ -47,6 +60,12 @@ export class BetaWorldGenerator implements WorldGenerator {
     );
     this.caveGenerator = new BetaCaveGenerator(worldSeed);
     this.enableCaves = options.enableCaves ?? true;
+    this.enableTrees = options.enableTrees ?? true;
+    // Passed enableCaves so BetaTreeDecorator's cross-chunk scratch
+    // recomputation (see ScratchTreeWorld) matches this generator's own
+    // pipeline exactly when it recomputes a neighbouring chunk's terrain
+    // read-only for tree space-validation purposes.
+    this.treeDecorator = new BetaTreeDecorator(worldSeed, this.terrainGenerator, this.enableCaves);
   }
 
   public populate(chunk: Chunk): void {
@@ -55,6 +74,10 @@ export class BetaWorldGenerator implements WorldGenerator {
 
     if (this.enableCaves) {
       this.caveGenerator.carve(chunk.chunkX, chunk.chunkZ, raw.blocks);
+    }
+
+    if (this.enableTrees) {
+      this.treeDecorator.decorate(chunk.chunkX, chunk.chunkZ, raw.blocks);
     }
 
     chunk.loadGeneratedBlocks(raw.blocks);

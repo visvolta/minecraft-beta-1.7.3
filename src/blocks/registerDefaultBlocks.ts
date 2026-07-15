@@ -10,6 +10,25 @@ import type { TintColor } from './BlockDefinition';
 const GRASS_TOP_TINT: TintColor = [0x79 / 255, 0xc0 / 255, 0x5a / 255];
 
 /**
+ * Temporary global Beta-style leaf tint (Stage 12C), applied to the
+ * grayscale leaf textures at render time — the textures themselves stay
+ * grayscale on disk and in the atlas; only the rendered colour changes.
+ *
+ * Value (0x4ee031) is Beta's own default foliage-colour multiplier,
+ * verified directly in mc-dev's MobSpawnerBase constructor
+ * (`q = 0x4ee031;`) — the same per-biome-overridable field real Beta
+ * uses for its biome-tinted leaf colour (biomes that don't explicitly
+ * override it, e.g. Seasonal Forest/Savanna/Shrubland/Desert/Plains,
+ * render leaves with exactly this colour). Using one fixed global value
+ * for every biome (rather than sampling per-biome like Beta's own
+ * colormap) is this stage's explicitly scoped simplification — the
+ * per-face BlockTints mechanism used here is the same one grass already
+ * uses, so swapping this constant for real biome-sampled tinting later
+ * requires no mesher/material changes, only a different tint *source*.
+ */
+const LEAF_TINT: TintColor = [0x4e / 255, 0xe0 / 255, 0x31 / 255];
+
+/**
  * Registers the initial Beta 1.7.3 blocks required for this stage.
  */
 export function registerDefaultBlocks(registry: BlockRegistry): void {
@@ -165,5 +184,89 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: true,
     replaceable: false,
     textures: { all: 'lava' },
+  });
+
+  registry.register({
+    id: BlockIds.Log,
+    name: 'log',
+    displayName: 'Oak Log',
+    // Real Beta 1.7.3 Log (id 17) is solid and opaque, matching the
+    // opaque terrain culling pass used here — no cutout/transparency.
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: {
+      top: 'oak_top',
+      bottom: 'oak_top',
+      side: 'oak_side',
+    },
+  });
+
+  registry.register({
+    id: BlockIds.Leaves,
+    name: 'leaves',
+    displayName: 'Oak Leaves',
+    // Leaves are solid for face-culling purposes (matching real Beta:
+    // adjacent leaf blocks hide each other's shared face, and leaves
+    // are opaque-for-lighting-and-collision blocks, not see-through
+    // like water/glass) but render via the cutout pass (binary alpha
+    // from the supplied grayscale texture), not the normal opaque pass
+    // — see BlockDefinition.cutout's doc comment. transparent stays
+    // false since "transparent" in this project's existing vocabulary
+    // means "does not occlude/cull like a wall" (fluids), which does
+    // not describe leaves; `cutout` is the correct, separate signal for
+    // "render as alpha-tested cutout geometry".
+    solid: true,
+    transparent: false,
+    cutout: true,
+    replaceable: false,
+    textures: { all: 'oak_leaves' },
+    // Leaves are supplied fully grayscale (see oak_leaves.png) and must
+    // never be recoloured on disk or baked into the atlas — this tint is
+    // applied only at render time via the same per-face BlockTints
+    // mechanism grass already uses. All three faces need an explicit
+    // entry (BlockTints has no "all" shorthand) since every face of a
+    // leaf block uses the single grayscale texture and needs tinting.
+    tints: {
+      top: LEAF_TINT,
+      bottom: LEAF_TINT,
+      side: LEAF_TINT,
+    },
+  });
+
+  registry.register({
+    id: BlockIds.SpruceLog,
+    name: 'spruce_log',
+    displayName: 'Spruce Log',
+    // TEMPORARY, project-internal id — see BlockIds.SpruceLog's doc
+    // comment (real Beta reuses Log id 17 with metadata for species).
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: {
+      top: 'spruce_top',
+      bottom: 'spruce_top',
+      side: 'spruce_side',
+    },
+  });
+
+  registry.register({
+    id: BlockIds.SpruceLeaves,
+    name: 'spruce_leaves',
+    displayName: 'Spruce Leaves',
+    // TEMPORARY, project-internal id — see BlockIds.SpruceLeaves's doc
+    // comment. Same cutout/tint treatment as Leaves (Oak); Beta's real
+    // spruce leaves are also foliage-tinted, not a fixed hardcoded
+    // colour like some later Minecraft versions eventually made them.
+    solid: true,
+    transparent: false,
+    cutout: true,
+    replaceable: false,
+    textures: { all: 'spruce_leaves' },
+    tints: {
+      top: LEAF_TINT,
+      bottom: LEAF_TINT,
+      side: LEAF_TINT,
+    },
   });
 }

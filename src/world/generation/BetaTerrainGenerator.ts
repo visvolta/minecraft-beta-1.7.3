@@ -53,15 +53,16 @@ export interface RawTerrain {
  * as positive ones.
  *
  * Also owns the two surface-pattern noise fields (Beta's `n`/`o`) even
- * though only SurfaceGenerator reads them: Beta constructs all eight
- * octave-noise fields from one shared Random stream in a fixed order, so
- * skipping n/o here would desynchronize every noise field constructed
- * after them (depth, height-variance) from their correct seeded state.
+ * though only SurfaceGenerator reads them, and (since Stage 12C) the
+ * tree-count noise field (Beta's `c`) consumed by BetaTreeDecorator:
+ * Beta constructs all eight octave-noise fields from one shared Random
+ * stream in a fixed order, so skipping any of them here would
+ * desynchronize every noise field constructed after it from its correct
+ * seeded state.
  *
  * Deliberate deviations from Beta, disclosed:
  * - No Ice placement at sea level for cold columns (ice generation is out
  *   of scope for this stage) — cold columns get ordinary still Water.
- * - No MapGenCaves pass (caves are Stage 12B).
  */
 export class BetaTerrainGenerator {
   private readonly minNoise: OctaveNoise; // Beta's `k`
@@ -71,6 +72,7 @@ export class BetaTerrainGenerator {
   public readonly surfaceDepthNoise: OctaveNoise; // Beta's `o` (consumed by SurfaceGenerator)
   private readonly depthNoise: OctaveNoise; // Beta's `a`
   private readonly heightVarianceNoise: OctaveNoise; // Beta's `b`
+  public readonly treeCountNoise: OctaveNoise; // Beta's `c` (consumed by BetaTreeDecorator, Stage 12C)
   private readonly climateSampler: ClimateSampler;
 
   public constructor(worldSeed: bigint) {
@@ -85,10 +87,7 @@ export class BetaTerrainGenerator {
     this.surfaceDepthNoise = new OctaveNoise(random, OCTAVES_SURFACE_DEPTH);
     this.depthNoise = new OctaveNoise(random, OCTAVES_DEPTH);
     this.heightVarianceNoise = new OctaveNoise(random, OCTAVES_HEIGHT_VARIANCE);
-    // Beta's `c` (tree-count noise) is constructed here purely to keep the
-    // shared Random stream advancing identically to source; unused because
-    // trees are Stage 12C. Not stored as a field since nothing reads it.
-    new OctaveNoise(random, 8);
+    this.treeCountNoise = new OctaveNoise(random, 8);
 
     this.climateSampler = new ClimateSampler(worldSeed);
   }

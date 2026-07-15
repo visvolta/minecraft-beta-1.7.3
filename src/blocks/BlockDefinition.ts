@@ -42,4 +42,17 @@ export interface BlockDefinition {
   readonly replaceable: boolean;
   readonly textures: BlockTextures;
   readonly tints?: BlockTints;
+  /**
+   * True for blocks that render via a binary alpha-test ("cutout") pass
+   * instead of the normal opaque pass or the blended fluid pass — every
+   * pixel is either fully opaque or fully transparent (no blending), and
+   * unlike fluids, cutout blocks DO cull faces against each other and
+   * other solid/cutout neighbours (matching Beta's real leaf behaviour:
+   * `solid: true` is what drives face culling; `cutout` only changes
+   * which material/mesh pass a block's faces are emitted into).
+   * Stage 12C's only cutout blocks are Leaves and SpruceLeaves. Defaults
+   * to false (omitted) for every other block, so this is purely additive
+   * and doesn't change any existing block's behaviour.
+   */
+  readonly cutout?: boolean;
 }
