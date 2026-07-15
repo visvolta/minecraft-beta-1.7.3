@@ -33,6 +33,7 @@ export class ChunkRenderer {
   private rawLightDebugMode = false;
   private ambientOcclusionDebugMode = false;
   private skylightSubtracted = 0;
+  private sunBrightnessFactor = 1;
 
   public constructor(
     scene: THREE.Scene,
@@ -125,12 +126,24 @@ export class ChunkRenderer {
    * vertex colours, never geometry topology, so no chunk remesh is needed.
    */
   public setSkylightSubtracted(value: number): void {
-    const clamped = THREE.MathUtils.clamp(Math.round(value), 0, 11);
+    const clamped = THREE.MathUtils.clamp(Math.round(value), 0, 13);
     if (clamped === this.skylightSubtracted) {
       return;
     }
 
     this.skylightSubtracted = clamped;
+    if (!this.ambientOcclusionDebugMode) {
+      this.updateDynamicColorsOnAllMeshes();
+    }
+  }
+
+  public setSunBrightnessFactor(value: number): void {
+    const clamped = THREE.MathUtils.clamp(value, 0, 1);
+    if (Math.abs(clamped - this.sunBrightnessFactor) < 1e-4) {
+      return;
+    }
+
+    this.sunBrightnessFactor = clamped;
     if (!this.ambientOcclusionDebugMode) {
       this.updateDynamicColorsOnAllMeshes();
     }
@@ -265,13 +278,15 @@ export class ChunkRenderer {
     const vertexCount = skyAttribute.count;
     for (let i = 0; i < vertexCount; i++) {
       const effectiveSky = Math.max(0, sky[i]! - this.skylightSubtracted);
-      const effectiveLight = Math.max(effectiveSky, block[i]!);
-      const rawBrightness = getLightBrightness(effectiveLight);
+      const skyBrightness = getLightBrightness(effectiveSky) * this.sunBrightnessFactor;
+      const blockBrightness = getLightBrightness(block[i]!);
+      const shadedBrightness = Math.max(skyBrightness, blockBrightness);
+      const rawBrightness = getLightBrightness(Math.max(effectiveSky, block[i]!));
       const aoFactor = ao[i]!;
 
-      normalColor[i * 3] = tint[i * 3]! * rawBrightness * aoFactor;
-      normalColor[i * 3 + 1] = tint[i * 3 + 1]! * rawBrightness * aoFactor;
-      normalColor[i * 3 + 2] = tint[i * 3 + 2]! * rawBrightness * aoFactor;
+      normalColor[i * 3] = tint[i * 3]! * shadedBrightness * aoFactor;
+      normalColor[i * 3 + 1] = tint[i * 3 + 1]! * shadedBrightness * aoFactor;
+      normalColor[i * 3 + 2] = tint[i * 3 + 2]! * shadedBrightness * aoFactor;
 
       debugColor[i * 3] = rawBrightness;
       debugColor[i * 3 + 1] = rawBrightness;

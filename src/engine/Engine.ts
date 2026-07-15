@@ -315,9 +315,10 @@ export class Engine {
       this.player.position.z,
     );
 
-    // 8. Update camera-centered sky and global skylight subtraction.
+    // 8. Update camera-centered sky and global skylight darkening.
     const skyState = this.skyRenderer.update(camera, this.worldTime);
     this.chunkRenderer.setSkylightSubtracted(this.worldTime.getSkylightSubtracted());
+    this.chunkRenderer.setSunBrightnessFactor(this.worldTime.getSunBrightnessFactor());
 
     // 9. Stream chunks around the player
     this.chunkStreamer.update(camera.position.x, camera.position.z);

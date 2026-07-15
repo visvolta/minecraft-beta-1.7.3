@@ -72,6 +72,9 @@ export class DebugOverlay {
       `Day: ${stats.dayNumber}`,
       `Celestial angle: ${stats.celestialAngle.toFixed(3)}`,
       `Sky: ${stats.skyPhase}`,
+      `Stars: ${stats.starOpacity.toFixed(3)}`,
+      `Sun altitude: ${stats.sunAltitude.toFixed(3)}`,
+      `Sky color: ${stats.skyColorHex}`,
       `Loaded chunks: ${stats.loadedChunks}`,
       `Visible chunk meshes: ${stats.visibleChunkMeshes}`,
       '',
@@ -82,6 +85,7 @@ export class DebugOverlay {
       `Fog: ${stats.fogMode}`,
       `Fog near: ${stats.fogNear.toFixed(1)}`,
       `Fog far: ${stats.fogFar.toFixed(1)}`,
+      `Fog color: ${stats.fogColorHex}`,
     ];
   }
 

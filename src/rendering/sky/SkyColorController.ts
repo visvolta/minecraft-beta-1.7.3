@@ -20,13 +20,17 @@ interface RgbColor {
   readonly b: number;
 }
 
-const DAY_TOP: RgbColor = { r: 0x57 / 255, g: 0x85 / 255, b: 0xff / 255 };
-const DAY_HORIZON: RgbColor = { r: 0xa8 / 255, g: 0xc8 / 255, b: 0xff / 255 };
-const DAY_BOTTOM: RgbColor = { r: 0xd8 / 255, g: 0xe8 / 255, b: 0xff / 255 };
+const DAY_TOP: RgbColor = { r: 0x45 / 255, g: 0x79 / 255, b: 0xff / 255 };
+const DAY_HORIZON: RgbColor = { r: 0x8f / 255, g: 0xc6 / 255, b: 0xff / 255 };
+const DAY_BOTTOM: RgbColor = { r: 0xd7 / 255, g: 0xec / 255, b: 0xff / 255 };
 
-const NIGHT_TOP: RgbColor = { r: 0x02 / 255, g: 0x05 / 255, b: 0x12 / 255 };
-const NIGHT_HORIZON: RgbColor = { r: 0x08 / 255, g: 0x10 / 255, b: 0x24 / 255 };
-const NIGHT_BOTTOM: RgbColor = { r: 0x03 / 255, g: 0x05 / 255, b: 0x10 / 255 };
+const DUSK_TOP: RgbColor = { r: 0x16 / 255, g: 0x1d / 255, b: 0x44 / 255 };
+const DUSK_HORIZON: RgbColor = { r: 0xf4 / 255, g: 0x88 / 255, b: 0x3d / 255 };
+const DUSK_BOTTOM: RgbColor = { r: 0x3d / 255, g: 0x29 / 255, b: 0x39 / 255 };
+
+const NIGHT_TOP: RgbColor = { r: 0x00 / 255, g: 0x02 / 255, b: 0x08 / 255 };
+const NIGHT_HORIZON: RgbColor = { r: 0x05 / 255, g: 0x09 / 255, b: 0x18 / 255 };
+const NIGHT_BOTTOM: RgbColor = { r: 0x01 / 255, g: 0x02 / 255, b: 0x07 / 255 };
 
 const fogDay = new THREE.Color();
 
@@ -58,27 +62,28 @@ function mixWithTint(base: RgbColor, tint: RgbColor, strength: number): RgbColor
   };
 }
 
-/**
- * Computes the full time-of-day color state shared by the sky, fog, stars,
- * and global skylight darkening.
- */
 export class SkyColorController {
   public compute(worldTime: WorldTime): SkyColorState {
     const celestialAngle = worldTime.getCelestialAngle();
     const time = worldTime.getTimeOfDayTicks();
-    const skyPhase = worldTime.getSkyPhase();
     const starOpacity = worldTime.getStarBrightness();
     const sunriseSunset = worldTime.calcSunriseSunsetColors();
     const skylightSubtracted = worldTime.getSkylightSubtracted();
 
-    let dayFactor = Math.cos(celestialAngle * Math.PI * 2) * 0.5 + 0.5;
-    dayFactor = clamp01(dayFactor * 1.15 - 0.05);
-
     const sunAltitude = Math.cos(celestialAngle * Math.PI * 2);
+    let dayFactor = clamp01((sunAltitude + 0.22) / 1.22);
+    dayFactor = Math.pow(dayFactor, 0.7);
 
-    let skyTop = lerpRgb(NIGHT_TOP, DAY_TOP, dayFactor);
-    let skyHorizon = lerpRgb(NIGHT_HORIZON, DAY_HORIZON, dayFactor);
-    let skyBottom = lerpRgb(NIGHT_BOTTOM, DAY_BOTTOM, dayFactor);
+    const duskWindow = clamp01(1 - Math.abs(sunAltitude) / 0.26);
+    const duskStrength = duskWindow * duskWindow;
+
+    const dayTop = lerpRgb(DUSK_TOP, DAY_TOP, dayFactor);
+    const dayHorizon = lerpRgb(DUSK_HORIZON, DAY_HORIZON, dayFactor);
+    const dayBottom = lerpRgb(DUSK_BOTTOM, DAY_BOTTOM, dayFactor);
+
+    let skyTop = lerpRgb(NIGHT_TOP, dayTop, dayFactor);
+    let skyHorizon = lerpRgb(NIGHT_HORIZON, dayHorizon, Math.max(dayFactor, duskStrength * 0.55));
+    let skyBottom = lerpRgb(NIGHT_BOTTOM, dayBottom, Math.max(dayFactor, duskStrength * 0.35));
 
     if (sunriseSunset !== null) {
       const sunriseTint: RgbColor = {
@@ -86,9 +91,10 @@ export class SkyColorController {
         g: sunriseSunset.g,
         b: sunriseSunset.b,
       };
-      const tintStrength = sunriseSunset.a * 0.45;
-      skyHorizon = mixWithTint(skyHorizon, sunriseTint, tintStrength);
-      skyBottom = mixWithTint(skyBottom, sunriseTint, tintStrength * 0.65);
+      const horizonTint = sunriseSunset.a * 0.75;
+      const bottomTint = sunriseSunset.a * 0.45;
+      skyHorizon = mixWithTint(skyHorizon, sunriseTint, horizonTint);
+      skyBottom = mixWithTint(skyBottom, sunriseTint, bottomTint);
     }
 
     const betaFog = worldTime.getFogColor();
@@ -99,37 +105,29 @@ export class SkyColorController {
       b: fogDay.b,
     };
 
-    let fogColor = mixWithTint(
-      fogBase,
-      skyHorizon,
-      0.25 + (1 - dayFactor) * 0.15,
-    );
-
+    let fogColor = mixWithTint(fogBase, skyHorizon, 0.35 + duskStrength * 0.2 + (1 - dayFactor) * 0.15);
     if (sunriseSunset !== null) {
-      const sunriseTint: RgbColor = {
-        r: sunriseSunset.r,
-        g: sunriseSunset.g,
-        b: sunriseSunset.b,
-      };
-      fogColor = mixWithTint(fogColor, sunriseTint, sunriseSunset.a * 0.22);
+      fogColor = mixWithTint(
+        fogColor,
+        { r: sunriseSunset.r, g: sunriseSunset.g, b: sunriseSunset.b },
+        sunriseSunset.a * 0.22,
+      );
     }
 
-    // Keep the sky-phase transitions readable in F3 by using a few named
-    // buckets while the color values themselves still interpolate smoothly.
-    let phase = skyPhase;
+    let phase: string;
     if (time >= 22000 || time < 250) {
       phase = 'pre-dawn';
-    } else if (time >= 250 && time < 1500) {
+    } else if (time < 1500) {
       phase = 'sunrise';
-    } else if (time >= 1500 && time < 5000) {
+    } else if (time < 5000) {
       phase = 'morning';
-    } else if (time >= 5000 && time < 10000) {
+    } else if (time < 10000) {
       phase = 'day';
-    } else if (time >= 10000 && time < 12000) {
+    } else if (time < 12000) {
       phase = 'afternoon';
-    } else if (time >= 12000 && time < 13750) {
+    } else if (time < 13750) {
       phase = 'sunset';
-    } else if (time >= 13750 && time < 16000) {
+    } else if (time < 16000) {
       phase = 'dusk';
     } else {
       phase = 'night';
