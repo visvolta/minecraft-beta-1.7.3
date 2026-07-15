@@ -48,10 +48,11 @@ const DIGIT_KEY_CODES: Record<DigitKey, string> = {
  * bound through the InputAction system since they control debug systems
  * rather than gameplay.
  */
-export type DebugKey = 'F3' | 'F6';
+export type DebugKey = 'F3' | 'F4' | 'F6';
 
 const DEBUG_KEY_CODES: Record<DebugKey, string> = {
   F3: 'F3',
+  F4: 'F4',
   F6: 'F6',
 };
 
@@ -117,7 +118,7 @@ export class Input {
     // pointer lock (e.g. right after page load, before the first click),
     // and must never trigger the browser's own F3 (find-in-page, in some
     // browsers) or F6 (address-bar focus) behaviour.
-    if (event.code === DEBUG_KEY_CODES.F3 || event.code === DEBUG_KEY_CODES.F6) {
+    if (event.code === DEBUG_KEY_CODES.F3 || event.code === DEBUG_KEY_CODES.F4 || event.code === DEBUG_KEY_CODES.F6) {
       event.preventDefault();
     }
   };

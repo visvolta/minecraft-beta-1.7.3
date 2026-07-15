@@ -130,10 +130,7 @@ const FACES: readonly FaceDef[] = [
   },
 ];
 
-/**
- * Scratch THREE.Color used to convert sRGB-authored block tints (see
- * BlockDefinition.tints) into the renderer's linear working colour space.
- */
+/** Scratch THREE.Color used to convert sRGB to linear. */
 const tintConversionColor = new THREE.Color();
 
 /**
@@ -158,8 +155,26 @@ function localCornerToTextureUv(face: FaceDef, corner: Corner): readonly [number
 }
 
 /**
+ * Translates a light level (0-15) into a brightness multiplier (0.0 - 1.0)
+ * using the authentic non-linear exponential decay curve from Beta 1.7.3.
+ */
+function getLightBrightness(lightLevel: number): number {
+  return Math.pow(0.8, 15 - lightLevel) * 0.95 + 0.05;
+}
+
+/**
+ * Applies basic Beta-style directional shading to give a 3D blocky feel.
+ */
+function getDirectionalShading(face: FaceDef): number {
+  if (face.dy > 0) return 1.0; // Top face (+Y)
+  if (face.dy < 0) return 0.5; // Bottom face (-Y)
+  if (face.dx !== 0) return 0.6; // East/West faces (X)
+  return 0.8; // North/South faces (Z)
+}
+
+/**
  * Accumulates vertex attributes and indices for one mesh build,
- * then produces the finished BufferGeometry.
+ * applying brightness and basic directional shading.
  */
 class MeshBuffers {
   public readonly positions: number[] = [];
@@ -175,8 +190,18 @@ class MeshBuffers {
     z: number,
     uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
     tint: readonly [number, number, number],
+    lightLevel: number,
   ): void {
-    tintConversionColor.setRGB(tint[0], tint[1], tint[2], THREE.SRGBColorSpace);
+    const brightness = getLightBrightness(lightLevel);
+    const directional = getDirectionalShading(face);
+    const multiplier = brightness * directional;
+
+    tintConversionColor.setRGB(
+      tint[0] * multiplier,
+      tint[1] * multiplier,
+      tint[2] * multiplier,
+      THREE.SRGBColorSpace,
+    );
 
     const vertexOffset = this.positions.length / 3;
 
@@ -216,8 +241,16 @@ class MeshBuffers {
     z: number,
     uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
     tint: readonly [number, number, number],
+    lightLevel: number,
   ): void {
-    tintConversionColor.setRGB(tint[0], tint[1], tint[2], THREE.SRGBColorSpace);
+    const brightness = getLightBrightness(lightLevel);
+
+    tintConversionColor.setRGB(
+      tint[0] * brightness,
+      tint[1] * brightness,
+      tint[2] * brightness,
+      THREE.SRGBColorSpace,
+    );
 
     const u0 = uvRect ? uvRect.u0 : 0;
     const v0 = uvRect ? uvRect.v0 : 0;
@@ -289,8 +322,18 @@ class MeshBuffers {
     z: number,
     uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
     tint: readonly [number, number, number],
+    lightLevel: number,
   ): void {
-    tintConversionColor.setRGB(tint[0], tint[1], tint[2], THREE.SRGBColorSpace);
+    const brightness = getLightBrightness(lightLevel);
+    const directional = getDirectionalShading(FACES[faceIndex]!);
+    const multiplier = brightness * directional;
+
+    tintConversionColor.setRGB(
+      tint[0] * multiplier,
+      tint[1] * multiplier,
+      tint[2] * multiplier,
+      THREE.SRGBColorSpace,
+    );
 
     const u0 = uvRect ? uvRect.u0 : 0;
     const v0 = uvRect ? uvRect.v0 : 0;
@@ -416,7 +459,7 @@ class MeshBuffers {
 }
 
 /**
- * Builds block geometry for one chunk.
+ * Builds block geometry for one chunk, reading skylight and blocklight values.
  */
 export class ChunkMesher {
   private readonly chunkManager: ChunkManager;
@@ -431,6 +474,51 @@ export class ChunkMesher {
     this.chunkManager = chunkManager;
     this.blockRegistry = blockRegistry;
     this.atlas = atlas;
+  }
+
+  /**
+   * Helper to sample maximum light (max(skylight, blocklight)) at absolute coordinates,
+   * taking chunk boundaries into account.
+   */
+  private getLightAt(chunk: Chunk, lx: number, ly: number, lz: number): number {
+    if (ly < 0) return 0;
+    if (ly >= CHUNK_SIZE_Y) return 15; // Open sky receives full light
+
+    if (chunk.isInBounds(lx, ly, lz)) {
+      const sky = chunk.getSkylight(lx, ly, lz);
+      const block = chunk.getBlocklight(lx, ly, lz);
+      return Math.max(sky, block);
+    }
+
+    let chunkX = chunk.chunkX;
+    let chunkZ = chunk.chunkZ;
+    let x = lx;
+    let z = lz;
+
+    if (x < 0) {
+      chunkX -= 1;
+      x += CHUNK_SIZE_X;
+    } else if (x >= CHUNK_SIZE_X) {
+      chunkX += 1;
+      x -= CHUNK_SIZE_X;
+    }
+
+    if (z < 0) {
+      chunkZ -= 1;
+      z += CHUNK_SIZE_Z;
+    } else if (z >= CHUNK_SIZE_Z) {
+      chunkZ += 1;
+      z -= CHUNK_SIZE_Z;
+    }
+
+    const neighbour = this.chunkManager.getChunk(chunkX, chunkZ);
+    if (neighbour === undefined) {
+      return ly >= 64 ? 15 : 0; // Default fallback depending on height when neighbor is unloaded
+    }
+
+    const sky = neighbour.getSkylight(x, ly, z);
+    const block = neighbour.getBlocklight(x, ly, z);
+    return Math.max(sky, block);
   }
 
   /**
@@ -470,7 +558,10 @@ export class ChunkMesher {
               textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
             const tint = resolveBlockTint(definition, face.slot);
 
-            buffers.pushFace(face, x, y, z, uvRect, tint);
+            // Sample light level of adjacent block face
+            const light = this.getLightAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+
+            buffers.pushFace(face, x, y, z, uvRect, tint, light);
           }
         }
       }
@@ -523,7 +614,9 @@ export class ChunkMesher {
                 textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
               const tint = resolveBlockTint(definition, face.slot);
 
-              buffers.pushFace(face, x, y, z, uvRect, tint);
+              const light = this.getLightAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+
+              buffers.pushFace(face, x, y, z, uvRect, tint, light);
             }
           } else if (renderType === 'cutout') {
             for (const face of FACES) {
@@ -543,7 +636,9 @@ export class ChunkMesher {
                 textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
               const tint = resolveBlockTint(definition, face.slot);
 
-              buffers.pushFace(face, x, y, z, uvRect, tint);
+              const light = this.getLightAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+
+              buffers.pushFace(face, x, y, z, uvRect, tint, light);
             }
           } else if (renderType === 'cross') {
             const textureName = resolveBlockTexture(definition, 'side');
@@ -551,7 +646,10 @@ export class ChunkMesher {
               textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
             const tint = resolveBlockTint(definition, 'side');
 
-            buffers.pushCross(x, y, z, uvRect, tint);
+            // Cross plant uses its own block's light level space
+            const light = this.getLightAt(chunk, x, y, z);
+
+            buffers.pushCross(x, y, z, uvRect, tint, light);
           } else if (renderType === 'cactus') {
             for (let i = 0; i < 6; i++) {
               const face = FACES[i]!;
@@ -572,7 +670,9 @@ export class ChunkMesher {
                 textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
               const tint = resolveBlockTint(definition, slot);
 
-              buffers.pushCactusFace(i, x, y, z, uvRect, tint);
+              const light = this.getLightAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+
+              buffers.pushCactusFace(i, x, y, z, uvRect, tint, light);
             }
           }
         }
@@ -619,7 +719,10 @@ export class ChunkMesher {
               textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
             const tint = resolveBlockTint(definition, face.slot);
 
-            buffers.pushFace(face, x, y, z, uvRect, tint);
+            // Fluids use their own block's light level space
+            const light = this.getLightAt(chunk, x, y, z);
+
+            buffers.pushFace(face, x, y, z, uvRect, tint, light);
           }
         }
       }
@@ -725,8 +828,7 @@ export class ChunkMesher {
   }
 
   /**
-   * True if a fluid face (for `fluidBlockId`, e.g. Water or Lava) should
-   * be culled against this neighbour.
+   * True if a fluid face should be culled against this neighbour.
    */
   private hidesFluidFace(fluidBlockId: BlockId, neighbourId: BlockId): boolean {
     if (neighbourId === fluidBlockId) {

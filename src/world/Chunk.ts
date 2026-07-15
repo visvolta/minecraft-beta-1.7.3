@@ -17,7 +17,18 @@ import {
  * project currently generates (Stone/Grass/Dirt/Sand/Gravel/Bedrock/
  * Log/Leaves) is opaque by default and correctly counted.
  */
-const NON_OPAQUE_FOR_HEIGHTMAP = new Set<BlockId>([AIR_BLOCK_ID, BlockIds.Water, BlockIds.Lava]);
+const NON_OPAQUE_FOR_HEIGHTMAP = new Set<BlockId>([
+  AIR_BLOCK_ID,
+  BlockIds.Water,
+  BlockIds.Lava,
+  BlockIds.Dandelion,
+  BlockIds.Rose,
+  BlockIds.BrownMushroom,
+  BlockIds.RedMushroom,
+  BlockIds.TallGrass,
+  BlockIds.DeadBush,
+  BlockIds.Reed
+]);
 
 /**
  * In-memory block storage for one Beta 1.7.3 chunk (16 × 128 × 16).

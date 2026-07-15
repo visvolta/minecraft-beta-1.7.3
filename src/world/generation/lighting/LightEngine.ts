@@ -52,10 +52,11 @@ export class LightEngine {
   }
 
   public getSkylight(x: number, y: number, z: number): number {
-    if (y < 0 || y >= CHUNK_SIZE_Y) return 15; // Void above gets full skylight
+    if (y < 0) return 0;
+    if (y >= CHUNK_SIZE_Y) return 15; // Void above gets full skylight
     const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(x, z);
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    return chunk ? chunk.getSkylight(localX, y, localZ) : 15;
+    return chunk ? chunk.getSkylight(localX, y, localZ) : (y >= 64 ? 15 : 0);
   }
 
   public setSkylight(x: number, y: number, z: number, val: number): void {
@@ -86,7 +87,14 @@ export class LightEngine {
   }
 
   public getOpacity(x: number, y: number, z: number): number {
-    const blockId = this.getBlock(x, y, z);
+    if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
+    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(x, z);
+    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+    if (!chunk) {
+      return y >= 64 ? 0 : 15; // Unloaded chunk: Air above sea level, Solid stone below
+    }
+
+    const blockId = chunk.getBlock(localX, y, localZ);
     if (blockId === 0) return 0; // Air is fully transparent
 
     const def = this.blockRegistry.getById(blockId);
@@ -135,6 +143,9 @@ export class LightEngine {
         for (let y = CHUNK_SIZE_Y - 1; y >= height; y--) {
           chunk.setSkylight(lx, y, lz, 15);
         }
+        
+        // Enqueue the heightmap block itself so it propagates sunlight horizontally
+        skyPropQueue.push({ x: wx, y: height, z: wz });
 
         // Below the heightmap, sunlight attenuates vertically by block opacity
         let currentLight = 15;
@@ -341,7 +352,8 @@ export class LightEngine {
   // ==========================================
 
   /**
-   * Reconciles borders between a newly loaded chunk and its loaded neighbors.
+   * Reconciles borders between a newly loaded chunk and its loaded neighbors,
+   * enqueuing boundary blocks from both chunks to propagate light bidirectionally.
    */
   public reconcileChunkBorders(chunk: Chunk): void {
     const startX = chunk.chunkX * CHUNK_SIZE_X;
@@ -350,10 +362,9 @@ export class LightEngine {
     const skyQueue: QueueNode[] = [];
     const blockQueue: QueueNode[] = [];
 
-    // Scan boundary block columns and enqueue any border transitions that can propagate
+    // 1. Scan our own chunk border blocks
     for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-        // Only check boundaries of the chunk (lx === 0, lx === 15, lz === 0, lz === 15)
         const isBorder = lx === 0 || lx === CHUNK_SIZE_X - 1 || lz === 0 || lz === CHUNK_SIZE_Z - 1;
         if (!isBorder) continue;
 
@@ -366,6 +377,43 @@ export class LightEngine {
 
           const block = chunk.getBlocklight(lx, y, lz);
           if (block > 0) blockQueue.push({ x: wx, y: y, z: wz });
+        }
+      }
+    }
+
+    // 2. Scan border blocks of loaded orthogonal neighbors
+    const neighborOffsets = [
+      { dx: -1, dz: 0 },
+      { dx: 1, dz: 0 },
+      { dx: 0, dz: -1 },
+      { dx: 0, dz: 1 },
+    ];
+    for (const { dx, dz } of neighborOffsets) {
+      const neighbor = this.chunkManager.getChunk(chunk.chunkX + dx, chunk.chunkZ + dz);
+      if (neighbor) {
+        const nStartX = neighbor.chunkX * CHUNK_SIZE_X;
+        const nStartZ = neighbor.chunkZ * CHUNK_SIZE_Z;
+        
+        let nMinX = 0, nMaxX = CHUNK_SIZE_X - 1;
+        let nMinZ = 0, nMaxZ = CHUNK_SIZE_Z - 1;
+
+        if (dx === -1) { nMinX = CHUNK_SIZE_X - 1; nMaxX = CHUNK_SIZE_X - 1; }
+        else if (dx === 1) { nMinX = 0; nMaxX = 0; }
+        if (dz === -1) { nMinZ = CHUNK_SIZE_Z - 1; nMaxZ = CHUNK_SIZE_Z - 1; }
+        else if (dz === 1) { nMinZ = 0; nMaxZ = 0; }
+
+        for (let lx = nMinX; lx <= nMaxX; lx++) {
+          for (let lz = nMinZ; lz <= nMaxZ; lz++) {
+            const wx = nStartX + lx;
+            const wz = nStartZ + lz;
+            for (let y = 0; y < CHUNK_SIZE_Y; y++) {
+              const sky = neighbor.getSkylight(lx, y, lz);
+              if (sky > 0) skyQueue.push({ x: wx, y: y, z: wz });
+
+              const block = neighbor.getBlocklight(lx, y, lz);
+              if (block > 0) blockQueue.push({ x: wx, y: y, z: wz });
+            }
+          }
         }
       }
     }

@@ -23,9 +23,9 @@ export class ChunkRenderer {
   private readonly terrainGroup: THREE.Group;
   private readonly fluidGroup: THREE.Group;
   private readonly cutoutGroup: THREE.Group;
-  private readonly terrainMaterial: THREE.MeshBasicMaterial;
-  private readonly fluidMaterial: THREE.MeshBasicMaterial;
-  private readonly cutoutMaterial: THREE.MeshBasicMaterial;
+  private readonly terrainMaterial: THREE.MeshStandardMaterial;
+  private readonly fluidMaterial: THREE.MeshStandardMaterial;
+  private readonly cutoutMaterial: THREE.MeshStandardMaterial;
   private readonly terrainMeshes = new Map<string, THREE.Mesh>();
   private readonly fluidMeshes = new Map<string, THREE.Mesh>();
   private readonly cutoutMeshes = new Map<string, THREE.Mesh>();
@@ -41,9 +41,11 @@ export class ChunkRenderer {
 
     // One shared, atlas-textured material for every opaque chunk mesh.
     // vertexColors carries the per-face tint multiplier (white = untinted).
-    this.terrainMaterial = new THREE.MeshBasicMaterial({
+    this.terrainMaterial = new THREE.MeshStandardMaterial({
       map: atlas.texture,
       vertexColors: true,
+      roughness: 1.0,
+      metalness: 0.0,
     });
 
     // One shared, atlas-textured, transparent material for every fluid
@@ -60,12 +62,14 @@ export class ChunkRenderer {
     // terrain mesh (drawn via its own, separate, opaque material) still
     // writes depth normally, so fluids always render above terrain
     // correctly.
-    this.fluidMaterial = new THREE.MeshBasicMaterial({
+    this.fluidMaterial = new THREE.MeshStandardMaterial({
       map: atlas.texture,
       vertexColors: true,
       transparent: true,
       depthWrite: false,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
+      roughness: 1.0,
+      metalness: 0.0,
     });
 
     // One shared, atlas-textured, alpha-tested ("cutout") material for
@@ -78,11 +82,13 @@ export class ChunkRenderer {
     // vertexColors carries the temporary global leaf tint (see
     // registerDefaultBlocks's LEAF_TINT) multiplied onto the grayscale
     // texture at render time — the texture itself is never recoloured.
-    this.cutoutMaterial = new THREE.MeshBasicMaterial({
+    this.cutoutMaterial = new THREE.MeshStandardMaterial({
       map: atlas.texture,
       vertexColors: true,
       alphaTest: 0.5,
       side: THREE.DoubleSide,
+      roughness: 1.0,
+      metalness: 0.0,
     });
 
     this.terrainGroup = new THREE.Group();
@@ -111,9 +117,12 @@ export class ChunkRenderer {
   /**
    * Rebuilds up to MESH_REBUILD_BUDGET dirty chunks (each rebuild
    * regenerates both the chunk's opaque and fluid meshes together).
+   * Dynamically boosts budget if there are many dirty chunks.
    */
   public update(): void {
     let rebuilt = 0;
+    const dirtyCount = this.chunkManager.countDirtyChunks();
+    const budget = dirtyCount > 10 ? 32 : MESH_REBUILD_BUDGET;
 
     for (const chunk of this.chunkManager) {
       if (!chunk.isDirty()) {
@@ -123,10 +132,24 @@ export class ChunkRenderer {
       this.rebuildChunk(chunk);
       rebuilt += 1;
 
-      if (rebuilt >= MESH_REBUILD_BUDGET) {
+      if (rebuilt >= budget) {
         break;
       }
     }
+  }
+
+  /**
+   * Toggles grayscale light-level visualization mode by hiding/restoring the texture atlas map.
+   */
+  public setGrayscaleMode(enabled: boolean, atlas: TextureAtlas): void {
+    this.terrainMaterial.map = enabled ? null : atlas.texture;
+    this.terrainMaterial.needsUpdate = true;
+
+    this.fluidMaterial.map = enabled ? null : atlas.texture;
+    this.fluidMaterial.needsUpdate = true;
+
+    this.cutoutMaterial.map = enabled ? null : atlas.texture;
+    this.cutoutMaterial.needsUpdate = true;
   }
 
   public removeChunkMesh(chunkX: number, chunkZ: number): void {
@@ -204,7 +227,7 @@ export class ChunkRenderer {
   private upsertMesh(
     meshes: Map<string, THREE.Mesh>,
     group: THREE.Group,
-    material: THREE.MeshBasicMaterial,
+    material: THREE.MeshStandardMaterial,
     chunk: Chunk,
     key: string,
     geometry: THREE.BufferGeometry,

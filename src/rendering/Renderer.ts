@@ -33,6 +33,15 @@ export class Renderer {
     this.renderer = new THREE.WebGLRenderer({ antialias: false });
     this.renderer.setPixelRatio(PIXEL_RATIO);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    // Add restrained Three.js scene lighting for directional depth
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    this.scene.add(ambientLight);
+
+    const sunLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    sunLight.position.set(1, 1.5, 0.5).normalize();
+    this.scene.add(sunLight);
   }
 
   /** Canvas element to mount in the DOM. */

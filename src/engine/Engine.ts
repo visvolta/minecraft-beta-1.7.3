@@ -38,7 +38,7 @@ const MAX_DELTA_SECONDS = 0.1;
  * default was changed. See BETA_TERRAIN_SEED_HEALTH_CHECK in
  * world/generation for the automated regression guarding this.
  */
-const WORLD_SEED = 0n;
+const WORLD_SEED = 474747474747n;
 
 /**
  * Player spawn (feet position). Fixed X/Z with a generously high Y so the
@@ -82,6 +82,7 @@ export class Engine {
   private readonly debugController: DebugController;
   private readonly debugStatsCollector: DebugStatsCollector;
   private noClipEnabled = false;
+  private grayscaleMode = false;
 
   private running = false;
   private animationFrameId: number | null = null;
@@ -238,6 +239,11 @@ export class Engine {
     // 2. Toggle debug systems
     if (this.input.isDebugKeyJustPressed('F3')) {
       this.debugOverlay.toggle();
+    }
+
+    if (this.input.isDebugKeyJustPressed('F4')) {
+      this.grayscaleMode = !this.grayscaleMode;
+      this.chunkRenderer.setGrayscaleMode(this.grayscaleMode, this.atlas);
     }
 
     if (this.input.isDebugKeyJustPressed('F6')) {
