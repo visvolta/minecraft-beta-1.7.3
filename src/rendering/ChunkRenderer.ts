@@ -9,26 +9,30 @@ import type { TextureAtlas } from '../assets/TextureAtlas';
 /** Max dirty chunk meshes rebuilt in a single frame. */
 export const MESH_REBUILD_BUDGET = 4;
 
-/**
- * Owns Three.js meshes for loaded chunks: one opaque terrain mesh, one
- * still-fluid mesh (Water and, since Stage 12B, cave-generated Lava),
- * and (since Stage 12C) one alpha-tested cutout mesh (Leaves,
- * SpruceLeaves) per chunk — each sharing a single material instance
- * across the whole world (never one material per chunk). Does not own
- * chunk data or decide streaming.
- */
+function getLightBrightness(lightLevel: number): number {
+  const clamped = THREE.MathUtils.clamp(lightLevel, 0, 15);
+  const darkness = 1 - clamped / 15;
+  return ((1 - darkness) / (darkness * 3 + 1)) * 0.95 + 0.05;
+}
+
+/** Owns Three.js chunk meshes and their shared materials. */
 export class ChunkRenderer {
   private readonly chunkManager: ChunkManager;
   private readonly mesher: ChunkMesher;
   private readonly terrainGroup: THREE.Group;
   private readonly fluidGroup: THREE.Group;
   private readonly cutoutGroup: THREE.Group;
-  private readonly terrainMaterial: THREE.MeshStandardMaterial;
-  private readonly fluidMaterial: THREE.MeshStandardMaterial;
-  private readonly cutoutMaterial: THREE.MeshStandardMaterial;
+  private readonly terrainMaterial: THREE.MeshBasicMaterial;
+  private readonly fluidMaterial: THREE.MeshBasicMaterial;
+  private readonly cutoutMaterial: THREE.MeshBasicMaterial;
   private readonly terrainMeshes = new Map<string, THREE.Mesh>();
   private readonly fluidMeshes = new Map<string, THREE.Mesh>();
   private readonly cutoutMeshes = new Map<string, THREE.Mesh>();
+  private readonly atlas: TextureAtlas;
+
+  private rawLightDebugMode = false;
+  private ambientOcclusionDebugMode = false;
+  private skylightSubtracted = 0;
 
   public constructor(
     scene: THREE.Scene,
@@ -38,87 +42,41 @@ export class ChunkRenderer {
   ) {
     this.chunkManager = chunkManager;
     this.mesher = new ChunkMesher(chunkManager, blockRegistry, atlas);
+    this.atlas = atlas;
 
-    // One shared, atlas-textured material for every opaque chunk mesh.
-    // vertexColors carries the per-face tint multiplier (white = untinted).
-    this.terrainMaterial = new THREE.MeshStandardMaterial({
+    this.terrainMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       vertexColors: true,
-      roughness: 1.0,
-      metalness: 0.0,
     });
 
-    // One shared, atlas-textured, transparent material for every fluid
-    // mesh (Water and Lava both use it — same still, non-animated
-    // meshing/material treatment, only their per-block texture differs
-    // via the atlas UVs baked into each mesh's geometry). The water
-    // texture itself already carries partial alpha (Beta's water.png is
-    // ~67-87% opaque), so `transparent: true` lets that alpha drive
-    // translucency directly — material `opacity` is left at its default
-    // (1) rather than compounding a second transparency multiplier on
-    // top of the texture's own alpha. depthWrite is disabled (standard
-    // Three.js transparency practice) so overlapping transparent fluid
-    // faces don't occlude each other based on draw order; the opaque
-    // terrain mesh (drawn via its own, separate, opaque material) still
-    // writes depth normally, so fluids always render above terrain
-    // correctly.
-    this.fluidMaterial = new THREE.MeshStandardMaterial({
+    this.fluidMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       vertexColors: true,
       transparent: true,
       depthWrite: false,
-      side: THREE.FrontSide,
-      roughness: 1.0,
-      metalness: 0.0,
+      side: THREE.DoubleSide,
     });
 
-    // One shared, atlas-textured, alpha-tested ("cutout") material for
-    // every leaf mesh (Stage 12C). The supplied leaf textures are
-    // grayscale with a fully binary alpha channel (0 or 255, no partial
-    // values) — alphaTest discards fragments below the threshold
-    // entirely (no blending, no depthWrite disabling needed, unlike the
-    // fluid material), matching real Beta's leaf rendering exactly:
-    // each pixel is either fully opaque or fully invisible.
-    // vertexColors carries the temporary global leaf tint (see
-    // registerDefaultBlocks's LEAF_TINT) multiplied onto the grayscale
-    // texture at render time — the texture itself is never recoloured.
-    this.cutoutMaterial = new THREE.MeshStandardMaterial({
+    this.cutoutMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       vertexColors: true,
       alphaTest: 0.5,
       side: THREE.DoubleSide,
-      roughness: 1.0,
-      metalness: 0.0,
     });
 
     this.terrainGroup = new THREE.Group();
     this.terrainGroup.name = 'chunks-terrain';
     scene.add(this.terrainGroup);
 
-    // Added after the terrain group so fluids render after (on top of)
-    // opaque terrain in Three.js's default back-to-front scene-graph
-    // traversal for same-depth transparent objects, per Stage 12D's
-    // "render terrain, then render water" requirement (now covering
-    // Lava too). Both groups sit in the same scene/camera pass — no
-    // second camera or render call.
     this.fluidGroup = new THREE.Group();
     this.fluidGroup.name = 'chunks-fluids';
     scene.add(this.fluidGroup);
 
-    // Cutout geometry is opaque-for-depth (alphaTest, not blended), so
-    // draw order relative to terrain/fluids doesn't matter for
-    // correctness the way it does for the blended fluid pass — added
-    // last simply to keep chunk group ordering readable/consistent.
     this.cutoutGroup = new THREE.Group();
     this.cutoutGroup.name = 'chunks-cutouts';
     scene.add(this.cutoutGroup);
   }
 
-  /**
-   * Rebuilds up to MESH_REBUILD_BUDGET dirty chunks (each rebuild
-   * regenerates both the chunk's opaque and fluid meshes together).
-   * Dynamically boosts budget if there are many dirty chunks.
-   */
   public update(): void {
     let rebuilt = 0;
     const dirtyCount = this.chunkManager.countDirtyChunks();
@@ -138,18 +96,44 @@ export class ChunkRenderer {
     }
   }
 
+  public setRawLightDebugMode(enabled: boolean): void {
+    if (this.rawLightDebugMode === enabled) {
+      return;
+    }
+
+    this.rawLightDebugMode = enabled;
+    if (enabled) {
+      this.ambientOcclusionDebugMode = false;
+    }
+    this.applyDebugModeToAllMeshes();
+  }
+
+  public setAmbientOcclusionDebugMode(enabled: boolean): void {
+    if (this.ambientOcclusionDebugMode === enabled) {
+      return;
+    }
+
+    this.ambientOcclusionDebugMode = enabled;
+    if (enabled) {
+      this.rawLightDebugMode = false;
+    }
+    this.applyDebugModeToAllMeshes();
+  }
+
   /**
-   * Toggles grayscale light-level visualization mode by hiding/restoring the texture atlas map.
+   * Applies the current global skylight subtraction (0-11). Updates only
+   * vertex colours, never geometry topology, so no chunk remesh is needed.
    */
-  public setGrayscaleMode(enabled: boolean, atlas: TextureAtlas): void {
-    this.terrainMaterial.map = enabled ? null : atlas.texture;
-    this.terrainMaterial.needsUpdate = true;
+  public setSkylightSubtracted(value: number): void {
+    const clamped = THREE.MathUtils.clamp(Math.round(value), 0, 11);
+    if (clamped === this.skylightSubtracted) {
+      return;
+    }
 
-    this.fluidMaterial.map = enabled ? null : atlas.texture;
-    this.fluidMaterial.needsUpdate = true;
-
-    this.cutoutMaterial.map = enabled ? null : atlas.texture;
-    this.cutoutMaterial.needsUpdate = true;
+    this.skylightSubtracted = clamped;
+    if (!this.ambientOcclusionDebugMode) {
+      this.updateDynamicColorsOnAllMeshes();
+    }
   }
 
   public removeChunkMesh(chunkX: number, chunkZ: number): void {
@@ -204,7 +188,6 @@ export class ChunkRenderer {
     this.cutoutGroup.removeFromParent();
   }
 
-  /** Number of currently loaded terrain chunk meshes (debug-overlay use). */
   public getVisibleMeshCount(): number {
     return this.terrainMeshes.size + this.fluidMeshes.size + this.cutoutMeshes.size;
   }
@@ -213,21 +196,132 @@ export class ChunkRenderer {
     const key = this.key(chunk.chunkX, chunk.chunkZ);
 
     const terrainGeometry = this.mesher.build(chunk);
+    this.applyColorModeToGeometry(terrainGeometry);
     this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, terrainGeometry);
 
     const fluidGeometry = this.mesher.buildFluids(chunk);
+    this.applyColorModeToGeometry(fluidGeometry);
     this.upsertMesh(this.fluidMeshes, this.fluidGroup, this.fluidMaterial, chunk, key, fluidGeometry);
 
     const cutoutGeometry = this.mesher.buildCutouts(chunk);
+    this.applyColorModeToGeometry(cutoutGeometry);
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, cutoutGeometry);
 
     chunk.markClean();
   }
 
+  private applyDebugModeToAllMeshes(): void {
+    this.applyMaterialMode();
+    this.updateDynamicColorsOnAllMeshes();
+    for (const mesh of this.terrainMeshes.values()) {
+      this.applyColorModeToGeometry(mesh.geometry);
+    }
+    for (const mesh of this.fluidMeshes.values()) {
+      this.applyColorModeToGeometry(mesh.geometry);
+    }
+    for (const mesh of this.cutoutMeshes.values()) {
+      this.applyColorModeToGeometry(mesh.geometry);
+    }
+  }
+
+  private updateDynamicColorsOnAllMeshes(): void {
+    for (const mesh of this.terrainMeshes.values()) {
+      this.updateDynamicColorAttributes(mesh.geometry);
+    }
+    for (const mesh of this.fluidMeshes.values()) {
+      this.updateDynamicColorAttributes(mesh.geometry);
+    }
+    for (const mesh of this.cutoutMeshes.values()) {
+      this.updateDynamicColorAttributes(mesh.geometry);
+    }
+  }
+
+  private updateDynamicColorAttributes(geometry: THREE.BufferGeometry): void {
+    const tintAttribute = geometry.getAttribute('tintColor') as THREE.BufferAttribute | undefined;
+    const skyAttribute = geometry.getAttribute('skyLightLevel') as THREE.BufferAttribute | undefined;
+    const blockAttribute = geometry.getAttribute('blockLightLevel') as THREE.BufferAttribute | undefined;
+    const aoAttribute = geometry.getAttribute('aoFactorScalar') as THREE.BufferAttribute | undefined;
+    const normalColorAttribute = geometry.getAttribute('normalColor') as THREE.BufferAttribute | undefined;
+    const debugColorAttribute = geometry.getAttribute('debugColor') as THREE.BufferAttribute | undefined;
+
+    if (
+      tintAttribute === undefined ||
+      skyAttribute === undefined ||
+      blockAttribute === undefined ||
+      aoAttribute === undefined ||
+      normalColorAttribute === undefined ||
+      debugColorAttribute === undefined
+    ) {
+      return;
+    }
+
+    const tint = tintAttribute.array as Float32Array;
+    const sky = skyAttribute.array as Float32Array;
+    const block = blockAttribute.array as Float32Array;
+    const ao = aoAttribute.array as Float32Array;
+    const normalColor = normalColorAttribute.array as Float32Array;
+    const debugColor = debugColorAttribute.array as Float32Array;
+
+    const vertexCount = skyAttribute.count;
+    for (let i = 0; i < vertexCount; i++) {
+      const effectiveSky = Math.max(0, sky[i]! - this.skylightSubtracted);
+      const effectiveLight = Math.max(effectiveSky, block[i]!);
+      const rawBrightness = getLightBrightness(effectiveLight);
+      const aoFactor = ao[i]!;
+
+      normalColor[i * 3] = tint[i * 3]! * rawBrightness * aoFactor;
+      normalColor[i * 3 + 1] = tint[i * 3 + 1]! * rawBrightness * aoFactor;
+      normalColor[i * 3 + 2] = tint[i * 3 + 2]! * rawBrightness * aoFactor;
+
+      debugColor[i * 3] = rawBrightness;
+      debugColor[i * 3 + 1] = rawBrightness;
+      debugColor[i * 3 + 2] = rawBrightness;
+    }
+
+    normalColorAttribute.needsUpdate = true;
+    debugColorAttribute.needsUpdate = true;
+  }
+
+  private applyColorModeToGeometry(geometry: THREE.BufferGeometry): void {
+    if (!this.ambientOcclusionDebugMode) {
+      this.updateDynamicColorAttributes(geometry);
+    }
+
+    const attributeName = this.rawLightDebugMode
+      ? 'debugColor'
+      : this.ambientOcclusionDebugMode
+        ? 'aoColor'
+        : 'normalColor';
+    const colorAttribute = geometry.getAttribute(attributeName);
+
+    if (colorAttribute === undefined) {
+      throw new Error(`Missing geometry colour attribute: ${attributeName}`);
+    }
+
+    geometry.setAttribute('color', colorAttribute);
+    geometry.getAttribute('color').needsUpdate = true;
+  }
+
+  private applyMaterialMode(): void {
+    if (this.rawLightDebugMode || this.ambientOcclusionDebugMode) {
+      this.terrainMaterial.map = null;
+      this.fluidMaterial.map = this.atlas.debugTexture;
+      this.cutoutMaterial.map = this.atlas.debugTexture;
+    } else {
+      this.terrainMaterial.map = this.atlas.texture;
+      this.fluidMaterial.map = this.atlas.texture;
+      this.cutoutMaterial.map = this.atlas.texture;
+    }
+
+    this.terrainMaterial.needsUpdate = true;
+    this.fluidMaterial.needsUpdate = true;
+    this.cutoutMaterial.needsUpdate = true;
+  }
+
   private upsertMesh(
     meshes: Map<string, THREE.Mesh>,
     group: THREE.Group,
-    material: THREE.MeshStandardMaterial,
+    material: THREE.MeshBasicMaterial,
     chunk: Chunk,
     key: string,
     geometry: THREE.BufferGeometry,

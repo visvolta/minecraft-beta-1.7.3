@@ -24,10 +24,14 @@ import {
   MIN_DISTINCT_BIOMES,
 } from '../src/world/generation/verifyBiomeHealth';
 
+declare const process: {
+  exit(code?: number): never;
+};
+
 // Keep in sync with engine/Engine.ts's WORLD_SEED. Not imported directly
 // since WORLD_SEED is intentionally a private module-level constant, not
 // part of Engine's public surface.
-const DEFAULT_WORLD_SEED = 2n;
+const DEFAULT_WORLD_SEED = 474747474747n;
 
 /** A seed already confirmed pathological, used to sanity-check the checker itself. */
 const KNOWN_BAD_SEED = 12345n;

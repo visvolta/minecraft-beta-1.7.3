@@ -68,6 +68,10 @@ export class DebugOverlay {
       '-- World --',
       `Biome: ${stats.biomeName}`,
       `Seed: ${stats.worldSeed}`,
+      `Time: ${stats.worldTime.toFixed(1)}`,
+      `Day: ${stats.dayNumber}`,
+      `Celestial angle: ${stats.celestialAngle.toFixed(3)}`,
+      `Sky: ${stats.skyPhase}`,
       `Loaded chunks: ${stats.loadedChunks}`,
       `Visible chunk meshes: ${stats.visibleChunkMeshes}`,
       '',
@@ -75,6 +79,9 @@ export class DebugOverlay {
       `Triangles: ${stats.triangleCount}`,
       `Draw calls: ${stats.drawCalls}`,
       `Dirty chunk queue: ${stats.dirtyChunkQueueSize}`,
+      `Fog: ${stats.fogMode}`,
+      `Fog near: ${stats.fogNear.toFixed(1)}`,
+      `Fog far: ${stats.fogFar.toFixed(1)}`,
     ];
   }
 

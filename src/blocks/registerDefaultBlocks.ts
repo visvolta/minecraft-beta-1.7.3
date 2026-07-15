@@ -425,7 +425,11 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
-    textures: { all: 'dirt' },
+    textures: {
+      top: 'pumpkin_top',
+      bottom: 'pumpkin_top',
+      side: 'pumpkin_side',
+    },
     renderType: 'opaque',
   });
 

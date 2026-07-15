@@ -17,12 +17,24 @@ export interface DebugStats {
 
   readonly biomeName: string;
   readonly worldSeed: string;
+  readonly worldTime: number;
+  readonly dayNumber: number;
+  readonly celestialAngle: number;
+  readonly skyPhase: string;
   readonly loadedChunks: number;
   readonly visibleChunkMeshes: number;
 
   readonly triangleCount: number;
   readonly drawCalls: number;
   readonly dirtyChunkQueueSize: number;
+
+  readonly fogMode: string;
+  readonly fogNear: number;
+  readonly fogFar: number;
+  readonly starOpacity: number;
+  readonly sunAltitude: number;
+  readonly skyColorHex: string;
+  readonly fogColorHex: string;
 
   readonly noClip: boolean;
 }

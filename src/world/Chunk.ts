@@ -21,13 +21,14 @@ const NON_OPAQUE_FOR_HEIGHTMAP = new Set<BlockId>([
   AIR_BLOCK_ID,
   BlockIds.Water,
   BlockIds.Lava,
+  BlockIds.LavaStill,
   BlockIds.Dandelion,
   BlockIds.Rose,
   BlockIds.BrownMushroom,
   BlockIds.RedMushroom,
   BlockIds.TallGrass,
   BlockIds.DeadBush,
-  BlockIds.Reed
+  BlockIds.Reed,
 ]);
 
 /**

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import type { FogState } from './FogController';
+import { OVERWORLD_FOG_COLOR } from './FogController';
 
-const BACKGROUND_COLOR = 0x70a0ff;
 const CAMERA_FOV = 70;
 const CAMERA_NEAR = 0.05;
 const CAMERA_FAR = 512;
@@ -15,13 +16,24 @@ export class Renderer {
   public readonly camera: THREE.PerspectiveCamera;
   public readonly renderer: THREE.WebGLRenderer;
 
+  private readonly backgroundColor = new THREE.Color(OVERWORLD_FOG_COLOR);
+  private readonly fog = new THREE.Fog(OVERWORLD_FOG_COLOR, 1, 2);
+  private currentFogState: FogState = {
+    mode: 'overworld',
+    enabled: true,
+    colorHex: OVERWORLD_FOG_COLOR,
+    near: 1,
+    far: 2,
+  };
+
   private readonly onResizeBound = (): void => {
     this.handleResize();
   };
 
   public constructor() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(BACKGROUND_COLOR);
+    this.scene.background = this.backgroundColor;
+    this.scene.fog = this.fog;
 
     this.camera = new THREE.PerspectiveCamera(
       CAMERA_FOV,
@@ -34,19 +46,36 @@ export class Renderer {
     this.renderer.setPixelRatio(PIXEL_RATIO);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-    // Add restrained Three.js scene lighting for directional depth
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-    this.scene.add(ambientLight);
-
-    const sunLight = new THREE.DirectionalLight(0xffffff, 0.6);
-    sunLight.position.set(1, 1.5, 0.5).normalize();
-    this.scene.add(sunLight);
+    this.renderer.toneMapping = THREE.NoToneMapping;
   }
 
   /** Canvas element to mount in the DOM. */
   public get domElement(): HTMLCanvasElement {
     return this.renderer.domElement;
+  }
+
+  public getCurrentFogState(): FogState {
+    return this.currentFogState;
+  }
+
+  /**
+   * Applies the active fog/background settings. Reuses a single Fog
+   * instance and background Color so no per-frame Three.js object churn is
+   * introduced.
+   */
+  public setFogState(state: FogState): void {
+    this.currentFogState = state;
+
+    this.backgroundColor.setHex(state.colorHex);
+
+    if (state.enabled) {
+      this.fog.color.setHex(state.colorHex);
+      this.fog.near = state.near;
+      this.fog.far = state.far;
+      this.scene.fog = this.fog;
+    } else {
+      this.scene.fog = null;
+    }
   }
 
   /** Begin listening for window resize. Called by the Engine on start. */

@@ -43,17 +43,19 @@ const DIGIT_KEY_CODES: Record<DigitKey, string> = {
 };
 
 /**
- * Debug-only function keys (Stage 12D): F3 toggles the debug overlay, F6
+ * Debug-only function keys: F3 toggles the debug overlay, F4 toggles
+ * raw-light debug rendering, F7 toggles AO-only debug rendering, and F6
  * toggles debug no-clip. Edge-triggered like the digit keys above, not
  * bound through the InputAction system since they control debug systems
  * rather than gameplay.
  */
-export type DebugKey = 'F3' | 'F4' | 'F6';
+export type DebugKey = 'F3' | 'F4' | 'F6' | 'F7';
 
 const DEBUG_KEY_CODES: Record<DebugKey, string> = {
   F3: 'F3',
   F4: 'F4',
   F6: 'F6',
+  F7: 'F7',
 };
 
 /**
@@ -114,11 +116,19 @@ export class Input {
       event.preventDefault();
     }
 
-    // F3/F6 are debug toggles that must reach the game even without
-    // pointer lock (e.g. right after page load, before the first click),
-    // and must never trigger the browser's own F3 (find-in-page, in some
-    // browsers) or F6 (address-bar focus) behaviour.
-    if (event.code === DEBUG_KEY_CODES.F3 || event.code === DEBUG_KEY_CODES.F4 || event.code === DEBUG_KEY_CODES.F6) {
+    // Debug toggles must reach the game even without pointer lock (e.g.
+    // right after page load, before the first click), and must never
+    // trigger the browser's own F-key behaviour.
+    if (
+      event.code === DEBUG_KEY_CODES.F3 ||
+      event.code === DEBUG_KEY_CODES.F4 ||
+      event.code === DEBUG_KEY_CODES.F6 ||
+      event.code === DEBUG_KEY_CODES.F7 ||
+      event.code === 'ArrowLeft' ||
+      event.code === 'ArrowRight' ||
+      event.code === 'ArrowUp' ||
+      event.code === 'ArrowDown'
+    ) {
       event.preventDefault();
     }
   };
@@ -289,8 +299,8 @@ export class Input {
   }
 
   /**
-   * True only on the frame a debug key (F3/F6) transitioned from up to
-   * down (edge-triggered, ignores OS key-repeat) — same pattern as
+   * True only on the frame a debug key (F3/F4/F6/F7) transitioned from
+   * up to down (edge-triggered, ignores OS key-repeat) — same pattern as
    * isDigitKeyJustPressed, kept separate since debug keys are not part
    * of the InputAction binding table.
    */
@@ -311,6 +321,14 @@ export class Input {
     }
 
     return false;
+  }
+
+  /**
+   * Returns true only on the frame the given KeyboardEvent.code was just
+   * pressed (edge-triggered, ignores OS key-repeat).
+   */
+  public isKeyJustPressed(code: string): boolean {
+    return this.frameKeyPresses.has(code);
   }
 
   /**

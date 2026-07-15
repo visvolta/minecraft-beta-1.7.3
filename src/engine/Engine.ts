@@ -8,7 +8,10 @@ import { InteractionController } from '../player/InteractionController';
 import { PlayerPhysics } from '../physics/PlayerPhysics';
 import { BlockHighlight } from '../rendering/BlockHighlight';
 import { ChunkRenderer } from '../rendering/ChunkRenderer';
+import { FogController } from '../rendering/FogController';
 import { Renderer } from '../rendering/Renderer';
+import { SkyRenderer } from '../rendering/sky/SkyRenderer';
+import { WorldTime } from '../world/WorldTime';
 import { ChunkManager } from '../world/ChunkManager';
 import { ChunkStreamer } from '../world/ChunkStreamer';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
@@ -27,16 +30,7 @@ const MAX_DELTA_SECONDS = 0.1;
  * full 64-bit long seed semantics, which a plain JS number can't
  * represent exactly.
  *
- * Seed 2 was chosen after verifying (against a compiled, unmodified
- * mc-dev reference) that it produces a healthy, varied biome
- * distribution — all 10 reachable Beta biomes present over a 41x41
- * chunk sample, no single biome exceeding ~26%. The previous default
- * (12345) was confirmed — via the same reference — to be a genuinely
- * atypical Beta seed that generates ~83% Desert; that was authentic
- * Beta behaviour for that specific seed, not a code defect, but it made
- * the world look far less varied than typical Beta terrain, so the
- * default was changed. See BETA_TERRAIN_SEED_HEALTH_CHECK in
- * world/generation for the automated regression guarding this.
+ * Keep this in sync with scripts/verifyDefaultSeedHealth.ts.
  */
 const WORLD_SEED = 474747474747n;
 
@@ -72,6 +66,9 @@ export class Engine {
   private readonly chunkRenderer: ChunkRenderer;
   private readonly chunkStreamer: ChunkStreamer;
   private readonly lightEngine: LightEngine;
+  private readonly worldTime: WorldTime;
+  private readonly fogController: FogController;
+  private readonly skyRenderer: SkyRenderer;
   private readonly updatables: IUpdatable[] = [];
 
   // Stage 12D debug systems. Kept isolated from gameplay: DebugController
@@ -82,7 +79,8 @@ export class Engine {
   private readonly debugController: DebugController;
   private readonly debugStatsCollector: DebugStatsCollector;
   private noClipEnabled = false;
-  private grayscaleMode = false;
+  private rawLightDebugMode = false;
+  private ambientOcclusionDebugMode = false;
 
   private running = false;
   private animationFrameId: number | null = null;
@@ -92,6 +90,7 @@ export class Engine {
     this.atlas = atlas;
     this.chunkManager = new ChunkManager();
     this.worldGenerator = new BetaWorldGenerator(WORLD_SEED);
+    this.worldTime = new WorldTime();
 
     this.renderer = new Renderer();
 
@@ -110,6 +109,8 @@ export class Engine {
     this.playerPhysics = new PlayerPhysics(this.chunkManager, blockRegistry);
 
     this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
+    this.fogController = new FogController(this.lightEngine);
+    this.skyRenderer = new SkyRenderer(this.renderer.scene);
 
     this.interactionController = new InteractionController(
       this.input,
@@ -144,8 +145,11 @@ export class Engine {
       this.player,
       this.chunkManager,
       this.chunkRenderer,
+      this.renderer,
+      this.skyRenderer,
       this.renderer.renderer,
       WORLD_SEED,
+      this.worldTime,
     );
   }
 
@@ -198,6 +202,7 @@ export class Engine {
     this.input.stop();
     this.debugOverlay.dispose();
     this.blockHighlight.dispose();
+    this.skyRenderer.dispose();
     this.chunkRenderer.dispose();
     this.atlas.dispose();
     this.chunkManager.clear();
@@ -208,17 +213,20 @@ export class Engine {
   /**
    * Frame order:
    * 1. Begin input frame
-   * 2. Toggle debug systems (F3 overlay, F6 no-clip)
-   * 3. Update camera look
-   * 4. Read movement input (player wish velocity + jump) — only when not in no-clip
-   * 5. Update player physics / no-clip movement
-   * 6. Move camera to player eye position
-   * 7. Stream chunks
-   * 8. Update interaction (raycast + break/place)
-   * 9. Rebuild dirty meshes (terrain + water)
-   * 10. Update block highlight
-   * 11. Update debug overlay stats
-   * 12. Render (terrain, then water, then debug overlay is plain DOM
+   * 2. Toggle debug systems (F3/F4/F6/F7) + time controls
+   * 3. Advance world time
+   * 4. Update camera look
+   * 5. Read movement input (player wish velocity + jump) — only when not in no-clip
+   * 6. Update player physics / no-clip movement
+   * 7. Move camera to player eye position
+   * 8. Update sky/celestials and apply global skylight subtraction
+   * 9. Stream chunks
+   * 10. Update interaction (raycast + break/place)
+   * 11. Rebuild dirty meshes (terrain + water)
+   * 12. Compute/apply fog from the current camera eye environment
+   * 13. Update block highlight
+   * 14. Update debug overlay stats
+   * 15. Render (terrain, then water, then debug overlay is plain DOM
    *     drawn by the browser compositor, not part of the WebGL pass)
    *
    * Optional registered systems (see register()) run just before rendering,
@@ -242,8 +250,21 @@ export class Engine {
     }
 
     if (this.input.isDebugKeyJustPressed('F4')) {
-      this.grayscaleMode = !this.grayscaleMode;
-      this.chunkRenderer.setGrayscaleMode(this.grayscaleMode, this.atlas);
+      this.rawLightDebugMode = !this.rawLightDebugMode;
+      if (this.rawLightDebugMode) {
+        this.ambientOcclusionDebugMode = false;
+        this.chunkRenderer.setAmbientOcclusionDebugMode(false);
+      }
+      this.chunkRenderer.setRawLightDebugMode(this.rawLightDebugMode);
+    }
+
+    if (this.input.isDebugKeyJustPressed('F7')) {
+      this.ambientOcclusionDebugMode = !this.ambientOcclusionDebugMode;
+      if (this.ambientOcclusionDebugMode) {
+        this.rawLightDebugMode = false;
+        this.chunkRenderer.setRawLightDebugMode(false);
+      }
+      this.chunkRenderer.setAmbientOcclusionDebugMode(this.ambientOcclusionDebugMode);
     }
 
     if (this.input.isDebugKeyJustPressed('F6')) {
@@ -254,10 +275,27 @@ export class Engine {
       this.debugController.resetPhysicsState();
     }
 
-    // 3. Update camera look
+    // Basic time controls.
+    if (this.input.isKeyJustPressed('ArrowLeft')) {
+      this.worldTime.addTicks(-1000);
+    }
+    if (this.input.isKeyJustPressed('ArrowRight')) {
+      this.worldTime.addTicks(1000);
+    }
+    if (this.input.isKeyJustPressed('ArrowUp')) {
+      this.worldTime.setDay();
+    }
+    if (this.input.isKeyJustPressed('ArrowDown')) {
+      this.worldTime.setNight();
+    }
+
+    // 3. Advance world time.
+    this.worldTime.update(deltaSeconds);
+
+    // 4. Update camera look
     this.cameraController.update();
 
-    // 4-5. Movement + physics: no-clip bypasses PlayerController's wish
+    // 5-6. Movement + physics: no-clip bypasses PlayerController's wish
     // velocity entirely and moves the player directly, skipping
     // PlayerPhysics (gravity, player collision, block collision) so
     // none of it runs while no-clip is active, per this stage's
@@ -269,7 +307,7 @@ export class Engine {
       this.playerPhysics.update(this.player, deltaSeconds);
     }
 
-    // 6. Move camera to the player's eye position
+    // 7. Move camera to the player's eye position
     const camera = this.renderer.camera;
     camera.position.set(
       this.player.position.x,
@@ -277,20 +315,36 @@ export class Engine {
       this.player.position.z,
     );
 
-    // 7. Stream chunks around the player
+    // 8. Update camera-centered sky and global skylight subtraction.
+    const skyState = this.skyRenderer.update(camera, this.worldTime);
+    this.chunkRenderer.setSkylightSubtracted(this.worldTime.getSkylightSubtracted());
+
+    // 9. Stream chunks around the player
     this.chunkStreamer.update(camera.position.x, camera.position.z);
 
-    // 8. Update interaction (raycast targeting + break/place edits)
+    // 10. Update interaction (raycast targeting + break/place edits)
     this.interactionController.update();
 
-    // 9. Rebuild dirty chunk meshes (budgeted, terrain + water together);
+    // 11. Rebuild dirty chunk meshes (budgeted, terrain + water together);
     // picks up this frame's edits
     this.chunkRenderer.update();
 
-    // 10. Update the block highlight to match the current target
+    // 12. Apply fog from the camera eye position after streaming so any
+    // newly entered fluid volume is already loaded when sampled.
+    const fogState = this.fogController.compute({
+      eyeX: camera.position.x,
+      eyeY: camera.position.y,
+      eyeZ: camera.position.z,
+      rawLightDebugMode: this.rawLightDebugMode,
+      ambientOcclusionDebugMode: this.ambientOcclusionDebugMode,
+      overworldColorHex: skyState.fogColorHex,
+    });
+    this.renderer.setFogState(fogState);
+
+    // 13. Update the block highlight to match the current target
     this.blockHighlight.setTarget(this.interactionController.getCurrentHit()?.blockPos);
 
-    // 11. Update debug overlay stats. Frame timing is recorded every
+    // 14. Update debug overlay stats. Frame timing is recorded every
     // frame (so FPS smoothing stays accurate even while the overlay is
     // hidden); the full stats snapshot (including a climate/biome
     // sample) is only computed while the overlay is actually visible.
@@ -304,7 +358,7 @@ export class Engine {
       system.update(deltaSeconds);
     }
 
-    // 12. Render terrain + water (both drawn in the one WebGL pass; the
+    // 15. Render terrain + water (both drawn in the one WebGL pass; the
     // debug overlay is a separate plain-HTML element composited by the
     // browser on top, not part of this render call).
     this.renderer.render();
