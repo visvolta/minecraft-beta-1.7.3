@@ -53,6 +53,25 @@ export const BlockIds = {
   SpruceLog: 252,
   /** TEMPORARY, project-internal ID — see SpruceLog's doc comment; the Leaves equivalent for the same reason. */
   SpruceLeaves: 253,
+  MossyCobblestone: 48,
+  CoalOre: 16,
+  IronOre: 15,
+  GoldOre: 14,
+  RedstoneOre: 73,
+  DiamondOre: 56,
+  LapisOre: 21,
+  Chest: 54,
+  Spawner: 52,
+  Dandelion: 37,
+  Rose: 38,
+  BrownMushroom: 39,
+  RedMushroom: 40,
+  TallGrass: 31,
+  DeadBush: 32,
+  Reed: 83,
+  Pumpkin: 86,
+  Cactus: 81,
+  LavaStill: 11,
 } as const;
 
 /** Numeric block ID (Beta 1.7.3 compatible). */

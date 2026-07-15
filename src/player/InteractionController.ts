@@ -11,6 +11,7 @@ import { AIR_BLOCK_ID, CHUNK_SIZE_Y } from '../world/chunkConstants';
 import type { RaycastHit } from '../world/Raycaster';
 import { Raycaster } from '../world/Raycaster';
 import { getBoundaryNeighbourChunks, worldToChunkLocal } from '../world/worldToChunkCoords';
+import type { LightEngine } from '../world/generation/lighting/LightEngine';
 
 /** Maximum block interaction reach, in blocks. */
 export const INTERACTION_REACH = 5;
@@ -41,6 +42,7 @@ export class InteractionController {
   private readonly chunkManager: ChunkManager;
   private readonly blockRegistry: BlockRegistry;
   private readonly raycaster: Raycaster;
+  private readonly lightEngine: LightEngine;
 
   private readonly lookDirection = new THREE.Vector3();
 
@@ -53,6 +55,7 @@ export class InteractionController {
     player: Player,
     chunkManager: ChunkManager,
     blockRegistry: BlockRegistry,
+    lightEngine: LightEngine,
   ) {
     this.input = input;
     this.camera = camera;
@@ -60,6 +63,7 @@ export class InteractionController {
     this.chunkManager = chunkManager;
     this.blockRegistry = blockRegistry;
     this.raycaster = new Raycaster(chunkManager, blockRegistry);
+    this.lightEngine = lightEngine;
   }
 
   /** Currently targeted block, if any (for BlockHighlight to render). */
@@ -168,6 +172,10 @@ export class InteractionController {
     }
 
     chunk.setBlock(localX, worldY, localZ, blockId);
+    chunk.recomputeHeightmap();
+
+    // Trigger local lighting recalculation
+    this.lightEngine.handleBlockEdit(worldX, worldY, worldZ);
 
     for (const neighbour of getBoundaryNeighbourChunks(chunkX, chunkZ, localX, localZ)) {
       this.chunkManager.getChunk(neighbour.chunkX, neighbour.chunkZ)?.markDirty();

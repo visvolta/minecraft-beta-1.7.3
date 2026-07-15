@@ -28,6 +28,8 @@ export interface BlockTints {
   side?: TintColor;
 }
 
+export type BlockRenderType = 'opaque' | 'cutout' | 'leaves' | 'cross' | 'cactus' | 'fluid';
+
 /**
  * Immutable block data. Behaviour lives in other systems, not here.
  */
@@ -42,6 +44,12 @@ export interface BlockDefinition {
   readonly replaceable: boolean;
   readonly textures: BlockTextures;
   readonly tints?: BlockTints;
+  /** Rendering category of the block, used for chunk meshing and collision types. */
+  readonly renderType?: BlockRenderType;
+  /** How much light this block blocks, from 0 to 15. Defaults to 15 if solid, or 0 if transparent. */
+  readonly lightOpacity?: number;
+  /** How much light this block emits, from 0 to 15. Defaults to 0. */
+  readonly lightEmission?: number;
   /**
    * True for blocks that render via a binary alpha-test ("cutout") pass
    * instead of the normal opaque pass or the blended fluid pass — every

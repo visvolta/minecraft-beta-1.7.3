@@ -5,7 +5,6 @@ import type { TintColor } from './BlockDefinition';
 /**
  * Beta-style flat grass tint (~#79C05A), applied to the grayscale
  * grass-top texture at render time. Not baked into any texture or atlas.
- * Replace with biome-colormap sampling in a future stage.
  */
 const GRASS_TOP_TINT: TintColor = [0x79 / 255, 0xc0 / 255, 0x5a / 255];
 
@@ -13,18 +12,6 @@ const GRASS_TOP_TINT: TintColor = [0x79 / 255, 0xc0 / 255, 0x5a / 255];
  * Temporary global Beta-style leaf tint (Stage 12C), applied to the
  * grayscale leaf textures at render time — the textures themselves stay
  * grayscale on disk and in the atlas; only the rendered colour changes.
- *
- * Value (0x4ee031) is Beta's own default foliage-colour multiplier,
- * verified directly in mc-dev's MobSpawnerBase constructor
- * (`q = 0x4ee031;`) — the same per-biome-overridable field real Beta
- * uses for its biome-tinted leaf colour (biomes that don't explicitly
- * override it, e.g. Seasonal Forest/Savanna/Shrubland/Desert/Plains,
- * render leaves with exactly this colour). Using one fixed global value
- * for every biome (rather than sampling per-biome like Beta's own
- * colormap) is this stage's explicitly scoped simplification — the
- * per-face BlockTints mechanism used here is the same one grass already
- * uses, so swapping this constant for real biome-sampled tinting later
- * requires no mesher/material changes, only a different tint *source*.
  */
 const LEAF_TINT: TintColor = [0x4e / 255, 0xe0 / 255, 0x31 / 255];
 
@@ -40,6 +27,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: true,
     replaceable: true,
     textures: {},
+    renderType: 'fluid',
   });
 
   registry.register({
@@ -50,6 +38,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: false,
     replaceable: false,
     textures: { all: 'stone' },
+    renderType: 'opaque',
   });
 
   registry.register({
@@ -65,10 +54,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
       side: 'grass_side',
     },
     tints: {
-      // Only the top face uses the grayscale texture; the side texture
-      // already has its green fringe baked in, matching Beta 1.7.3.
       top: GRASS_TOP_TINT,
     },
+    renderType: 'opaque',
   });
 
   registry.register({
@@ -79,6 +67,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: false,
     replaceable: false,
     textures: { all: 'dirt' },
+    renderType: 'opaque',
   });
 
   registry.register({
@@ -89,6 +78,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: false,
     replaceable: false,
     textures: { all: 'cobblestone' },
+    renderType: 'opaque',
   });
 
   registry.register({
@@ -99,6 +89,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: false,
     replaceable: false,
     textures: { all: 'bedrock' },
+    renderType: 'opaque',
   });
 
   registry.register({
@@ -109,6 +100,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: false,
     replaceable: false,
     textures: { all: 'sand' },
+    renderType: 'opaque',
   });
 
   registry.register({
@@ -119,28 +111,24 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: false,
     replaceable: false,
     textures: { all: 'gravel' },
+    renderType: 'opaque',
   });
 
   registry.register({
     id: BlockIds.Clay,
     name: 'clay',
     displayName: 'Clay',
-    // Registered because the texture is supplied; Stage 12A's terrain
-    // generation never places Clay (no clay-patch logic implemented yet).
     solid: true,
     transparent: false,
     replaceable: false,
     textures: { all: 'clay' },
+    renderType: 'opaque',
   });
 
   registry.register({
     id: BlockIds.Podzol,
     name: 'podzol',
     displayName: 'Podzol',
-    // Registered so the texture/atlas pipeline can use it later; never
-    // generated naturally by Stage 12A terrain (real Beta 1.7.3 had no
-    // Podzol block at all — see BlockIds.Podzol's doc comment for why
-    // this id is a temporary, non-Beta-compatible placeholder).
     solid: true,
     transparent: false,
     replaceable: false,
@@ -149,49 +137,38 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
       bottom: 'dirt',
       side: 'podzol_side',
     },
+    renderType: 'opaque',
   });
 
   registry.register({
     id: BlockIds.Water,
     name: 'water',
     displayName: 'Water',
-    // Non-solid and transparent: correct block *data* (players won't
-    // collide with it like a wall, and it won't cull neighbouring faces
-    // as if opaque). However, the current ChunkMesher only emits geometry
-    // for solid-opaque blocks, so water will not yet be visually rendered
-    // — this is a deliberately deferred rendering limitation (see the
-    // Stage 12A summary), not a silent omission from world data. No flow
-    // simulation or animation is implemented; water is a static fill.
     solid: false,
     transparent: true,
     replaceable: false,
     textures: { all: 'water' },
+    renderType: 'fluid',
+    lightOpacity: 3,
   });
 
   registry.register({
     id: BlockIds.Lava,
     name: 'lava',
     displayName: 'Lava',
-    // Mirrors Water's current deliberate deferral (Stage 12A/12D): real
-    // Beta lava is solid-for-collision and animated/flowing, but this
-    // project has no fluid simulation yet. Registered as non-solid so
-    // it doesn't block player movement like a wall (a nearer-term
-    // improvement than leaving cave lava as impassible stone-like
-    // collision would be), transparent so ChunkMesher's fluid-mesh pass
-    // (see Stage 12D's water meshing, generalized for Lava in Stage
-    // 12B) renders it with culled faces instead of as opaque terrain.
     solid: false,
     transparent: true,
     replaceable: false,
     textures: { all: 'lava' },
+    renderType: 'fluid',
+    lightOpacity: 3,
+    lightEmission: 15,
   });
 
   registry.register({
     id: BlockIds.Log,
     name: 'log',
     displayName: 'Oak Log',
-    // Real Beta 1.7.3 Log (id 17) is solid and opaque, matching the
-    // opaque terrain culling pass used here — no cutout/transparency.
     solid: true,
     transparent: false,
     replaceable: false,
@@ -200,46 +177,31 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
       bottom: 'oak_top',
       side: 'oak_side',
     },
+    renderType: 'opaque',
   });
 
   registry.register({
     id: BlockIds.Leaves,
     name: 'leaves',
     displayName: 'Oak Leaves',
-    // Leaves are solid for face-culling purposes (matching real Beta:
-    // adjacent leaf blocks hide each other's shared face, and leaves
-    // are opaque-for-lighting-and-collision blocks, not see-through
-    // like water/glass) but render via the cutout pass (binary alpha
-    // from the supplied grayscale texture), not the normal opaque pass
-    // — see BlockDefinition.cutout's doc comment. transparent stays
-    // false since "transparent" in this project's existing vocabulary
-    // means "does not occlude/cull like a wall" (fluids), which does
-    // not describe leaves; `cutout` is the correct, separate signal for
-    // "render as alpha-tested cutout geometry".
     solid: true,
     transparent: false,
     cutout: true,
     replaceable: false,
     textures: { all: 'oak_leaves' },
-    // Leaves are supplied fully grayscale (see oak_leaves.png) and must
-    // never be recoloured on disk or baked into the atlas — this tint is
-    // applied only at render time via the same per-face BlockTints
-    // mechanism grass already uses. All three faces need an explicit
-    // entry (BlockTints has no "all" shorthand) since every face of a
-    // leaf block uses the single grayscale texture and needs tinting.
     tints: {
       top: LEAF_TINT,
       bottom: LEAF_TINT,
       side: LEAF_TINT,
     },
+    renderType: 'leaves',
+    lightOpacity: 1,
   });
 
   registry.register({
     id: BlockIds.SpruceLog,
     name: 'spruce_log',
     displayName: 'Spruce Log',
-    // TEMPORARY, project-internal id — see BlockIds.SpruceLog's doc
-    // comment (real Beta reuses Log id 17 with metadata for species).
     solid: true,
     transparent: false,
     replaceable: false,
@@ -248,16 +210,13 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
       bottom: 'spruce_top',
       side: 'spruce_side',
     },
+    renderType: 'opaque',
   });
 
   registry.register({
     id: BlockIds.SpruceLeaves,
     name: 'spruce_leaves',
     displayName: 'Spruce Leaves',
-    // TEMPORARY, project-internal id — see BlockIds.SpruceLeaves's doc
-    // comment. Same cutout/tint treatment as Leaves (Oak); Beta's real
-    // spruce leaves are also foliage-tinted, not a fixed hardcoded
-    // colour like some later Minecraft versions eventually made them.
     solid: true,
     transparent: false,
     cutout: true,
@@ -268,5 +227,234 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
       bottom: LEAF_TINT,
       side: LEAF_TINT,
     },
+    renderType: 'leaves',
+    lightOpacity: 1,
+  });
+
+  // Ores and other Blocks added for Stage 12D
+  registry.register({
+    id: BlockIds.MossyCobblestone,
+    name: 'mossy_cobbled',
+    displayName: 'Mossy Cobblestone',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: { all: 'mossy_cobble' },
+    renderType: 'opaque',
+  });
+
+  registry.register({
+    id: BlockIds.CoalOre,
+    name: 'coal_ore',
+    displayName: 'Coal Ore',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: { all: 'coal_ore' },
+    renderType: 'opaque',
+  });
+
+  registry.register({
+    id: BlockIds.IronOre,
+    name: 'iron_ore',
+    displayName: 'Iron Ore',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: { all: 'iron_ore' },
+    renderType: 'opaque',
+  });
+
+  registry.register({
+    id: BlockIds.GoldOre,
+    name: 'gold_ore',
+    displayName: 'Gold Ore',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: { all: 'gold_ore' },
+    renderType: 'opaque',
+  });
+
+  registry.register({
+    id: BlockIds.RedstoneOre,
+    name: 'redstone_ore',
+    displayName: 'Redstone Ore',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: { all: 'redstone_ore' },
+    renderType: 'opaque',
+  });
+
+  registry.register({
+    id: BlockIds.DiamondOre,
+    name: 'diamond_ore',
+    displayName: 'Diamond Ore',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: { all: 'diamond_ore' },
+    renderType: 'opaque',
+  });
+
+  registry.register({
+    id: BlockIds.LapisOre,
+    name: 'lapis_ore',
+    displayName: 'Lapis Lazuli Ore',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: { all: 'lapis_ore' },
+    renderType: 'opaque',
+  });
+
+  registry.register({
+    id: BlockIds.Chest,
+    name: 'chest',
+    displayName: 'Chest',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: {
+      top: 'singlechest_top',
+      bottom: 'singlechest_top',
+      side: 'singlechest_side',
+    },
+    renderType: 'opaque',
+  });
+
+  registry.register({
+    id: BlockIds.Spawner,
+    name: 'spawner',
+    displayName: 'Mob Spawner',
+    solid: true,
+    transparent: true,
+    cutout: true,
+    replaceable: false,
+    textures: { all: 'monster_spawner' },
+    renderType: 'cutout',
+  });
+
+  registry.register({
+    id: BlockIds.Dandelion,
+    name: 'dandelion',
+    displayName: 'Dandelion',
+    solid: false,
+    transparent: true,
+    replaceable: true,
+    textures: { all: 'dandi' },
+    renderType: 'cross',
+  });
+
+  registry.register({
+    id: BlockIds.Rose,
+    name: 'rose',
+    displayName: 'Rose',
+    solid: false,
+    transparent: true,
+    replaceable: true,
+    textures: { all: 'rose' },
+    renderType: 'cross',
+  });
+
+  registry.register({
+    id: BlockIds.BrownMushroom,
+    name: 'brown_mushroom',
+    displayName: 'Brown Mushroom',
+    solid: false,
+    transparent: true,
+    replaceable: true,
+    textures: { all: 'brown_mush' },
+    renderType: 'cross',
+  });
+
+  registry.register({
+    id: BlockIds.RedMushroom,
+    name: 'red_mushroom',
+    displayName: 'Red Mushroom',
+    solid: false,
+    transparent: true,
+    replaceable: true,
+    textures: { all: 'red_mush' },
+    renderType: 'cross',
+  });
+
+  registry.register({
+    id: BlockIds.TallGrass,
+    name: 'tall_grass',
+    displayName: 'Tall Grass',
+    solid: false,
+    transparent: true,
+    replaceable: true,
+    textures: { all: 'tall_grass' },
+    tints: {
+      top: GRASS_TOP_TINT,
+      bottom: GRASS_TOP_TINT,
+      side: GRASS_TOP_TINT,
+    },
+    renderType: 'cross',
+  });
+
+  registry.register({
+    id: BlockIds.DeadBush,
+    name: 'dead_bush',
+    displayName: 'Dead Bush',
+    solid: false,
+    transparent: true,
+    replaceable: true,
+    textures: { all: 'dead_bush' },
+    renderType: 'cross',
+  });
+
+  registry.register({
+    id: BlockIds.Reed,
+    name: 'reed',
+    displayName: 'Sugar Cane',
+    solid: false,
+    transparent: true,
+    replaceable: true,
+    textures: { all: 'reeds' },
+    renderType: 'cross',
+  });
+
+  registry.register({
+    id: BlockIds.Pumpkin,
+    name: 'pumpkin',
+    displayName: 'Pumpkin',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    textures: { all: 'dirt' },
+    renderType: 'opaque',
+  });
+
+  registry.register({
+    id: BlockIds.Cactus,
+    name: 'cactus',
+    displayName: 'Cactus',
+    solid: true,
+    transparent: true,
+    replaceable: false,
+    textures: {
+      top: 'cactus_top',
+      bottom: 'cactus_bottom',
+      side: 'cactus_side',
+    },
+    renderType: 'cactus',
+  });
+
+  // Stationary Lava block used by Lakes
+  registry.register({
+    id: BlockIds.LavaStill,
+    name: 'lava_still',
+    displayName: 'Still Lava',
+    solid: false,
+    transparent: true,
+    replaceable: false,
+    textures: { all: 'lava' },
+    renderType: 'fluid',
+    lightOpacity: 3,
+    lightEmission: 15,
   });
 }

@@ -2,6 +2,7 @@ import type { ChunkRenderer } from '../rendering/ChunkRenderer';
 import type { ChunkManager } from './ChunkManager';
 import type { WorldGenerator } from './WorldGenerator';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from './chunkConstants';
+import type { LightEngine } from './generation/lighting/LightEngine';
 
 /** Chebyshev radius (square) for loading chunks around the camera. */
 export const CHUNK_LOAD_RADIUS = 6;
@@ -24,6 +25,7 @@ export class ChunkStreamer {
   private readonly chunkManager: ChunkManager;
   private readonly generator: WorldGenerator;
   private readonly chunkRenderer: ChunkRenderer;
+  private readonly lightEngine: LightEngine;
 
   private lastChunkX: number | null = null;
   private lastChunkZ: number | null = null;
@@ -33,10 +35,12 @@ export class ChunkStreamer {
     chunkManager: ChunkManager,
     generator: WorldGenerator,
     chunkRenderer: ChunkRenderer,
+    lightEngine: LightEngine,
   ) {
     this.chunkManager = chunkManager;
     this.generator = generator;
     this.chunkRenderer = chunkRenderer;
+    this.lightEngine = lightEngine;
   }
 
   /**
@@ -70,6 +74,8 @@ export class ChunkStreamer {
 
         const chunk = this.chunkManager.getOrCreateChunk(x, z);
         this.generator.populate(chunk);
+        this.lightEngine.initializeChunkLighting(chunk);
+        this.lightEngine.reconcileChunkBorders(chunk);
         this.markNeighboursDirty(x, z);
       }
     }

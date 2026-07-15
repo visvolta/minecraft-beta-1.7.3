@@ -179,7 +179,15 @@ export class PlayerPhysics {
             continue;
           }
 
-          const blockBox = new AABB(bx, by, bz, bx + 1, by + 1, bz + 1);
+          const blockId = this.getBlockIdAt(bx, by, bz);
+          let blockBox: AABB;
+
+          if (blockId === 81) { // Cactus block ID is 81
+            // Cactus is inset horizontally by 1/16 (0.0625)
+            blockBox = new AABB(bx + 0.0625, by, bz + 0.0625, bx + 0.9375, by + 1, bz + 0.9375);
+          } else {
+            blockBox = new AABB(bx, by, bz, bx + 1, by + 1, bz + 1);
+          }
 
           if (!this.overlapsOnOtherAxes(box, blockBox, axis)) {
             continue;
@@ -199,6 +207,18 @@ export class PlayerPhysics {
     }
 
     return allowedDistance;
+  }
+
+  private getBlockIdAt(worldX: number, worldY: number, worldZ: number): number {
+    if (worldY < 0 || worldY >= CHUNK_SIZE_Y) {
+      return 0;
+    }
+    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(worldX, worldZ);
+    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+    if (chunk === undefined) {
+      return 0;
+    }
+    return chunk.getBlock(localX, worldY, localZ);
   }
 
   /** True if the box overlaps the block on the two axes other than `axis`. */

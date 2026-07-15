@@ -132,55 +132,41 @@ const FACES: readonly FaceDef[] = [
 
 /**
  * Scratch THREE.Color used to convert sRGB-authored block tints (see
- * BlockDefinition.tints) into the renderer's linear working colour space
- * before they are written into the vertex colour buffer. THREE's
- * vertexColors path multiplies buffer values directly in linear space, so
- * feeding it raw sRGB values would render visibly wrong (too dark/muted).
- * Reused per-call to avoid per-face allocation.
+ * BlockDefinition.tints) into the renderer's linear working colour space.
  */
 const tintConversionColor = new THREE.Color();
 
 /**
  * Maps a face's local-space corner to (u, v) in the source texture's own
- * 0–1 space, before atlas placement. V follows Beta's "top of block reads
- * as top of texture" convention: v = 0 at the top of the block (y = 1).
+ * 0–1 space, before atlas placement.
  */
 function localCornerToTextureUv(face: FaceDef, corner: Corner): readonly [number, number] {
   const [x, y, z] = corner;
 
   if (face.dx !== 0) {
-    // East/West side faces: horizontal axis follows Z, vertical follows Y.
-    // Screen-right (increasing u) points toward -Z when viewing the +X
-    // face from outside, and toward +Z when viewing the -X face from
-    // outside (opposite of a naive same-sign assumption) — verified by
-    // rendering a chirally-asymmetric marker texture on each face.
     const u = face.dx > 0 ? 1 - z : z;
     return [u, 1 - y];
   }
 
   if (face.dz !== 0) {
-    // North/South side faces: horizontal axis follows X, vertical follows Y.
     const u = face.dz > 0 ? x : 1 - x;
     return [u, 1 - y];
   }
 
-  // Top/bottom faces: both remaining axes are horizontal.
   const v = face.dy > 0 ? z : 1 - z;
   return [x, v];
 }
 
 /**
- * Accumulates vertex attributes and indices for one mesh build (opaque or
- * water), then produces the finished BufferGeometry. Kept as a tiny local
- * helper (not exported) so build()/buildWater() share the exact same
- * per-face vertex-emission logic without duplicating it.
+ * Accumulates vertex attributes and indices for one mesh build,
+ * then produces the finished BufferGeometry.
  */
 class MeshBuffers {
-  private readonly positions: number[] = [];
-  private readonly normals: number[] = [];
-  private readonly uvs: number[] = [];
-  private readonly colors: number[] = [];
-  private readonly indices: number[] = [];
+  public readonly positions: number[] = [];
+  public readonly normals: number[] = [];
+  public readonly uvs: number[] = [];
+  public readonly colors: number[] = [];
+  public readonly indices: number[] = [];
 
   public pushFace(
     face: FaceDef,
@@ -207,11 +193,205 @@ class MeshBuffers {
           uvRect.v0 + localV * (uvRect.v1 - uvRect.v0),
         );
       } else {
-        // No texture resolved for this face (should not happen for
-        // registered blocks with complete definitions); avoid a
-        // misaligned attribute array.
         this.uvs.push(0, 0);
       }
+    }
+
+    this.indices.push(
+      vertexOffset,
+      vertexOffset + 1,
+      vertexOffset + 2,
+      vertexOffset,
+      vertexOffset + 2,
+      vertexOffset + 3,
+    );
+  }
+
+  /**
+   * Pushes a crossed flat plane model (two intersecting vertical diagonal planes).
+   */
+  public pushCross(
+    x: number,
+    y: number,
+    z: number,
+    uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
+    tint: readonly [number, number, number],
+  ): void {
+    tintConversionColor.setRGB(tint[0], tint[1], tint[2], THREE.SRGBColorSpace);
+
+    const u0 = uvRect ? uvRect.u0 : 0;
+    const v0 = uvRect ? uvRect.v0 : 0;
+    const u1 = uvRect ? uvRect.u1 : 0;
+    const v1 = uvRect ? uvRect.v1 : 0;
+
+    const r = tintConversionColor.r;
+    const g = tintConversionColor.g;
+    const b = tintConversionColor.b;
+
+    const nx = 0;
+    const ny = 1;
+    const nz = 0;
+
+    // Plane 1: Diagonal from (0,0,0) to (1,1,1)
+    let offset = this.positions.length / 3;
+    this.positions.push(
+      x, y, z,
+      x + 1, y, z + 1,
+      x + 1, y + 1, z + 1,
+      x, y + 1, z
+    );
+    for (let i = 0; i < 4; i++) {
+      this.normals.push(nx, ny, nz);
+      this.colors.push(r, g, b);
+    }
+    this.uvs.push(
+      u0, v1,
+      u1, v1,
+      u1, v0,
+      u0, v0
+    );
+    this.indices.push(
+      offset, offset + 1, offset + 2,
+      offset, offset + 2, offset + 3
+    );
+
+    // Plane 2: Diagonal from (0,0,1) to (1,1,0)
+    offset = this.positions.length / 3;
+    this.positions.push(
+      x, y, z + 1,
+      x + 1, y, z,
+      x + 1, y + 1, z,
+      x, y + 1, z + 1
+    );
+    for (let i = 0; i < 4; i++) {
+      this.normals.push(nx, ny, nz);
+      this.colors.push(r, g, b);
+    }
+    this.uvs.push(
+      u0, v1,
+      u1, v1,
+      u1, v0,
+      u0, v0
+    );
+    this.indices.push(
+      offset, offset + 1, offset + 2,
+      offset, offset + 2, offset + 3
+    );
+  }
+
+  /**
+   * Pushes one face of a Cactus model (which is horizontally inset by 1/16).
+   */
+  public pushCactusFace(
+    faceIndex: number, // 0: +X, 1: -X, 2: +Y, 3: -Y, 4: +Z, 5: -Z
+    x: number,
+    y: number,
+    z: number,
+    uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
+    tint: readonly [number, number, number],
+  ): void {
+    tintConversionColor.setRGB(tint[0], tint[1], tint[2], THREE.SRGBColorSpace);
+
+    const u0 = uvRect ? uvRect.u0 : 0;
+    const v0 = uvRect ? uvRect.v0 : 0;
+    const u1 = uvRect ? uvRect.u1 : 0;
+    const v1 = uvRect ? uvRect.v1 : 0;
+
+    const r = tintConversionColor.r;
+    const g = tintConversionColor.g;
+    const b = tintConversionColor.b;
+
+    const vertexOffset = this.positions.length / 3;
+
+    const inset = 0.0625; // 1/16
+    const oinset = 1 - inset;
+
+    let px: number[] = [];
+    let py: number[] = [];
+    let pz: number[] = [];
+    let nx = 0, ny = 0, nz = 0;
+    let faceUvs: number[] = [];
+
+    switch (faceIndex) {
+      case 0: // +X (East)
+        px = [x + oinset, x + oinset, x + oinset, x + oinset];
+        py = [y, y + 1, y + 1, y];
+        pz = [z + inset, z + inset, z + oinset, z + oinset];
+        nx = 1; ny = 0; nz = 0;
+        faceUvs = [
+          u0 + (u1 - u0) * inset, v1,
+          u0 + (u1 - u0) * inset, v0,
+          u0 + (u1 - u0) * oinset, v0,
+          u0 + (u1 - u0) * oinset, v1
+        ];
+        break;
+      case 1: // -X (West)
+        px = [x + inset, x + inset, x + inset, x + inset];
+        py = [y, y + 1, y + 1, y];
+        pz = [z + oinset, z + oinset, z + inset, z + inset];
+        nx = -1; ny = 0; nz = 0;
+        faceUvs = [
+          u0 + (u1 - u0) * oinset, v1,
+          u0 + (u1 - u0) * oinset, v0,
+          u0 + (u1 - u0) * inset, v0,
+          u0 + (u1 - u0) * inset, v1
+        ];
+        break;
+      case 2: // +Y (Up)
+        px = [x + inset, x + oinset, x + oinset, x + inset];
+        py = [y + 1, y + 1, y + 1, y + 1];
+        pz = [z + oinset, z + oinset, z + inset, z + inset];
+        nx = 0; ny = 1; nz = 0;
+        faceUvs = [
+          u0 + (u1 - u0) * inset, v0 + (v1 - v0) * oinset,
+          u0 + (u1 - u0) * oinset, v0 + (v1 - v0) * oinset,
+          u0 + (u1 - u0) * oinset, v0 + (v1 - v0) * inset,
+          u0 + (u1 - u0) * inset, v0 + (v1 - v0) * inset
+        ];
+        break;
+      case 3: // -Y (Down)
+        px = [x + inset, x + oinset, x + oinset, x + inset];
+        py = [y, y, y, y];
+        pz = [z + inset, z + inset, z + oinset, z + oinset];
+        nx = 0; ny = -1; nz = 0;
+        faceUvs = [
+          u0 + (u1 - u0) * inset, v0 + (v1 - v0) * inset,
+          u0 + (u1 - u0) * oinset, v0 + (v1 - v0) * inset,
+          u0 + (u1 - u0) * oinset, v0 + (v1 - v0) * oinset,
+          u0 + (u1 - u0) * inset, v0 + (v1 - v0) * oinset
+        ];
+        break;
+      case 4: // +Z (South)
+        px = [x + inset, x + oinset, x + oinset, x + inset];
+        py = [y, y, y + 1, y + 1];
+        pz = [z + oinset, z + oinset, z + oinset, z + oinset];
+        nx = 0; ny = 0; nz = 1;
+        faceUvs = [
+          u0 + (u1 - u0) * inset, v1,
+          u0 + (u1 - u0) * oinset, v1,
+          u0 + (u1 - u0) * oinset, v0,
+          u0 + (u1 - u0) * inset, v0
+        ];
+        break;
+      case 5: // -Z (North)
+        px = [x + oinset, x + inset, x + inset, x + oinset];
+        py = [y + 1, y + 1, y, y];
+        pz = [z + inset, z + inset, z + inset, z + inset];
+        nx = 0; ny = 0; nz = -1;
+        faceUvs = [
+          u0 + (u1 - u0) * oinset, v0,
+          u0 + (u1 - u0) * inset, v0,
+          u0 + (u1 - u0) * inset, v1,
+          u0 + (u1 - u0) * oinset, v1
+        ];
+        break;
+    }
+
+    for (let i = 0; i < 4; i++) {
+      this.positions.push(px[i]!, py[i]!, pz[i]!);
+      this.normals.push(nx, ny, nz);
+      this.colors.push(r, g, b);
+      this.uvs.push(faceUvs[i * 2]!, faceUvs[i * 2 + 1]!);
     }
 
     this.indices.push(
@@ -236,12 +416,7 @@ class MeshBuffers {
 }
 
 /**
- * Builds culled face geometry for one chunk, in three separate passes:
- * opaque terrain (build), still fluids (buildFluids), and alpha-tested
- * cutout blocks — Leaves/SpruceLeaves, Stage 12C (buildCutouts). Missing
- * neighbour chunks are treated as Air in all passes. Emits UVs (via the
- * shared atlas) and per-vertex tint colours instead of flat placeholder
- * colours.
+ * Builds block geometry for one chunk.
  */
 export class ChunkMesher {
   private readonly chunkManager: ChunkManager;
@@ -259,9 +434,7 @@ export class ChunkMesher {
   }
 
   /**
-   * Builds opaque terrain geometry: every solid, non-transparent,
-   * non-cutout block (cutout blocks like Leaves are meshed separately by
-   * buildCutouts, even though they're also "solid" for culling purposes).
+   * Builds opaque terrain geometry: every block with renderType === 'opaque'.
    */
   public build(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
@@ -307,12 +480,11 @@ export class ChunkMesher {
   }
 
   /**
-   * Builds alpha-tested cutout geometry (Stage 12C: Leaves and
-   * SpruceLeaves). Cutout blocks are "solid" for face-culling purposes,
-   * exactly like real Beta leaves — a face is only emitted when the
-   * neighbour is NOT solid-for-culling (matching hidesOpaqueFace's own
-   * rule, reused here via isCullingSolid so opaque and cutout blocks
-   * consistently hide each other's shared faces in both directions).
+   * Builds cutout geometry:
+   *  - Leaves: hidesLeafFace(neighbour)
+   *  - Spawner: hidesCutoutFace(neighbour)
+   *  - Cross plant: no culling, pushCross called once
+   *  - Cactus: hidesCactusFace(faceIndex, neighbour)
    */
   public buildCutouts(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
@@ -322,33 +494,86 @@ export class ChunkMesher {
         for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
 
-          if (blockId === AIR_BLOCK_ID || !this.isCutoutBlock(blockId)) {
+          if (blockId === AIR_BLOCK_ID) {
             continue;
           }
 
           const definition = this.blockRegistry.getById(blockId);
-          if (definition === undefined) {
+          if (definition === undefined || definition.renderType === undefined) {
             continue;
           }
 
-          for (const face of FACES) {
-            const neighbourId = this.getNeighbourBlock(
-              chunk,
-              x + face.dx,
-              y + face.dy,
-              z + face.dz,
-            );
+          const renderType = definition.renderType;
 
-            if (this.isCullingSolid(neighbourId)) {
-              continue;
+          if (renderType === 'leaves') {
+            for (const face of FACES) {
+              const neighbourId = this.getNeighbourBlock(
+                chunk,
+                x + face.dx,
+                y + face.dy,
+                z + face.dz,
+              );
+
+              if (this.hidesLeafFace(neighbourId)) {
+                continue;
+              }
+
+              const textureName = resolveBlockTexture(definition, face.slot);
+              const uvRect =
+                textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+              const tint = resolveBlockTint(definition, face.slot);
+
+              buffers.pushFace(face, x, y, z, uvRect, tint);
             }
+          } else if (renderType === 'cutout') {
+            for (const face of FACES) {
+              const neighbourId = this.getNeighbourBlock(
+                chunk,
+                x + face.dx,
+                y + face.dy,
+                z + face.dz,
+              );
 
-            const textureName = resolveBlockTexture(definition, face.slot);
+              if (this.hidesCutoutFace(neighbourId)) {
+                continue;
+              }
+
+              const textureName = resolveBlockTexture(definition, face.slot);
+              const uvRect =
+                textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+              const tint = resolveBlockTint(definition, face.slot);
+
+              buffers.pushFace(face, x, y, z, uvRect, tint);
+            }
+          } else if (renderType === 'cross') {
+            const textureName = resolveBlockTexture(definition, 'side');
             const uvRect =
               textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-            const tint = resolveBlockTint(definition, face.slot);
+            const tint = resolveBlockTint(definition, 'side');
 
-            buffers.pushFace(face, x, y, z, uvRect, tint);
+            buffers.pushCross(x, y, z, uvRect, tint);
+          } else if (renderType === 'cactus') {
+            for (let i = 0; i < 6; i++) {
+              const face = FACES[i]!;
+              const neighbourId = this.getNeighbourBlock(
+                chunk,
+                x + face.dx,
+                y + face.dy,
+                z + face.dz,
+              );
+
+              if (this.hidesCactusFace(i, neighbourId)) {
+                continue;
+              }
+
+              const slot = i === 2 ? 'top' : (i === 3 ? 'bottom' : 'side');
+              const textureName = resolveBlockTexture(definition, slot);
+              const uvRect =
+                textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+              const tint = resolveBlockTint(definition, slot);
+
+              buffers.pushCactusFace(i, x, y, z, uvRect, tint);
+            }
           }
         }
       }
@@ -358,21 +583,7 @@ export class ChunkMesher {
   }
 
   /**
-   * Builds still-fluid geometry for one chunk (Water and, since Stage
-   * 12B introduced cave-generated Lava, Lava too — both are static,
-   * non-animated "still fluid" blocks with identical meshing rules, so
-   * they share one pass rather than duplicating buildWater's logic per
-   * fluid type). Only emits faces where a fluid block is actually
-   * exposed:
-   *  - Fluid -> Air: always emitted.
-   *  - Fluid -> transparent non-matching block (including the other
-   *    fluid type, e.g. Water next to Lava): emitted — they are visually
-   *    distinct blocks, so the boundary face is meaningful geometry, not
-   *    redundant internal geometry.
-   *  - Fluid -> the SAME fluid type: never emitted (no internal faces
-   *    between adjacent blocks of the same fluid, per Stage 12D scope,
-   *    now applied per-fluid-type rather than only to Water).
-   *  - Fluid -> solid opaque block: never emitted (already fully hidden).
+   * Builds still-fluid geometry for Water and Lava Still.
    */
   public buildFluids(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
@@ -461,75 +672,81 @@ export class ChunkMesher {
   }
 
   /**
-   * True if an opaque-terrain face should be culled against this
-   * neighbour. Cutout blocks (Leaves) count as culling-solid here too —
-   * an opaque block face fully hidden behind a leaf block is genuinely
-   * invisible and would be unnecessary geometry, matching real Beta.
+   * Only solid, non-transparent, non-cutout, non-leaves blocks hide opaque faces.
    */
-  private hidesOpaqueFace(blockId: BlockId): boolean {
-    if (blockId === AIR_BLOCK_ID) {
+  private hidesOpaqueFace(neighbourId: BlockId): boolean {
+    const neighbourDef = this.blockRegistry.getById(neighbourId);
+    if (neighbourDef === undefined) {
       return false;
     }
+    return neighbourDef.solid && !neighbourDef.transparent && neighbourDef.renderType === 'opaque';
+  }
 
-    return this.isCullingSolid(blockId);
+  /**
+   * Cutout blocks (like Spawners) are hidden only by solid, non-transparent, non-leaves opaque blocks.
+   */
+  private hidesCutoutFace(neighbourId: BlockId): boolean {
+    const neighbourDef = this.blockRegistry.getById(neighbourId);
+    if (neighbourDef === undefined) {
+      return false;
+    }
+    return neighbourDef.solid && !neighbourDef.transparent && neighbourDef.renderType === 'opaque';
+  }
+
+  /**
+   * Leaves faces are hidden if the neighbour is a leaf block OR an opaque solid block.
+   */
+  private hidesLeafFace(neighbourId: BlockId): boolean {
+    const neighbourDef = this.blockRegistry.getById(neighbourId);
+    if (neighbourDef === undefined) {
+      return false;
+    }
+    return (neighbourDef.solid && !neighbourDef.transparent && neighbourDef.renderType === 'opaque') || neighbourDef.renderType === 'leaves';
+  }
+
+  /**
+   * Cactus top/bottom faces are culled if the neighbour is solid and non-transparent.
+   * Cactus side faces are never culled because they are inset by 1/16.
+   */
+  private hidesCactusFace(faceIndex: number, neighbourId: BlockId): boolean {
+    if (faceIndex !== 2 && faceIndex !== 3) {
+      return false;
+    }
+    const neighbourDef = this.blockRegistry.getById(neighbourId);
+    if (neighbourDef === undefined) {
+      return false;
+    }
+    return neighbourDef.solid && !neighbourDef.transparent;
   }
 
   /** True if a block ID is one of the still-fluid blocks meshed by buildFluids(). */
   private isFluid(blockId: BlockId): boolean {
-    return blockId === BlockIds.Water || blockId === BlockIds.Lava;
+    return blockId === BlockIds.Water || blockId === BlockIds.Lava || blockId === BlockIds.LavaStill;
   }
 
   /**
    * True if a fluid face (for `fluidBlockId`, e.g. Water or Lava) should
-   * be culled against this neighbour:
-   *  - The SAME fluid type hides the face (no internal faces between
-   *    adjacent blocks of one fluid, per Stage 12D scope, generalized in
-   *    Stage 12B to apply per-fluid-type rather than only to Water).
-   *  - A solid or cutout neighbour (e.g. the stone floor a lake sits on,
-   *    or Stage 12C's leaves) also hides the face: it can never be seen,
-   *    so emitting it would be unnecessary geometry, contrary to this
-   *    stage's explicit "avoid unnecessary geometry" requirement.
-   *  - Air, the OTHER fluid type, and any other transparent block always
-   *    expose the face (they are visually distinct from `fluidBlockId`).
+   * be culled against this neighbour.
    */
   private hidesFluidFace(fluidBlockId: BlockId, neighbourId: BlockId): boolean {
     if (neighbourId === fluidBlockId) {
       return true;
     }
 
-    return this.isCullingSolid(neighbourId);
+    const neighbourDef = this.blockRegistry.getById(neighbourId);
+    if (neighbourDef === undefined) {
+      return false;
+    }
+
+    return neighbourDef.solid && !neighbourDef.transparent;
   }
 
-  /** True for blocks meshed in the opaque pass: solid, non-transparent, and NOT cutout. */
+  /** True for blocks meshed in the opaque pass: solid, non-transparent, and of renderType 'opaque'. */
   private isOpaqueMeshBlock(blockId: BlockId): boolean {
     const definition = this.blockRegistry.getById(blockId);
     if (definition === undefined) {
       return false;
     }
-
-    return definition.solid && !definition.transparent && !definition.cutout;
-  }
-
-  /** True for blocks meshed in the cutout pass (Stage 12C: Leaves, SpruceLeaves). */
-  private isCutoutBlock(blockId: BlockId): boolean {
-    const definition = this.blockRegistry.getById(blockId);
-    return definition?.cutout === true;
-  }
-
-  /**
-   * True if this block should hide a neighbouring face for culling
-   * purposes — solid+opaque terrain blocks AND cutout blocks (leaves)
-   * both count, matching real Beta (leaves are solid, opaque-for-culling
-   * blocks; only their *rendering* uses binary alpha, not their
-   * face-culling behaviour). This is the single shared "is this
-   * something a face can hide behind" rule used by every mesh pass.
-   */
-  private isCullingSolid(blockId: BlockId): boolean {
-    const definition = this.blockRegistry.getById(blockId);
-    if (definition === undefined) {
-      return false;
-    }
-
-    return definition.solid && !definition.transparent;
+    return definition.renderType === 'opaque';
   }
 }

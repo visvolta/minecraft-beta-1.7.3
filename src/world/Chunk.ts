@@ -32,6 +32,7 @@ export class Chunk {
   public readonly chunkZ: number;
 
   private readonly blocks: Uint8Array;
+  private readonly light: Uint8Array;
   private dirty: boolean;
 
   /**
@@ -51,6 +52,7 @@ export class Chunk {
     this.chunkX = chunkX;
     this.chunkZ = chunkZ;
     this.blocks = new Uint8Array(CHUNK_VOLUME);
+    this.light = new Uint8Array(CHUNK_VOLUME);
     // Air is 0; Uint8Array is zero-filled by default.
     this.dirty = true;
   }
@@ -88,6 +90,38 @@ export class Chunk {
     }
 
     return this.blocks[this.index(localX, localY, localZ)]!;
+  }
+
+  public getSkylight(localX: number, localY: number, localZ: number): number {
+    if (!this.isInBounds(localX, localY, localZ)) {
+      return 0;
+    }
+    return this.light[this.index(localX, localY, localZ)]! & 0x0F;
+  }
+
+  public setSkylight(localX: number, localY: number, localZ: number, value: number): void {
+    if (!this.isInBounds(localX, localY, localZ)) {
+      return;
+    }
+    const idx = this.index(localX, localY, localZ);
+    this.light[idx] = (this.light[idx]! & 0xF0) | (value & 0x0F);
+    this.dirty = true;
+  }
+
+  public getBlocklight(localX: number, localY: number, localZ: number): number {
+    if (!this.isInBounds(localX, localY, localZ)) {
+      return 0;
+    }
+    return (this.light[this.index(localX, localY, localZ)]! >> 4) & 0x0F;
+  }
+
+  public setBlocklight(localX: number, localY: number, localZ: number, value: number): void {
+    if (!this.isInBounds(localX, localY, localZ)) {
+      return;
+    }
+    const idx = this.index(localX, localY, localZ);
+    this.light[idx] = (this.light[idx]! & 0x0F) | ((value & 0x0F) << 4);
+    this.dirty = true;
   }
 
   /**

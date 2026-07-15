@@ -12,6 +12,7 @@ import { Renderer } from '../rendering/Renderer';
 import { ChunkManager } from '../world/ChunkManager';
 import { ChunkStreamer } from '../world/ChunkStreamer';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
+import { LightEngine } from '../world/generation/lighting/LightEngine';
 import { DebugController } from '../debug/DebugController';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import { DebugStatsCollector } from '../debug/DebugStatsCollector';
@@ -70,6 +71,7 @@ export class Engine {
   private readonly worldGenerator: BetaWorldGenerator;
   private readonly chunkRenderer: ChunkRenderer;
   private readonly chunkStreamer: ChunkStreamer;
+  private readonly lightEngine: LightEngine;
   private readonly updatables: IUpdatable[] = [];
 
   // Stage 12D debug systems. Kept isolated from gameplay: DebugController
@@ -106,12 +108,15 @@ export class Engine {
     );
     this.playerPhysics = new PlayerPhysics(this.chunkManager, blockRegistry);
 
+    this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
+
     this.interactionController = new InteractionController(
       this.input,
       this.renderer.camera,
       this.player,
       this.chunkManager,
       blockRegistry,
+      this.lightEngine,
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
 
@@ -125,6 +130,7 @@ export class Engine {
       this.chunkManager,
       this.worldGenerator,
       this.chunkRenderer,
+      this.lightEngine,
     );
 
     this.debugOverlay = new DebugOverlay();
