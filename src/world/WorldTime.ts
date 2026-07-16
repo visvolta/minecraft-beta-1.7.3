@@ -95,12 +95,20 @@ export class WorldTime {
     };
   }
 
+  /**
+   * Beta 1.7.3 `getStarBrightness`, ported verbatim from mc-dev:
+   *   float f2 = 1.0F - (MathHelper.cos(f1 * 3.141593F * 2.0F) * 2.0F + 0.75F);
+   *   return f2 * f2 * 0.5F;
+   *
+   * The prior implementation used `0.85` here and `0.25` inside the cos()
+   * term — both slight deviations. Now bit-for-bit Beta.
+   */
   public getStarBrightness(): number {
     const celestialAngle = this.getCelestialAngle();
-    let value = 1 - (Math.cos(celestialAngle * Math.PI * 2) * 2 + 0.25);
+    let value = 1 - (Math.cos(celestialAngle * Math.PI * 2) * 2 + 0.75);
 
     value = Math.max(0, Math.min(1, value));
-    return value * value * 0.85;
+    return value * value * 0.5;
   }
 
   /** Kept phase-ready even though Stage 16 renders a single Moon texture. */
@@ -108,21 +116,41 @@ export class WorldTime {
     return ((Math.floor(this.ticks / TICKS_PER_DAY) % 8) + 8) % 8;
   }
 
+  /**
+   * Beta 1.7.3 `calculateSkylightSubtracted`, ported from mc-dev:
+   *   return (int)(f2 * 11F);
+   *
+   * The prior implementation used 13 here — a deviation that kept
+   * outdoor terrain 2 skylight levels brighter at midnight than Beta.
+   * Now bit-for-bit Beta (max 11).
+   */
   public getSkylightSubtracted(): number {
     const celestialAngle = this.getCelestialAngle();
     let value = Math.cos(celestialAngle * Math.PI * 2) * 2 + 0.5;
 
     value = Math.max(0, Math.min(1, value));
-    return Math.round((1 - value) * 13);
+    return Math.floor((1 - value) * 11);
   }
 
+  /**
+   * "How much of peak sunlight is present" factor multiplied into skylight
+   * contributions by ChunkRenderer.
+   *
+   * Beta's own value is `f * 0.8 + 0.2` (hard 0.2 floor). Stage 16
+   * intentionally deviates: we drop the 0.2 floor so a fully enclosed,
+   * skylight=0 block genuinely renders black rather than 20% grey. The
+   * downstream lighting pipeline (getLightBrightness) also has its 0.05
+   * floor removed, so together they let caves and unlit-corner nights
+   * reach true darkness without introducing a global "night overlay".
+   *
+   * Returns [0, 1]. At noon, `value = 1`; at midnight, `value = 0`.
+   */
   public getSunBrightnessFactor(): number {
     const celestialAngle = this.getCelestialAngle();
     let value = 1 - (Math.cos(celestialAngle * Math.PI * 2) * 2 + 0.2);
 
     value = Math.max(0, Math.min(1, value));
-    value = 1 - value;
-    return value * 0.8 + 0.2;
+    return 1 - value;
   }
 
   public getSkyPhase(): string {

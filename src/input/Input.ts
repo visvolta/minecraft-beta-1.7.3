@@ -49,13 +49,25 @@ const DIGIT_KEY_CODES: Record<DigitKey, string> = {
  * bound through the InputAction system since they control debug systems
  * rather than gameplay.
  */
-export type DebugKey = 'F3' | 'F4' | 'F6' | 'F7';
+/**
+ * Debug function keys. F3/F4/F6/F7 are the original set; Stage 18 adds
+ * F5/F8/F9/F10 for weather debug controls:
+ *   F5  = return to automatic weather
+ *   F8  = force clear
+ *   F9  = force rain
+ *   F10 = force thunder
+ */
+export type DebugKey = 'F3' | 'F4' | 'F5' | 'F6' | 'F7' | 'F8' | 'F9' | 'F10';
 
 const DEBUG_KEY_CODES: Record<DebugKey, string> = {
   F3: 'F3',
   F4: 'F4',
+  F5: 'F5',
   F6: 'F6',
   F7: 'F7',
+  F8: 'F8',
+  F9: 'F9',
+  F10: 'F10',
 };
 
 /**
@@ -122,8 +134,12 @@ export class Input {
     if (
       event.code === DEBUG_KEY_CODES.F3 ||
       event.code === DEBUG_KEY_CODES.F4 ||
+      event.code === DEBUG_KEY_CODES.F5 ||
       event.code === DEBUG_KEY_CODES.F6 ||
       event.code === DEBUG_KEY_CODES.F7 ||
+      event.code === DEBUG_KEY_CODES.F8 ||
+      event.code === DEBUG_KEY_CODES.F9 ||
+      event.code === DEBUG_KEY_CODES.F10 ||
       event.code === 'ArrowLeft' ||
       event.code === 'ArrowRight' ||
       event.code === 'ArrowUp' ||

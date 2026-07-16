@@ -9,11 +9,131 @@ import type { TextureAtlas } from '../assets/TextureAtlas';
 /** Max dirty chunk meshes rebuilt in a single frame. */
 export const MESH_REBUILD_BUDGET = 4;
 
+/**
+ * Stage 17B height-aware fog constants.
+ *
+ * Terrain materials use Three.js's stock fog (FogExp2 for overworld,
+ * Fog for water/lava) but multiply the shader-computed `fogFactor` by
+ * `1 - smoothstep(FOG_HEIGHT_START, FOG_HEIGHT_END, worldY)` so:
+ *
+ *   worldY ≤ FOG_HEIGHT_START : full-strength horizon fog
+ *   worldY ≥ FOG_HEIGHT_END   : no fog contribution
+ *   between                    : smooth taper
+ *
+ * Purpose: keep the horizon-fog band concentrated near terrain, so
+ * looking upward reveals a clear sky and the cloud layer (Y=108..112)
+ * is not washed out by a distant chunk edge's fog.
+ *
+ * Values chosen so:
+ *   FOG_HEIGHT_START = 62  — right around sea level; peaks of low
+ *                            hills sit inside the fog band and get the
+ *                            expected atmospheric fade.
+ *   FOG_HEIGHT_END   = 96  — safely below cloud altitude (108), so the
+ *                            cloud layer sees no fog contribution from
+ *                            terrain surfaces at any horizontal
+ *                            distance. Tall mountains (Y ≥ 96) also
+ *                            escape the fog band and read as crisp
+ *                            silhouettes against the sky.
+ *
+ * Weather (future) may want to lower FOG_HEIGHT_END during rain so
+ * clouds appear grounded — tuning knobs are exposed here so it's a
+ * one-line change.
+ */
+export const FOG_HEIGHT_START = 62;
+export const FOG_HEIGHT_END = 96;
+
+/**
+ * Injects a small vertex-fragment shader modification into the passed
+ * MeshBasicMaterial so its fog is height-attenuated. Uniforms
+ * `uFogHeightStart` / `uFogHeightEnd` are added; a `vHeightFogWorldY`
+ * varying carries the world-space Y of each fragment.
+ *
+ * We reuse Three's own `<fog_fragment>` computation entirely and only
+ * multiply the resulting `fogFactor` by the height taper before the
+ * final `mix()`.
+ */
+function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
+  material.userData.heightFogStart = { value: FOG_HEIGHT_START };
+  material.userData.heightFogEnd = { value: FOG_HEIGHT_END };
+  material.onBeforeCompile = (shader): void => {
+    shader.uniforms.uFogHeightStart = material.userData.heightFogStart;
+    shader.uniforms.uFogHeightEnd = material.userData.heightFogEnd;
+
+    // Vertex shader: add a world-Y varying alongside Three's existing
+    // fog vertex chunk. We compute worldPosition ourselves rather than
+    // relying on the `<worldpos_vertex>` chunk, because that chunk is
+    // only emitted when specific features are active — this way we
+    // stay a strictly additive, dependency-free injection.
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        #ifdef USE_FOG
+          varying float vHeightFogWorldY;
+        #endif`,
+      )
+      .replace(
+        '#include <fog_vertex>',
+        `#include <fog_vertex>
+        #ifdef USE_FOG
+          vHeightFogWorldY = (modelMatrix * vec4(transformed, 1.0)).y;
+        #endif`,
+      );
+
+    // Fragment shader: replace Three's stock <fog_fragment> chunk with
+    // the same code plus a single-line height-taper multiplication on
+    // the fogFactor. This is the minimal change that lets Three's
+    // FogExp2/Fog branches keep computing themselves.
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        #ifdef USE_FOG
+          varying float vHeightFogWorldY;
+          uniform float uFogHeightStart;
+          uniform float uFogHeightEnd;
+        #endif`,
+      )
+      .replace(
+        '#include <fog_fragment>',
+        `
+        #ifdef USE_FOG
+          #ifdef FOG_EXP2
+            float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+          #else
+            float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+          #endif
+          fogFactor *= 1.0 - smoothstep( uFogHeightStart, uFogHeightEnd, vHeightFogWorldY );
+          gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+        #endif
+        `,
+      );
+  };
+  // Ensure Three recompiles the shader next render.
+  material.needsUpdate = true;
+}
+
+/**
+ * Beta 1.7.3 voxel brightness curve (Chunk.getLightBrightnessTable).
+ * See ChunkMesher.ts for the identical Beta-verbatim justification.
+ * The voxel-lighting pipeline itself has no floor.
+ */
 function getLightBrightness(lightLevel: number): number {
   const clamped = THREE.MathUtils.clamp(lightLevel, 0, 15);
   const darkness = 1 - clamped / 15;
-  return ((1 - darkness) / (darkness * 3 + 1)) * 0.95 + 0.05;
+  return (1 - darkness) / (darkness * 3 + 1);
 }
+
+/**
+ * Stage 16E minimum-visibility floor for the LIGHT MULTIPLIER only.
+ * Must stay in sync with the constant in ChunkMesher.ts; both the initial
+ * bake there and the dynamic recompute here apply the same floor to the
+ * light multiplier BEFORE multiplying by AO — so occluded corners still
+ * render darker than exposed surfaces at night. See ChunkMesher.ts's
+ * extended comment for the full rationale (root-cause fix of the
+ * Stage 16D "flat AO at night" bug).
+ */
+const TEXTURE_MIN_BRIGHTNESS = 0.015;
 
 /** Owns Three.js chunk meshes and their shared materials. */
 export class ChunkRenderer {
@@ -49,6 +169,7 @@ export class ChunkRenderer {
       map: atlas.texture,
       vertexColors: true,
     });
+    attachHeightAwareFog(this.terrainMaterial);
 
     this.fluidMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
@@ -57,6 +178,7 @@ export class ChunkRenderer {
       depthWrite: false,
       side: THREE.DoubleSide,
     });
+    attachHeightAwareFog(this.fluidMaterial);
 
     this.cutoutMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
@@ -64,17 +186,29 @@ export class ChunkRenderer {
       alphaTest: 0.5,
       side: THREE.DoubleSide,
     });
+    attachHeightAwareFog(this.cutoutMaterial);
 
+    // Stage 17: explicit renderOrder assignment so the transparent
+    // queue is deterministic. Opaque terrain at 0 (default), clouds at
+    // 10 (see CloudRenderer.ts), water/lava + cutout leaves at 20.
+    // Clouds therefore correctly sit BEHIND water surfaces (a cloud
+    // reflected in a pond, say, still gets overpainted by the pond) —
+    // and clouds are IN FRONT of terrain in the transparent queue,
+    // which is what depthTest expects since terrain has already
+    // written its depths in the opaque pass.
     this.terrainGroup = new THREE.Group();
     this.terrainGroup.name = 'chunks-terrain';
+    this.terrainGroup.renderOrder = 0;
     scene.add(this.terrainGroup);
 
     this.fluidGroup = new THREE.Group();
     this.fluidGroup.name = 'chunks-fluids';
+    this.fluidGroup.renderOrder = 20;
     scene.add(this.fluidGroup);
 
     this.cutoutGroup = new THREE.Group();
     this.cutoutGroup.name = 'chunks-cutouts';
+    this.cutoutGroup.renderOrder = 20;
     scene.add(this.cutoutGroup);
   }
 
@@ -126,7 +260,10 @@ export class ChunkRenderer {
    * vertex colours, never geometry topology, so no chunk remesh is needed.
    */
   public setSkylightSubtracted(value: number): void {
-    const clamped = THREE.MathUtils.clamp(Math.round(value), 0, 13);
+    // Beta caps at 11 (see WorldTime.getSkylightSubtracted). Was 13 here,
+    // a 2-level deviation that kept outdoor terrain systematically
+    // brighter at night than Beta.
+    const clamped = THREE.MathUtils.clamp(Math.round(value), 0, 11);
     if (clamped === this.skylightSubtracted) {
       return;
     }
@@ -284,9 +421,22 @@ export class ChunkRenderer {
       const rawBrightness = getLightBrightness(Math.max(effectiveSky, block[i]!));
       const aoFactor = ao[i]!;
 
-      normalColor[i * 3] = tint[i * 3]! * shadedBrightness * aoFactor;
-      normalColor[i * 3 + 1] = tint[i * 3 + 1]! * shadedBrightness * aoFactor;
-      normalColor[i * 3 + 2] = tint[i * 3 + 2]! * shadedBrightness * aoFactor;
+      // Stage 16E: floor the LIGHT multiplier alone, then multiply by
+      // AO. Prior Stage 16D order `max(brightness*ao, floor)` flattened
+      // AO at night because both an exposed and a fully-occluded corner
+      // clamped to the same floor. This ordering preserves AO contrast:
+      //
+      //   occluded corner (ao=0.4, brightness≈0): floor * 0.4 ≈ 0.006
+      //   exposed surface (ao=1.0, brightness≈0): floor * 1.0 = 0.015
+      //
+      // Voxel light, AO factor, tint, and sun factor remain untouched.
+      const clampedLight =
+        shadedBrightness < TEXTURE_MIN_BRIGHTNESS ? TEXTURE_MIN_BRIGHTNESS : shadedBrightness;
+      const visibility = clampedLight * aoFactor;
+
+      normalColor[i * 3] = tint[i * 3]! * visibility;
+      normalColor[i * 3 + 1] = tint[i * 3 + 1]! * visibility;
+      normalColor[i * 3 + 2] = tint[i * 3 + 2]! * visibility;
 
       debugColor[i * 3] = rawBrightness;
       debugColor[i * 3 + 1] = rawBrightness;
@@ -352,6 +502,10 @@ export class ChunkRenderer {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(chunk.chunkX * CHUNK_SIZE_X, 0, chunk.chunkZ * CHUNK_SIZE_Z);
     mesh.name = `chunk_${key}`;
+    // Stage 17: per-mesh renderOrder mirrors the group's so Three's
+    // transparent-queue sorter picks it up (group.renderOrder alone
+    // does NOT propagate to children when the sort runs).
+    mesh.renderOrder = group.renderOrder;
     group.add(mesh);
     meshes.set(key, mesh);
   }

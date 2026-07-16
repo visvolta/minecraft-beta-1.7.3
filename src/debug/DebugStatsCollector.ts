@@ -10,6 +10,11 @@ import { FrameTimeTracker } from './DebugStats';
 import type { DebugStats } from './DebugStats';
 import type { WorldTime } from '../world/WorldTime';
 import type { SkyRenderer } from '../rendering/sky/SkyRenderer';
+import type { CloudRenderer } from '../rendering/sky/CloudRenderer';
+import type { WeatherController } from '../world/weather/WeatherController';
+import type { PrecipitationRenderer } from '../rendering/weather/PrecipitationRenderer';
+import type { RainSplashRenderer } from '../rendering/weather/RainSplashRenderer';
+import type { LightningRenderer } from '../rendering/weather/LightningRenderer';
 
 function formatHexColor(hex: number): string {
   return `#${hex.toString(16).padStart(6, '0').toUpperCase()}`;
@@ -21,6 +26,11 @@ export class DebugStatsCollector {
   private readonly chunkRenderer: ChunkRenderer;
   private readonly sceneRenderer: Renderer;
   private readonly skyRenderer: SkyRenderer;
+  private readonly cloudRenderer: CloudRenderer;
+  private readonly weatherController: WeatherController;
+  private readonly precipitationRenderer: PrecipitationRenderer;
+  private readonly rainSplashRenderer: RainSplashRenderer;
+  private readonly lightningRenderer: LightningRenderer;
   private readonly threeRenderer: THREE.WebGLRenderer;
   private readonly worldSeed: bigint;
   private readonly climateSampler: ClimateSampler;
@@ -33,6 +43,11 @@ export class DebugStatsCollector {
     chunkRenderer: ChunkRenderer,
     sceneRenderer: Renderer,
     skyRenderer: SkyRenderer,
+    cloudRenderer: CloudRenderer,
+    weatherController: WeatherController,
+    precipitationRenderer: PrecipitationRenderer,
+    rainSplashRenderer: RainSplashRenderer,
+    lightningRenderer: LightningRenderer,
     threeRenderer: THREE.WebGLRenderer,
     worldSeed: bigint,
     worldTime: WorldTime,
@@ -42,6 +57,11 @@ export class DebugStatsCollector {
     this.chunkRenderer = chunkRenderer;
     this.sceneRenderer = sceneRenderer;
     this.skyRenderer = skyRenderer;
+    this.cloudRenderer = cloudRenderer;
+    this.weatherController = weatherController;
+    this.precipitationRenderer = precipitationRenderer;
+    this.rainSplashRenderer = rainSplashRenderer;
+    this.lightningRenderer = lightningRenderer;
     this.threeRenderer = threeRenderer;
     this.worldSeed = worldSeed;
     this.worldTime = worldTime;
@@ -51,6 +71,28 @@ export class DebugStatsCollector {
   public recordFrame(deltaSeconds: number): void {
     this.frameTimeTracker.record(deltaSeconds);
   }
+
+  /**
+   * Stage 18B: called once per frame by Engine so the F3 overlay can
+   * show the computed weather-skylight penalty, final effective
+   * subtraction (after flash), and the shared wind vector. Kept as a
+   * setter to avoid coupling DebugStatsCollector to AtmosphericState's
+   * concrete shape.
+   */
+  public setStormReadout(readout: {
+    weatherSkylightPenalty: number;
+    effectiveSkylightSubtracted: number;
+    windX: number;
+    windZ: number;
+  }): void {
+    this.stormReadout = readout;
+  }
+  private stormReadout: {
+    weatherSkylightPenalty: number;
+    effectiveSkylightSubtracted: number;
+    windX: number;
+    windZ: number;
+  } = { weatherSkylightPenalty: 0, effectiveSkylightSubtracted: 0, windX: 0, windZ: 0 };
 
   public collect(noClip: boolean): DebugStats {
     const chunkX = Math.floor(this.player.position.x / CHUNK_SIZE_X);
@@ -67,6 +109,22 @@ export class DebugStatsCollector {
     const info = this.threeRenderer.info;
     const fog = this.sceneRenderer.getCurrentFogState();
     const sky = this.skyRenderer.getCurrentState();
+    const cloudInfo = this.cloudRenderer.getDebugInfo();
+
+    // Stage 18: weather stats.
+    const w = this.weatherController.getState();
+    const forcedMode = this.weatherController.getForcedMode();
+    const weatherStats = {
+      mode: w.getEffectiveMode(w.partialTick),
+      forced: forcedMode === null ? 'auto' : forcedMode,
+      rainStrength: w.rainingStrength,
+      prevRainStrength: w.prevRainingStrength,
+      thunderStrength: w.thunderingStrength,
+      prevThunderStrength: w.prevThunderingStrength,
+      rainTime: w.rainTime,
+      thunderTime: w.thunderTime,
+    };
+    const precipStats = this.precipitationRenderer.getStats();
 
     return {
       fps: this.frameTimeTracker.getFps(),
@@ -92,12 +150,48 @@ export class DebugStatsCollector {
       dirtyChunkQueueSize: this.chunkManager.countDirtyChunks(),
 
       fogMode: fog.mode,
+      fogKind: fog.kind,
       fogNear: fog.near,
       fogFar: fog.far,
+      fogDensity: fog.density,
       starOpacity: sky.starOpacity,
       sunAltitude: sky.sunAltitude,
       skyColorHex: formatHexColor(sky.skyColorHex),
+      horizonColorHex: formatHexColor(sky.horizonColorHex),
       fogColorHex: formatHexColor(fog.colorHex),
+
+      // "Overall daylight reaching an open outdoor block" — max(0..15
+      // effective sky) × sun-brightness, normalised. 1.0 = full noon,
+      // ~0 = midnight enclosed.
+      skylightFactor: Math.max(0, (15 - sky.skylightSubtracted) / 15) * sky.sunBrightnessFactor,
+      skylightSubtracted: sky.skylightSubtracted,
+      sunBrightnessFactor: sky.sunBrightnessFactor,
+
+      // Stage 17: cloud debug snapshot.
+      cloudOffsetX: cloudInfo.cloudOffsetX,
+      cloudWindSpeed: cloudInfo.windSpeedBlocksPerSecond,
+      cloudColorHex: formatHexColor(cloudInfo.colorHex),
+      cloudCellCount: cloudInfo.cellCountVisible,
+
+      // Stage 18 weather snapshot.
+      weatherMode: weatherStats.mode,
+      weatherForced: weatherStats.forced,
+      rainStrength: weatherStats.rainStrength,
+      prevRainStrength: weatherStats.prevRainStrength,
+      thunderStrength: weatherStats.thunderStrength,
+      prevThunderStrength: weatherStats.prevThunderStrength,
+      rainTime: weatherStats.rainTime,
+      thunderTime: weatherStats.thunderTime,
+      precipitationRain: precipStats.rain,
+      precipitationSnow: precipStats.snow,
+      splashActive: this.rainSplashRenderer.getActiveCount(),
+      lightningActive: this.lightningRenderer.getActiveBoltCount(),
+      lightningFlash: this.lightningRenderer.getFlashStrength(),
+
+      weatherSkylightPenalty: this.stormReadout.weatherSkylightPenalty,
+      effectiveSkylightSubtracted: this.stormReadout.effectiveSkylightSubtracted,
+      windX: this.stormReadout.windX,
+      windZ: this.stormReadout.windZ,
 
       noClip,
     };

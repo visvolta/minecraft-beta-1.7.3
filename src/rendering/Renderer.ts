@@ -1,15 +1,30 @@
 import * as THREE from 'three';
 import type { FogState } from './FogController';
-import { OVERWORLD_FOG_COLOR } from './FogController';
+import { OVERWORLD_FOG_COLOR, overworldFogDensity } from './FogController';
 
 const CAMERA_FOV = 70;
 const CAMERA_NEAR = 0.05;
-const CAMERA_FAR = 512;
+/**
+ * Stage 18: bumped to 1024 to safely cover the new celestial-sphere
+ * radius (480 blocks + star quads a few units past that). The old 512
+ * would clip the far edge of the star field where it approaches the
+ * camera-far plane.
+ */
+const CAMERA_FAR = 1024;
 const PIXEL_RATIO = 1;
 
 /**
  * Owns the Three.js scene, camera, and WebGL renderer.
  * Rendering and resize only — the Engine owns the game loop.
+ *
+ * Stage 17B: the scene fog can now be `FogExp2` (overworld) OR `Fog`
+ * (linear, used for water/lava). We keep one instance of each and
+ * swap `scene.fog` between them based on `FogState.kind`. Reassigning
+ * `scene.fog` when the material has already been compiled with a
+ * different fog type would normally require a shader recompile — we
+ * avoid that by ONLY switching between compatible variants at the
+ * boundaries the shader was compiled for (see ChunkRenderer's height-
+ * aware fog injection notes).
  */
 export class Renderer {
   public readonly scene: THREE.Scene;
@@ -17,13 +32,16 @@ export class Renderer {
   public readonly renderer: THREE.WebGLRenderer;
 
   private readonly backgroundColor = new THREE.Color(OVERWORLD_FOG_COLOR);
-  private readonly fog = new THREE.Fog(OVERWORLD_FOG_COLOR, 1, 2);
+  private readonly exp2Fog = new THREE.FogExp2(OVERWORLD_FOG_COLOR, overworldFogDensity());
+  private readonly linearFog = new THREE.Fog(OVERWORLD_FOG_COLOR, 1, 2);
   private currentFogState: FogState = {
     mode: 'overworld',
+    kind: 'exp2',
     enabled: true,
     colorHex: OVERWORLD_FOG_COLOR,
-    near: 1,
-    far: 2,
+    near: 0,
+    far: 64,
+    density: overworldFogDensity(),
   };
 
   private readonly onResizeBound = (): void => {
@@ -33,7 +51,7 @@ export class Renderer {
   public constructor() {
     this.scene = new THREE.Scene();
     this.scene.background = this.backgroundColor;
-    this.scene.fog = this.fog;
+    this.scene.fog = this.exp2Fog;
 
     this.camera = new THREE.PerspectiveCamera(
       CAMERA_FOV,
@@ -59,20 +77,37 @@ export class Renderer {
   }
 
   /**
-   * Applies the active fog/background settings. Reuses a single Fog
-   * instance and background Color so no per-frame Three.js object churn is
-   * introduced.
+   * Applies the active fog/background settings. Reuses the two fog
+   * instances so no per-frame Three.js object churn is introduced;
+   * only `scene.fog` may switch reference when a material moves between
+   * water/lava (linear) and overworld (exp2).
+   *
+   * Note on shader recompiles: assigning `scene.fog` to a different
+   * fog class (Fog ↔ FogExp2) DOES flip Three's `USE_FOG_EXP2` shader
+   * define. Materials that were compiled with one fog kind and then
+   * see the other will silently re-compile at next `renderer.render()`.
+   * Cost: a handful of shader compiles the first time the player
+   * enters water/lava, then cached forever.
    */
   public setFogState(state: FogState): void {
     this.currentFogState = state;
 
     this.backgroundColor.setHex(state.colorHex);
 
-    if (state.enabled) {
-      this.fog.color.setHex(state.colorHex);
-      this.fog.near = state.near;
-      this.fog.far = state.far;
-      this.scene.fog = this.fog;
+    if (!state.enabled) {
+      this.scene.fog = null;
+      return;
+    }
+
+    if (state.kind === 'exp2') {
+      this.exp2Fog.color.setHex(state.colorHex);
+      this.exp2Fog.density = state.density;
+      this.scene.fog = this.exp2Fog;
+    } else if (state.kind === 'linear') {
+      this.linearFog.color.setHex(state.colorHex);
+      this.linearFog.near = state.near;
+      this.linearFog.far = state.far;
+      this.scene.fog = this.linearFog;
     } else {
       this.scene.fog = null;
     }

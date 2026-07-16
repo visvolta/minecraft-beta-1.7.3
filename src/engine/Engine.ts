@@ -11,11 +11,18 @@ import { ChunkRenderer } from '../rendering/ChunkRenderer';
 import { FogController } from '../rendering/FogController';
 import { Renderer } from '../rendering/Renderer';
 import { SkyRenderer } from '../rendering/sky/SkyRenderer';
+import { CloudRenderer } from '../rendering/sky/CloudRenderer';
 import { WorldTime } from '../world/WorldTime';
 import { ChunkManager } from '../world/ChunkManager';
 import { ChunkStreamer } from '../world/ChunkStreamer';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
+import { ClimateSampler } from '../world/generation/climate/ClimateSampler';
+import { WeatherController } from '../world/weather/WeatherController';
+import { PrecipitationRenderer, WEATHER_RENDER_RADIUS } from '../rendering/weather/PrecipitationRenderer';
+import { RainSplashRenderer } from '../rendering/weather/RainSplashRenderer';
+import { LightningRenderer } from '../rendering/weather/LightningRenderer';
+import { buildAtmosphericState, previewWeatherFade } from '../rendering/AtmosphericState';
 import { DebugController } from '../debug/DebugController';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import { DebugStatsCollector } from '../debug/DebugStatsCollector';
@@ -69,6 +76,12 @@ export class Engine {
   private readonly worldTime: WorldTime;
   private readonly fogController: FogController;
   private readonly skyRenderer: SkyRenderer;
+  private readonly cloudRenderer: CloudRenderer;
+  private readonly weatherController: WeatherController;
+  private readonly climateSampler: ClimateSampler;
+  private readonly precipitationRenderer: PrecipitationRenderer;
+  private readonly rainSplashRenderer: RainSplashRenderer;
+  private readonly lightningRenderer: LightningRenderer;
   private readonly updatables: IUpdatable[] = [];
 
   // Stage 12D debug systems. Kept isolated from gameplay: DebugController
@@ -111,6 +124,24 @@ export class Engine {
     this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
     this.fogController = new FogController(this.lightEngine);
     this.skyRenderer = new SkyRenderer(this.renderer.scene);
+    this.cloudRenderer = new CloudRenderer(this.renderer.scene);
+
+    // Stage 18: weather. Session-seeded RNG (not tied to WORLD_SEED)
+    // so weather timing is fresh each session, matching Beta behaviour.
+    const sessionSeed = BigInt(Date.now()) & 0xffffffffffffffffn;
+    this.weatherController = new WeatherController(sessionSeed);
+    this.climateSampler = new ClimateSampler(WORLD_SEED);
+    this.precipitationRenderer = new PrecipitationRenderer(
+      this.renderer.scene,
+      this.chunkManager,
+      this.climateSampler,
+    );
+    this.rainSplashRenderer = new RainSplashRenderer(this.renderer.scene);
+    this.lightningRenderer = new LightningRenderer(
+      this.renderer.scene,
+      this.chunkManager,
+      sessionSeed,
+    );
 
     this.interactionController = new InteractionController(
       this.input,
@@ -147,6 +178,11 @@ export class Engine {
       this.chunkRenderer,
       this.renderer,
       this.skyRenderer,
+      this.cloudRenderer,
+      this.weatherController,
+      this.precipitationRenderer,
+      this.rainSplashRenderer,
+      this.lightningRenderer,
       this.renderer.renderer,
       WORLD_SEED,
       this.worldTime,
@@ -202,6 +238,10 @@ export class Engine {
     this.input.stop();
     this.debugOverlay.dispose();
     this.blockHighlight.dispose();
+    this.lightningRenderer.dispose();
+    this.rainSplashRenderer.dispose();
+    this.precipitationRenderer.dispose();
+    this.cloudRenderer.dispose();
     this.skyRenderer.dispose();
     this.chunkRenderer.dispose();
     this.atlas.dispose();
@@ -275,6 +315,20 @@ export class Engine {
       this.debugController.resetPhysicsState();
     }
 
+    // Stage 18 weather debug controls.
+    if (this.input.isDebugKeyJustPressed('F5')) {
+      this.weatherController.setAuto();
+    }
+    if (this.input.isDebugKeyJustPressed('F8')) {
+      this.weatherController.forceMode('clear');
+    }
+    if (this.input.isDebugKeyJustPressed('F9')) {
+      this.weatherController.forceMode('rain');
+    }
+    if (this.input.isDebugKeyJustPressed('F10')) {
+      this.weatherController.forceMode('thunder');
+    }
+
     // Basic time controls.
     if (this.input.isKeyJustPressed('ArrowLeft')) {
       this.worldTime.addTicks(-1000);
@@ -315,10 +369,94 @@ export class Engine {
       this.player.position.z,
     );
 
+    // 7b. Stage 18: advance weather simulation. Renderer-independent;
+    //     only produces a WeatherState the rest of the frame reads from.
+    this.weatherController.update(deltaSeconds);
+    const weatherState = this.weatherController.getState();
+
     // 8. Update camera-centered sky and global skylight darkening.
-    const skyState = this.skyRenderer.update(camera, this.worldTime);
-    this.chunkRenderer.setSkylightSubtracted(this.worldTime.getSkylightSubtracted());
-    this.chunkRenderer.setSunBrightnessFactor(this.worldTime.getSunBrightnessFactor());
+    //    Stage 18: SkyColorController's own getCloudColor still runs
+    //    for cloud vertex-colour recompute; the SHARED atmospheric
+    //    state we build immediately after is what all other systems
+    //    (fog, precipitation, celestial fade) consume. We preview the
+    //    weather fade values here (cheap, no colour math) so the sky
+    //    renderer can pass them into CelestialRenderer.update in a
+    //    single pass.
+    const previewFade = previewWeatherFade(
+      weatherState.getRainStrength(weatherState.partialTick),
+      weatherState.getThunderStrength(weatherState.partialTick),
+    );
+    // The SkyRenderState returned here is used only for the F3 overlay
+    // (via SkyRenderer.getCurrentState); fog and atmos now read from
+    // the underlying SkyColorState via getCurrentColorState().
+    this.skyRenderer.update(camera, this.worldTime, previewFade);
+
+    // 8b. Build the SHARED atmospheric state once per frame. All
+    //     downstream atmospheric renderers read from here — no
+    //     independent weather calculation anywhere.
+    //     Uses the underlying SkyColorState (which carries the raw
+    //     colour channels the weather blend needs), NOT the compact
+    //     SkyRenderState used by the F3 overlay.
+    const atmos = buildAtmosphericState(
+      this.skyRenderer.getCurrentColorState(),
+      weatherState,
+    );
+
+    // Stage 18B: unified skylight computation. The weather penalty
+    // adds to the base skylight subtraction (never mutates arrays,
+    // never causes chunk remesh). Lightning flash is a temporary
+    // negative penalty that briefly brightens the scene.
+    //
+    // We deliberately do NOT also apply a weather multiplier to
+    // sunBrightnessFactor (Stage 18 did; Stage 18B q2 removed it) —
+    // otherwise brightness gets dimmed twice and the effective light
+    // levels no longer match the brief's target table.
+    //
+    // Formula:
+    //   effectiveSub = clamp(baseSub + weatherPenalty − 15*flash, 0, 15)
+    // where flash ∈ [0, 1] and 15*flash is enough to zero any base +
+    // penalty combination during a full-strength strike.
+    const baseSkylightSubtracted = this.worldTime.getSkylightSubtracted();
+    const flashStrength = this.lightningRenderer.getFlashStrength();
+    const effectiveSubtracted = Math.max(
+      0,
+      Math.min(
+        15,
+        Math.round(baseSkylightSubtracted + atmos.weatherSkylightPenalty - 15 * flashStrength),
+      ),
+    );
+    this.chunkRenderer.setSkylightSubtracted(effectiveSubtracted);
+    // Sun-brightness factor: only the base (time-of-day) factor + a
+    // flash bump. Weather influence lives entirely in the skylight
+    // penalty above so we don't double-dim.
+    const baseSunBrightness = this.worldTime.getSunBrightnessFactor();
+    const sunBrightness = Math.min(1.0, baseSunBrightness + flashStrength);
+    this.chunkRenderer.setSunBrightnessFactor(sunBrightness);
+
+    // Stage 18B: publish the derived storm readout to the debug HUD.
+    this.debugStatsCollector.setStormReadout({
+      weatherSkylightPenalty: atmos.weatherSkylightPenalty,
+      effectiveSkylightSubtracted: effectiveSubtracted,
+      windX: atmos.wind.x,
+      windZ: atmos.wind.z,
+    });
+
+    // 8c. Stage 17/18: cloud layer. Weather-blended cloud colour comes
+    //     via the shared atmospheric state so it and the sky sphere
+    //     agree exactly.
+    const cloudColor = {
+      r: atmos.cloud.r,
+      g: atmos.cloud.g,
+      b: atmos.cloud.b,
+      hex: atmos.cloud.hex,
+    };
+    this.cloudRenderer.update(
+      camera.position.x,
+      camera.position.z,
+      deltaSeconds,
+      cloudColor,
+      atmos.cloudFogStrength,
+    );
 
     // 9. Stream chunks around the player
     this.chunkStreamer.update(camera.position.x, camera.position.z);
@@ -330,15 +468,46 @@ export class Engine {
     // picks up this frame's edits
     this.chunkRenderer.update();
 
+    // 11b. Stage 18: precipitation, splash particles, lightning.
+    //      Precipitation depends on chunk heightmaps having been
+    //      streamed/updated (step 9), so it runs after streaming.
+    this.precipitationRenderer.update(
+      camera.position.x,
+      camera.position.y,
+      camera.position.z,
+      deltaSeconds,
+      atmos,
+      this.worldTime,
+    );
+    this.rainSplashRenderer.update(camera, deltaSeconds, atmos, this.precipitationRenderer);
+    this.lightningRenderer.update(
+      camera.position.x,
+      camera.position.y,
+      camera.position.z,
+      deltaSeconds,
+      atmos,
+      WEATHER_RENDER_RADIUS * 2,
+      camera, // Stage 18B: perpendicular math for camera-facing quad strips
+    );
+
     // 12. Apply fog from the camera eye position after streaming so any
     // newly entered fluid volume is already loaded when sampled.
+    // Stage 17: fog colour now derives from the sky's HORIZON colour
+    // (which already equals Beta getFogColor + sunrise tint) so the
+    // fog band and horizon band always agree.
+    // Stage 18: horizon colour used is the WEATHER-BLENDED one from
+    // AtmosphericState, so storms tighten and darken fog automatically.
     const fogState = this.fogController.compute({
       eyeX: camera.position.x,
       eyeY: camera.position.y,
       eyeZ: camera.position.z,
       rawLightDebugMode: this.rawLightDebugMode,
       ambientOcclusionDebugMode: this.ambientOcclusionDebugMode,
-      overworldColorHex: skyState.fogColorHex,
+      // Stage 18: use WEATHER-BLENDED horizon so fog and sky agree
+      // during storms. Base overworld density multiplied by the storm
+      // multiplier so rain/thunder pull the horizon closer.
+      overworldColorHex: atmos.horizon.hex,
+      overworldDensityMultiplier: atmos.fogDensityMultiplier,
     });
     this.renderer.setFogState(fogState);
 
