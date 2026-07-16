@@ -1,9 +1,11 @@
 import type { BlockId } from '../blocks/BlockId';
 import type { BlockUpdateWorld } from './BlockUpdateWorld';
+import type { WorldEventQueue } from './events/WorldEventQueue';
 
 export interface BlockBehaviourContext {
   readonly world: BlockUpdateWorld;
   readonly gameTick: number;
+  readonly events?: WorldEventQueue;
 }
 
 export interface BlockBehaviour {

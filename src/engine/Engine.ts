@@ -19,6 +19,10 @@ import { BlockBehaviourRegistry } from '../world/BlockBehaviour';
 import { RandomTickScheduler } from '../world/ticks/RandomTickScheduler';
 import { WorldTickScheduler } from '../world/ticks/WorldTickScheduler';
 import { registerFluidBehaviours } from '../world/fluid/FluidBehaviour';
+import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
+import { WorldEventQueue } from '../world/events/WorldEventQueue';
+import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
+import { fluidSurfaceHeight, getFluidLevel, isFallingFluid } from '../world/fluid/FluidMetadata';
 import { ChunkStreamer } from '../world/ChunkStreamer';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
@@ -79,6 +83,8 @@ export class Engine {
   private readonly chunkManager: ChunkManager;
   private readonly worldGenerator: BetaWorldGenerator;
   private readonly chunkRenderer: ChunkRenderer;
+  private readonly fluidAnimationSystem: FluidAnimationSystem;
+  private readonly worldEventQueue: WorldEventQueue;
   private readonly chunkStreamer: ChunkStreamer;
   private readonly lightEngine: LightEngine;
   private readonly blockUpdateWorld: BlockUpdateWorld;
@@ -137,12 +143,14 @@ export class Engine {
     this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
     this.blockBehaviourRegistry = new BlockBehaviourRegistry();
+    this.worldEventQueue = new WorldEventQueue();
     registerFluidBehaviours(this.blockBehaviourRegistry);
     this.worldTickScheduler = new WorldTickScheduler(
       this.chunkManager,
       this.blockUpdateWorld,
       this.blockBehaviourRegistry,
       new RandomTickScheduler(WORLD_SEED),
+      this.worldEventQueue,
     );
     this.blockUpdateWorld.setScheduleCallback((x, y, z, id, delay) =>
       this.worldTickScheduler.schedule(x, y, z, id, delay),
@@ -180,12 +188,14 @@ export class Engine {
       this.blockUpdateWorld,
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
+    this.fluidAnimationSystem = new FluidAnimationSystem();
 
     this.chunkRenderer = new ChunkRenderer(
       this.renderer.scene,
       this.chunkManager,
       blockRegistry,
       this.atlas,
+      this.fluidAnimationSystem,
     );
     this.chunkStreamer = new ChunkStreamer(
       this.chunkManager,
@@ -224,6 +234,38 @@ export class Engine {
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
       validateMeshWorkers: () => validationHarness.validateMeshWorker(),
       getTickMetrics: () => this.worldTickScheduler.getMetrics(),
+      getFluidMetrics: () => ({
+        ...this.fluidAnimationSystem.getDebugInfo(),
+        lavaIgnitionAttempts: this.worldEventQueue.getTotalLavaIgnitionAttempts(),
+        worldEventQueueDepth: this.worldEventQueue.getQueueDepth(),
+      }),
+      inspectFluid: (x: number, y: number, z: number) => {
+        const blockId = this.blockUpdateWorld.getBlock(x, y, z);
+        const metadata = this.blockUpdateWorld.getBlockMetadata(x, y, z);
+        const flow = computeFluidFlowVector({
+          getBlock: (wx, wy, wz) => this.blockUpdateWorld.getBlock(wx, wy, wz),
+          getMetadata: (wx, wy, wz) => this.blockUpdateWorld.getBlockMetadata(wx, wy, wz),
+          isSolid: (id) => blockRegistry.getById(id)?.solid ?? false,
+        }, x, y, z, blockId);
+        const isWater = blockId === 8 || blockId === 9;
+        const isLava = blockId === 10 || blockId === 11;
+        const moving = Math.hypot(flow.x, flow.z) > 1e-6;
+        const textureSelector = isWater
+          ? (isFallingFluid(metadata) || moving || blockId === 8 ? 'WaterFlow' : 'WaterStill')
+          : isLava
+            ? (isFallingFluid(metadata) || moving || blockId === 10 ? 'LavaFlow' : 'LavaStill')
+            : 'None';
+        return {
+          blockId,
+          metadata,
+          flowLevel: getFluidLevel(metadata),
+          falling: isFallingFluid(metadata),
+          flow,
+          surfaceHeight: fluidSurfaceHeight(metadata),
+          textureSelector,
+          currentFrames: this.fluidAnimationSystem.getDebugInfo(),
+        };
+      },
     };
   }
 
@@ -283,6 +325,7 @@ export class Engine {
     this.cloudRenderer.dispose();
     this.skyRenderer.dispose();
     this.chunkRenderer.dispose();
+    this.fluidAnimationSystem.dispose();
     this.atlas.dispose();
     this.chunkManager.clear();
     this.renderer.domElement.remove();
@@ -387,6 +430,8 @@ export class Engine {
     // 3. Advance world time and world block-tick infrastructure.
     this.worldTime.update(deltaSeconds);
     this.worldTickScheduler.update(deltaSeconds);
+    this.worldEventQueue.drainNoop();
+    this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
 
     // 4. Update camera look
     this.cameraController.update();

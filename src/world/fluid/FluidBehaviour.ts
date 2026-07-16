@@ -85,7 +85,11 @@ function normalizedLevel(metadata: number): number {
 }
 
 class FluidBehaviour implements BlockBehaviour {
-  public constructor(private readonly config: FluidConfig, private readonly stationary: boolean) {}
+  public readonly randomTicks: boolean;
+
+  public constructor(private readonly config: FluidConfig, private readonly stationary: boolean) {
+    this.randomTicks = stationary && config === LAVA;
+  }
 
   public onPlaced(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void {
     if (blockId === this.config.flowingId) {
@@ -103,8 +107,8 @@ class FluidBehaviour implements BlockBehaviour {
       ctx.world.setBlock(x, y, z, this.config.flowingId, {
         metadata,
         reason: 'neighbour',
-        notifyNeighbours: true,
-        updateLighting: true,
+        notifyNeighbours: false,
+        updateLighting: false,
       });
       ctx.world.scheduleBlockTick(x, y, z, this.config.flowingId, this.config.tickDelay);
     } else {
@@ -115,6 +119,26 @@ class FluidBehaviour implements BlockBehaviour {
   public scheduledTick(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void {
     if (blockId !== this.config.flowingId) return;
     this.updateFlow(ctx, x, y, z);
+  }
+
+  public randomTick(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void {
+    if (!this.stationary || this.config !== LAVA || ctx.events === undefined) return;
+    const metadata = ctx.world.getBlockMetadata(x, y, z);
+    const candidateX = x;
+    const candidateY = y + 1;
+    const candidateZ = z;
+    const randomValue = (x * 734287 + y * 912271 + z * 438289 + ctx.gameTick * 31) >>> 0;
+    if (ctx.world.getBlock(candidateX, candidateY, candidateZ) === BlockIds.Air && this.hasIgnitionNeighbour(ctx, candidateX, candidateY, candidateZ)) {
+      ctx.events.enqueueLavaIgnitionAttempt(ctx.gameTick, x, y, z, candidateX, candidateY, candidateZ, blockId, metadata, randomValue);
+    }
+  }
+
+  private hasIgnitionNeighbour(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+    for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,0,1],[0,0,-1],[0,-1,0],[0,1,0]] as const) {
+      const id = ctx.world.getBlock(x + dx, y + dy, z + dz);
+      if (id !== BlockIds.Air && !isWater(id) && !isLava(id)) return true;
+    }
+    return false;
   }
 
   private updateFlow(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
@@ -157,10 +181,10 @@ class FluidBehaviour implements BlockBehaviour {
         ctx.world.setBlockMetadata(x, y, z, level, { affectsMesh: true, affectsWeather: false, affectsLight: false });
         ctx.world.scheduleBlockTick(x, y, z, this.config.flowingId, this.config.tickDelay);
       } else if (shouldBecomeStill) {
-        ctx.world.setBlock(x, y, z, this.config.stillId, { metadata: level, reason: 'scheduled', notifyNeighbours: true, updateLighting: true });
+        ctx.world.setBlock(x, y, z, this.config.stillId, { metadata: level, reason: 'scheduled', notifyNeighbours: false, updateLighting: false });
       }
     } else {
-      ctx.world.setBlock(x, y, z, this.config.stillId, { metadata: level, reason: 'scheduled', notifyNeighbours: true, updateLighting: true });
+      ctx.world.setBlock(x, y, z, this.config.stillId, { metadata: level, reason: 'scheduled', notifyNeighbours: false, updateLighting: false });
     }
 
     if (canFlowInto(ctx, x, y - 1, z, this.config)) {

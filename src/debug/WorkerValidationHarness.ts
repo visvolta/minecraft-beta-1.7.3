@@ -113,6 +113,8 @@ export class WorkerValidationHarness {
       ['skyLightLevel', expected.getAttribute('skyLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.skyLightLevels), 0],
       ['blockLightLevel', expected.getAttribute('blockLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.blockLightLevels), 0],
       ['aoFactorScalar', expected.getAttribute('aoFactorScalar')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.aoFactorScalars), 1e-5],
+      ['fluidTextureKind', expected.getAttribute('fluidTextureKind')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.fluidTextureKinds), 0],
+      ['fluidFrameUv', expected.getAttribute('fluidFrameUv')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.fluidFrameUvs), 1e-6],
     ];
     for (const [name, a, b, epsilon] of checks) {
       if (a.length !== b.length) return `${label}.${name} length mismatch ${a.length} !== ${b.length}`;

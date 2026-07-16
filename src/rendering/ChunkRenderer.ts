@@ -7,6 +7,7 @@ import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { TextureAtlas } from '../assets/TextureAtlas';
 import { ChunkMeshingQueue, type ChunkMeshQueueStats, type ChunkMeshGeometrySet } from './meshing/ChunkMeshingQueue';
 import { getLightBrightness, TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
+import type { FluidAnimationSystem } from './fluid/FluidAnimationSystem';
 
 /** Max dirty chunk meshes rebuilt in a single frame. */
 export const MESH_REBUILD_BUDGET = 4;
@@ -101,6 +102,71 @@ function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
   material.needsUpdate = true;
 }
 
+function attachFluidAnimationShader(material: THREE.MeshBasicMaterial, fluidAnimationSystem: FluidAnimationSystem): void {
+  const previous = material.onBeforeCompile;
+  const uniforms = {
+    uWaterStillTexture: { value: fluidAnimationSystem.waterStillTexture },
+    uWaterFlowTexture: { value: fluidAnimationSystem.waterFlowTexture },
+    uLavaStillTexture: { value: fluidAnimationSystem.lavaStillTexture },
+    uLavaFlowTexture: { value: fluidAnimationSystem.lavaFlowTexture },
+    uWaterStillFrame: { value: 0 },
+    uWaterFlowFrame: { value: 0 },
+    uLavaStillFrame: { value: 0 },
+    uLavaFlowFrame: { value: 0 },
+    uWaterStillFrameCount: { value: fluidAnimationSystem.waterStillDescriptor.frameCount },
+    uWaterFlowFrameCount: { value: fluidAnimationSystem.waterFlowDescriptor.frameCount },
+    uLavaStillFrameCount: { value: fluidAnimationSystem.lavaStillDescriptor.frameCount },
+    uLavaFlowFrameCount: { value: fluidAnimationSystem.lavaFlowDescriptor.frameCount },
+  };
+  material.userData.fluidAnimationUniforms = uniforms;
+  material.onBeforeCompile = (shader): void => {
+    previous.call(material, shader, null as never);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute float fluidTextureKind;
+        attribute vec2 fluidFrameUv;
+        varying float vFluidTextureKind;
+        varying vec2 vFluidFrameUv;`)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+        vFluidTextureKind = fluidTextureKind;
+        vFluidFrameUv = fluidFrameUv;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying float vFluidTextureKind;
+        varying vec2 vFluidFrameUv;
+        uniform sampler2D uWaterStillTexture;
+        uniform sampler2D uWaterFlowTexture;
+        uniform sampler2D uLavaStillTexture;
+        uniform sampler2D uLavaFlowTexture;
+        uniform float uWaterStillFrame;
+        uniform float uWaterFlowFrame;
+        uniform float uLavaStillFrame;
+        uniform float uLavaFlowFrame;
+        uniform float uWaterStillFrameCount;
+        uniform float uWaterFlowFrameCount;
+        uniform float uLavaStillFrameCount;
+        uniform float uLavaFlowFrameCount;
+        vec2 fluidFrameUv(vec2 uv, float frame, float frameCount) {
+          return vec2(uv.x, (uv.y + frame) / frameCount);
+        }`)
+      .replace('#include <map_fragment>', `#ifdef USE_MAP
+          vec4 sampledDiffuseColor;
+          if (vFluidTextureKind < 0.5) {
+            sampledDiffuseColor = texture2D(uWaterStillTexture, fluidFrameUv(vFluidFrameUv, uWaterStillFrame, uWaterStillFrameCount));
+          } else if (vFluidTextureKind < 1.5) {
+            sampledDiffuseColor = texture2D(uWaterFlowTexture, fluidFrameUv(vFluidFrameUv, uWaterFlowFrame, uWaterFlowFrameCount));
+          } else if (vFluidTextureKind < 2.5) {
+            sampledDiffuseColor = texture2D(uLavaStillTexture, fluidFrameUv(vFluidFrameUv, uLavaStillFrame, uLavaStillFrameCount));
+          } else {
+            sampledDiffuseColor = texture2D(uLavaFlowTexture, fluidFrameUv(vFluidFrameUv, uLavaFlowFrame, uLavaFlowFrameCount));
+          }
+          diffuseColor *= sampledDiffuseColor;
+        #endif`);
+  };
+  material.needsUpdate = true;
+}
+
 /** Owns Three.js chunk meshes and their shared materials. */
 export class ChunkRenderer {
   private readonly chunkManager: ChunkManager;
@@ -116,6 +182,7 @@ export class ChunkRenderer {
   private readonly fluidMeshes = new Map<string, THREE.Mesh>();
   private readonly cutoutMeshes = new Map<string, THREE.Mesh>();
   private readonly atlas: TextureAtlas;
+  private readonly fluidAnimationSystem: FluidAnimationSystem;
 
   private rawLightDebugMode = false;
   private ambientOcclusionDebugMode = false;
@@ -128,11 +195,13 @@ export class ChunkRenderer {
     chunkManager: ChunkManager,
     blockRegistry: BlockRegistry,
     atlas: TextureAtlas,
+    fluidAnimationSystem: FluidAnimationSystem,
   ) {
     this.chunkManager = chunkManager;
     this.mesher = new ChunkMesher(chunkManager, blockRegistry, atlas);
     this.meshQueue = new ChunkMeshingQueue(chunkManager, atlas);
     this.atlas = atlas;
+    this.fluidAnimationSystem = fluidAnimationSystem;
 
     this.terrainMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
@@ -148,8 +217,9 @@ export class ChunkRenderer {
       side: THREE.DoubleSide,
     });
     attachHeightAwareFog(this.fluidMaterial);
+    attachFluidAnimationShader(this.fluidMaterial, this.fluidAnimationSystem);
 
-    this.cutoutMaterial = new THREE.MeshBasicMaterial({
+    this.cutoutMaterial = new THREE.MeshBasicMaterial({ 
       map: atlas.texture,
       vertexColors: true,
       alphaTest: 0.5,
@@ -183,6 +253,7 @@ export class ChunkRenderer {
 
   public update(recentFrameTimeMs = 0, cameraWorldX = 0, cameraWorldZ = 0): void {
     this.meshUploadsThisFrame = 0;
+    this.updateFluidAnimationUniforms();
 
     if (this.meshQueue.isWorkerEnabled()) {
       for (const chunk of this.chunkManager) {
@@ -337,6 +408,17 @@ export class ChunkRenderer {
     return this.meshQueue.getStats();
   }
 
+  public getChunkMeshState(chunkX: number, chunkZ: number): unknown {
+    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+    return {
+      blockRevision: chunk?.getBlockRevision() ?? null,
+      metadataRevision: chunk?.getMetadataRevision() ?? null,
+      lightRevision: chunk?.getLightRevision() ?? null,
+      meshRevision: chunk?.getRevision() ?? null,
+      queue: this.meshQueue.getChunkState(chunkX, chunkZ),
+    };
+  }
+
   public getApproximateGeometryMemoryBytes(): number {
     let total = 0;
     const addGeometry = (geometry: THREE.BufferGeometry): void => {
@@ -364,13 +446,68 @@ export class ChunkRenderer {
     }
 
     const key = this.key(result.chunkX, result.chunkZ);
+    if (!this.validateGeometrySet(result)) {
+      result.terrain.dispose();
+      result.fluid.dispose();
+      result.cutout.dispose();
+      return;
+    }
     this.applyColorModeToGeometry(result.terrain);
     this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, result.terrain);
     this.applyColorModeToGeometry(result.fluid);
     this.upsertMesh(this.fluidMeshes, this.fluidGroup, this.fluidMaterial, chunk, key, result.fluid);
     this.applyColorModeToGeometry(result.cutout);
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, result.cutout);
+    this.meshQueue.markUploaded(result.chunkX, result.chunkZ, result.targetRevision);
     chunk.markClean();
+  }
+
+  private validateGeometrySet(result: ChunkMeshGeometrySet): boolean {
+    return this.validateGeometry(result.terrain, false)
+      && this.validateGeometry(result.fluid, true)
+      && this.validateGeometry(result.cutout, false);
+  }
+
+  private validateGeometry(geometry: THREE.BufferGeometry, fluid: boolean): boolean {
+    const position = geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
+    if (position === undefined) return false;
+    const vertexCount = position.count;
+    const required: ReadonlyArray<readonly [string, number]> = [
+      ['normal', 3],
+      ['uv', 2],
+      ['normalColor', 3],
+      ['debugColor', 3],
+      ['aoColor', 3],
+      ['tintColor', 3],
+      ['skyLightLevel', 1],
+      ['blockLightLevel', 1],
+      ['aoFactorScalar', 1],
+    ];
+    for (const [name] of required) {
+      const attr = geometry.getAttribute(name) as THREE.BufferAttribute | undefined;
+      if (attr === undefined || attr.count !== vertexCount) return false;
+    }
+    if (fluid) {
+      const selector = geometry.getAttribute('fluidTextureKind') as THREE.BufferAttribute | undefined;
+      const frameUv = geometry.getAttribute('fluidFrameUv') as THREE.BufferAttribute | undefined;
+      if (selector === undefined || selector.count !== vertexCount) return false;
+      if (frameUv === undefined || frameUv.count !== vertexCount) return false;
+    }
+    for (const attr of Object.values(geometry.attributes)) {
+      const array = attr.array as ArrayLike<number>;
+      for (let i = 0; i < array.length; i++) {
+        if (!Number.isFinite(array[i])) return false;
+      }
+    }
+    const index = geometry.getIndex();
+    if (index !== null) {
+      const array = index.array as ArrayLike<number>;
+      for (let i = 0; i < array.length; i++) {
+        const value = array[i]!;
+        if (!Number.isFinite(value) || value < 0 || value >= vertexCount) return false;
+      }
+    }
+    return true;
   }
 
   private rebuildChunk(chunk: Chunk): void {
@@ -389,6 +526,26 @@ export class ChunkRenderer {
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, cutoutGeometry);
 
     chunk.markClean();
+  }
+
+  private updateFluidAnimationUniforms(): void {
+    const uniforms = this.fluidMaterial.userData.fluidAnimationUniforms as {
+      uWaterStillTexture: { value: THREE.Texture };
+      uWaterFlowTexture: { value: THREE.Texture };
+      uLavaStillTexture: { value: THREE.Texture };
+      uLavaFlowTexture: { value: THREE.Texture };
+      uWaterStillFrame: { value: number };
+      uWaterFlowFrame: { value: number };
+      uLavaStillFrame: { value: number };
+      uLavaFlowFrame: { value: number };
+      uWaterStillFrameCount: { value: number };
+      uWaterFlowFrameCount: { value: number };
+      uLavaStillFrameCount: { value: number };
+      uLavaFlowFrameCount: { value: number };
+    } | undefined;
+    if (uniforms !== undefined) {
+      this.fluidAnimationSystem.applyUniforms(uniforms);
+    }
   }
 
   private updateDynamicLightingUniforms(): void {

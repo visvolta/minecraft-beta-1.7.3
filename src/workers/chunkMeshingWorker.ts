@@ -50,6 +50,8 @@ function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
     skyLightLevels: attributeBuffer(geometry, 'skyLightLevel'),
     blockLightLevels: attributeBuffer(geometry, 'blockLightLevel'),
     aoFactorScalars: attributeBuffer(geometry, 'aoFactorScalar'),
+    fluidTextureKinds: attributeBuffer(geometry, 'fluidTextureKind'),
+    fluidFrameUvs: attributeBuffer(geometry, 'fluidFrameUv'),
     indices: indices.buffer as ArrayBuffer,
     vertexCount: position?.count ?? 0,
     indexCount: index?.count ?? 0,
@@ -70,6 +72,8 @@ function transferList(result: ChunkMeshResult): Transferable[] {
       mesh.skyLightLevels,
       mesh.blockLightLevels,
       mesh.aoFactorScalars,
+      mesh.fluidTextureKinds,
+      mesh.fluidFrameUvs,
       mesh.indices,
     );
   }

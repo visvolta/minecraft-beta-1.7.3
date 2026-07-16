@@ -6,6 +6,7 @@ import type { BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBeha
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from '../chunkConstants';
 import { worldToChunkLocal } from '../worldToChunkCoords';
 import { RandomTickScheduler, type RandomTickMetrics } from './RandomTickScheduler';
+import type { WorldEventQueue } from '../events/WorldEventQueue';
 import { ScheduledTickQueue, type ScheduledTickEntry } from './ScheduledTickQueue';
 
 export interface TickSchedulerMetrics {
@@ -55,6 +56,7 @@ export class WorldTickScheduler {
     private readonly updateWorld: BlockUpdateWorld,
     private readonly behaviours: BlockBehaviourRegistry,
     private readonly randomTicks: RandomTickScheduler,
+    private readonly events?: WorldEventQueue,
   ) {
     this.metrics = this.emptyMetrics(randomTicks.getMetrics());
     this.chunkManager.addRemoveListener((chunk) => this.detachChunkTicks(chunk));
@@ -97,7 +99,9 @@ export class WorldTickScheduler {
 
   private tickOnce(): void {
     const start = performance.now();
-    const ctx: BlockBehaviourContext = { world: this.updateWorld, gameTick: this.gameTick };
+    const ctx: BlockBehaviourContext = this.events === undefined
+      ? { world: this.updateWorld, gameTick: this.gameTick }
+      : { world: this.updateWorld, gameTick: this.gameTick, events: this.events };
     let processedScheduledTicks = 0;
     let skippedStaleTicks = 0;
 
