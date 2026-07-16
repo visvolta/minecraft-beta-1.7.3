@@ -46,6 +46,8 @@ export class Chunk {
   private readonly blocks: Uint8Array;
   private readonly light: Uint8Array;
   private dirty: boolean;
+  private revision = 0;
+  private weatherRevision = 0;
 
   /**
    * Cached per-column height: for each (localX, localZ), one past the
@@ -83,6 +85,22 @@ export class Chunk {
 
   public markDirty(): void {
     this.dirty = true;
+    this.revision += 1;
+  }
+
+  public getRevision(): number {
+    return this.revision;
+  }
+
+  public getWeatherRevision(): number {
+    return this.weatherRevision;
+  }
+
+  private markBlockDataChanged(): void {
+    this.heightmap = undefined;
+    this.precipitationHeightmap = undefined;
+    this.weatherRevision += 1;
+    this.markDirty();
   }
 
   public markClean(): void {
@@ -125,7 +143,7 @@ export class Chunk {
     }
     const idx = this.index(localX, localY, localZ);
     this.light[idx] = (this.light[idx]! & 0xF0) | (value & 0x0F);
-    this.dirty = true;
+    this.markDirty();
   }
 
   public getBlocklight(localX: number, localY: number, localZ: number): number {
@@ -141,7 +159,7 @@ export class Chunk {
     }
     const idx = this.index(localX, localY, localZ);
     this.light[idx] = (this.light[idx]! & 0x0F) | ((value & 0x0F) << 4);
-    this.dirty = true;
+    this.markDirty();
   }
 
   /**
@@ -173,9 +191,7 @@ export class Chunk {
     }
 
     this.blocks[i] = blockId;
-    this.heightmap = undefined;
-    this.precipitationHeightmap = undefined;
-    this.dirty = true;
+    this.markBlockDataChanged();
   }
 
   /**
@@ -199,9 +215,7 @@ export class Chunk {
     }
 
     if (changed) {
-      this.heightmap = undefined;
-      this.precipitationHeightmap = undefined;
-      this.dirty = true;
+      this.markBlockDataChanged();
     }
   }
 
@@ -233,9 +247,7 @@ export class Chunk {
     }
 
     if (changed) {
-      this.heightmap = undefined;
-      this.precipitationHeightmap = undefined;
-      this.dirty = true;
+      this.markBlockDataChanged();
     }
   }
 
@@ -255,10 +267,23 @@ export class Chunk {
     }
 
     this.blocks.set(data);
-    this.dirty = true;
-    // Any previously cached heightmaps are now stale; recomputed lazily.
-    this.heightmap = undefined;
-    this.precipitationHeightmap = undefined;
+    this.markBlockDataChanged();
+  }
+
+  public copyBlocks(): Uint8Array {
+    return new Uint8Array(this.blocks);
+  }
+
+  public copyLight(): Uint8Array {
+    return new Uint8Array(this.light);
+  }
+
+  public loadLightData(data: Uint8Array): void {
+    if (data.length !== CHUNK_VOLUME) {
+      throw new RangeError(`Light array length ${data.length} does not match chunk volume ${CHUNK_VOLUME}.`);
+    }
+    this.light.set(data);
+    this.markDirty();
   }
 
   /**

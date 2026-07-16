@@ -5,6 +5,8 @@ import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from '../world/chunkConstants';
 import { ChunkMesher } from './ChunkMesher';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { TextureAtlas } from '../assets/TextureAtlas';
+import { ChunkMeshingQueue, type ChunkMeshQueueStats, type ChunkMeshGeometrySet } from './meshing/ChunkMeshingQueue';
+import { getLightBrightness, TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
 
 /** Max dirty chunk meshes rebuilt in a single frame. */
 export const MESH_REBUILD_BUDGET = 4;
@@ -53,40 +55,57 @@ export const FOG_HEIGHT_END = 96;
  * final `mix()`.
  */
 function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
-  // Focused bug-fix pass: Beta terrain fog is vertically complete. The
-  // previous height taper removed fog from high terrain, exposing the
-  // chunk boundary from mountains or no-clip altitude. Keep Three's stock
-  // fog shader untouched so distant terrain always fades fully into the
-  // shared horizon/fog colour at every world Y.
+  const uniforms = {
+    uSkylightSubtracted: { value: 0 },
+    uSunBrightnessFactor: { value: 1 },
+    uTextureMinBrightness: { value: TEXTURE_MIN_BRIGHTNESS },
+    uDynamicLightingEnabled: { value: 1 },
+  };
+  material.userData.dynamicLightingUniforms = uniforms;
+  material.onBeforeCompile = (shader): void => {
+    shader.uniforms.uSkylightSubtracted = uniforms.uSkylightSubtracted;
+    shader.uniforms.uSunBrightnessFactor = uniforms.uSunBrightnessFactor;
+    shader.uniforms.uTextureMinBrightness = uniforms.uTextureMinBrightness;
+    shader.uniforms.uDynamicLightingEnabled = uniforms.uDynamicLightingEnabled;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        attribute vec3 tintColor;
+        attribute float skyLightLevel;
+        attribute float blockLightLevel;
+        attribute float aoFactorScalar;
+        uniform float uSkylightSubtracted;
+        uniform float uSunBrightnessFactor;
+        uniform float uTextureMinBrightness;
+        uniform float uDynamicLightingEnabled;
+        float betaLightBrightness(float lightLevel) {
+          float clamped = clamp(lightLevel, 0.0, 15.0);
+          float darkness = 1.0 - clamped / 15.0;
+          return (1.0 - darkness) / (darkness * 3.0 + 1.0);
+        }`,
+      )
+      .replace(
+        '#include <color_vertex>',
+        `#include <color_vertex>
+        if (uDynamicLightingEnabled > 0.5) {
+          float effectiveSky = max(0.0, skyLightLevel - uSkylightSubtracted);
+          float skyBrightness = betaLightBrightness(effectiveSky) * uSunBrightnessFactor;
+          float blockBrightness = betaLightBrightness(blockLightLevel);
+          float brightness = max(skyBrightness, blockBrightness);
+          float visibility = max(brightness, uTextureMinBrightness) * aoFactorScalar;
+          vColor.xyz = tintColor * visibility;
+        }`,
+      );
+  };
   material.needsUpdate = true;
 }
-
-/**
- * Beta 1.7.3 voxel brightness curve (Chunk.getLightBrightnessTable).
- * See ChunkMesher.ts for the identical Beta-verbatim justification.
- * The voxel-lighting pipeline itself has no floor.
- */
-function getLightBrightness(lightLevel: number): number {
-  const clamped = THREE.MathUtils.clamp(lightLevel, 0, 15);
-  const darkness = 1 - clamped / 15;
-  return (1 - darkness) / (darkness * 3 + 1);
-}
-
-/**
- * Stage 16E minimum-visibility floor for the LIGHT MULTIPLIER only.
- * Must stay in sync with the constant in ChunkMesher.ts; both the initial
- * bake there and the dynamic recompute here apply the same floor to the
- * light multiplier BEFORE multiplying by AO — so occluded corners still
- * render darker than exposed surfaces at night. See ChunkMesher.ts's
- * extended comment for the full rationale (root-cause fix of the
- * Stage 16D "flat AO at night" bug).
- */
-const TEXTURE_MIN_BRIGHTNESS = 0.015;
 
 /** Owns Three.js chunk meshes and their shared materials. */
 export class ChunkRenderer {
   private readonly chunkManager: ChunkManager;
   private readonly mesher: ChunkMesher;
+  private readonly meshQueue: ChunkMeshingQueue;
   private readonly terrainGroup: THREE.Group;
   private readonly fluidGroup: THREE.Group;
   private readonly cutoutGroup: THREE.Group;
@@ -102,6 +121,7 @@ export class ChunkRenderer {
   private ambientOcclusionDebugMode = false;
   private skylightSubtracted = 0;
   private sunBrightnessFactor = 1;
+  private meshUploadsThisFrame = 0;
 
   public constructor(
     scene: THREE.Scene,
@@ -111,6 +131,7 @@ export class ChunkRenderer {
   ) {
     this.chunkManager = chunkManager;
     this.mesher = new ChunkMesher(chunkManager, blockRegistry, atlas);
+    this.meshQueue = new ChunkMeshingQueue(chunkManager, atlas);
     this.atlas = atlas;
 
     this.terrainMaterial = new THREE.MeshBasicMaterial({
@@ -160,10 +181,31 @@ export class ChunkRenderer {
     scene.add(this.cutoutGroup);
   }
 
-  public update(): void {
+  public update(recentFrameTimeMs = 0, cameraWorldX = 0, cameraWorldZ = 0): void {
+    this.meshUploadsThisFrame = 0;
+
+    if (this.meshQueue.isWorkerEnabled()) {
+      for (const chunk of this.chunkManager) {
+        if (!chunk.isDirty()) continue;
+        const cameraChunkX = Math.floor(cameraWorldX / CHUNK_SIZE_X);
+        const cameraChunkZ = Math.floor(cameraWorldZ / CHUNK_SIZE_Z);
+        const dx = chunk.chunkX - cameraChunkX;
+        const dz = chunk.chunkZ - cameraChunkZ;
+        const priority = dx * dx + dz * dz;
+        this.meshQueue.enqueue(chunk, priority);
+      }
+      this.meshQueue.process();
+      const healthyFrame = recentFrameTimeMs <= 18;
+      const maxUploads = healthyFrame ? 2 : 1;
+      const maxUploadMs = healthyFrame ? 4 : 2;
+      for (const result of this.meshQueue.takeUpload(maxUploads, maxUploadMs)) {
+        this.applyMeshResult(result);
+      }
+      return;
+    }
+
     let rebuilt = 0;
-    const dirtyCount = this.chunkManager.countDirtyChunks();
-    const budget = dirtyCount > 10 ? 32 : MESH_REBUILD_BUDGET;
+    const budget = MESH_REBUILD_BUDGET;
 
     for (const chunk of this.chunkManager) {
       if (!chunk.isDirty()) {
@@ -217,9 +259,7 @@ export class ChunkRenderer {
     }
 
     this.skylightSubtracted = clamped;
-    if (!this.ambientOcclusionDebugMode) {
-      this.updateDynamicColorsOnAllMeshes();
-    }
+    this.updateDynamicLightingUniforms();
   }
 
   public setSunBrightnessFactor(value: number): void {
@@ -229,9 +269,7 @@ export class ChunkRenderer {
     }
 
     this.sunBrightnessFactor = clamped;
-    if (!this.ambientOcclusionDebugMode) {
-      this.updateDynamicColorsOnAllMeshes();
-    }
+    this.updateDynamicLightingUniforms();
   }
 
   public removeChunkMesh(chunkX: number, chunkZ: number): void {
@@ -260,6 +298,7 @@ export class ChunkRenderer {
   }
 
   public dispose(): void {
+    this.meshQueue.dispose();
     for (const mesh of this.terrainMeshes.values()) {
       this.terrainGroup.remove(mesh);
       mesh.geometry.dispose();
@@ -290,6 +329,50 @@ export class ChunkRenderer {
     return this.terrainMeshes.size + this.fluidMeshes.size + this.cutoutMeshes.size;
   }
 
+  public getMeshUploadsThisFrame(): number {
+    return this.meshUploadsThisFrame;
+  }
+
+  public getMeshingStats(): ChunkMeshQueueStats {
+    return this.meshQueue.getStats();
+  }
+
+  public getApproximateGeometryMemoryBytes(): number {
+    let total = 0;
+    const addGeometry = (geometry: THREE.BufferGeometry): void => {
+      for (const attribute of Object.values(geometry.attributes)) {
+        total += attribute.array.byteLength;
+      }
+      const index = geometry.getIndex();
+      if (index !== null) {
+        total += index.array.byteLength;
+      }
+    };
+    for (const mesh of this.terrainMeshes.values()) addGeometry(mesh.geometry);
+    for (const mesh of this.fluidMeshes.values()) addGeometry(mesh.geometry);
+    for (const mesh of this.cutoutMeshes.values()) addGeometry(mesh.geometry);
+    return total;
+  }
+
+  private applyMeshResult(result: ChunkMeshGeometrySet): void {
+    const chunk = this.chunkManager.getChunk(result.chunkX, result.chunkZ);
+    if (chunk === undefined || chunk.getRevision() !== result.targetRevision) {
+      result.terrain.dispose();
+      result.fluid.dispose();
+      result.cutout.dispose();
+      return;
+    }
+
+    const key = this.key(result.chunkX, result.chunkZ);
+    this.applyColorModeToGeometry(result.terrain);
+    this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, result.terrain);
+    this.applyColorModeToGeometry(result.fluid);
+    this.upsertMesh(this.fluidMeshes, this.fluidGroup, this.fluidMaterial, chunk, key, result.fluid);
+    this.applyColorModeToGeometry(result.cutout);
+    this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, result.cutout);
+    chunk.markClean();
+  }
+
   private rebuildChunk(chunk: Chunk): void {
     const key = this.key(chunk.chunkX, chunk.chunkZ);
 
@@ -306,6 +389,22 @@ export class ChunkRenderer {
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, cutoutGeometry);
 
     chunk.markClean();
+  }
+
+  private updateDynamicLightingUniforms(): void {
+    for (const material of [this.terrainMaterial, this.fluidMaterial, this.cutoutMaterial]) {
+      const uniforms = material.userData.dynamicLightingUniforms as {
+        uSkylightSubtracted: { value: number };
+        uSunBrightnessFactor: { value: number };
+        uTextureMinBrightness: { value: number };
+        uDynamicLightingEnabled: { value: number };
+      } | undefined;
+      if (uniforms === undefined) continue;
+      uniforms.uSkylightSubtracted.value = this.skylightSubtracted;
+      uniforms.uSunBrightnessFactor.value = this.sunBrightnessFactor;
+      uniforms.uTextureMinBrightness.value = TEXTURE_MIN_BRIGHTNESS;
+      uniforms.uDynamicLightingEnabled.value = this.rawLightDebugMode || this.ambientOcclusionDebugMode ? 0 : 1;
+    }
   }
 
   private applyDebugModeToAllMeshes(): void {
@@ -426,6 +525,7 @@ export class ChunkRenderer {
       this.cutoutMaterial.map = this.atlas.texture;
     }
 
+    this.updateDynamicLightingUniforms();
     this.terrainMaterial.needsUpdate = true;
     this.fluidMaterial.needsUpdate = true;
     this.cutoutMaterial.needsUpdate = true;
@@ -444,9 +544,11 @@ export class ChunkRenderer {
     if (existing !== undefined) {
       existing.geometry.dispose();
       existing.geometry = geometry;
+      this.meshUploadsThisFrame += 1;
       return;
     }
 
+    this.meshUploadsThisFrame += 1;
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(chunk.chunkX * CHUNK_SIZE_X, 0, chunk.chunkZ * CHUNK_SIZE_Z);
     mesh.name = `chunk_${key}`;

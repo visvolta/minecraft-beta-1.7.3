@@ -8,6 +8,9 @@
 export interface DebugStats {
   readonly fps: number;
   readonly frameTimeMs: number;
+  readonly worstFrameTimeMs: number;
+  readonly updateTimeMs: number;
+  readonly renderTimeMs: number;
 
   readonly playerX: number;
   readonly playerY: number;
@@ -27,6 +30,14 @@ export interface DebugStats {
   readonly triangleCount: number;
   readonly drawCalls: number;
   readonly dirtyChunkQueueSize: number;
+  readonly chunkGenerationQueueSize: number;
+  readonly oldestCriticalGenerationAgeMs: number;
+  readonly chunkMeshingQueueSize: number;
+  readonly activeWorkerCount: number;
+  readonly completedWorkerJobs: number;
+  readonly staleWorkerJobs: number;
+  readonly meshUploadsThisFrame: number;
+  readonly approximateGeometryMemoryMb: number;
 
   readonly fogMode: string;
   readonly fogNear: number;
@@ -77,6 +88,9 @@ export interface DebugStats {
   readonly thunderTime: number;
   readonly precipitationRain: number;
   readonly precipitationSnow: number;
+  readonly precipitationBuildMs: number;
+  readonly precipitationUpdateMs: number;
+  readonly precipitationVertices: number;
   readonly splashActive: number;
   readonly lightningActive: number;
   readonly lightningFlash: number;

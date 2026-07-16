@@ -27,6 +27,8 @@ import { buildAtmosphericState, previewWeatherFade } from '../rendering/Atmosphe
 import { DebugController } from '../debug/DebugController';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import { DebugStatsCollector } from '../debug/DebugStatsCollector';
+import { PerformanceProfiler } from '../debug/PerformanceProfiler';
+import { WorkerValidationHarness } from '../debug/WorkerValidationHarness';
 import type { IUpdatable } from './IUpdatable';
 
 /** Maximum delta (seconds) applied in one frame after tab focus / hitch. */
@@ -93,6 +95,7 @@ export class Engine {
   private readonly debugOverlay: DebugOverlay;
   private readonly debugController: DebugController;
   private readonly debugStatsCollector: DebugStatsCollector;
+  private readonly performanceProfiler = new PerformanceProfiler();
   private noClipEnabled = false;
   private rawLightDebugMode = false;
   private ambientOcclusionDebugMode = false;
@@ -169,6 +172,7 @@ export class Engine {
       this.worldGenerator,
       this.chunkRenderer,
       this.lightEngine,
+      WORLD_SEED,
     );
 
     this.debugOverlay = new DebugOverlay();
@@ -191,7 +195,14 @@ export class Engine {
       this.renderer.renderer,
       WORLD_SEED,
       this.worldTime,
+      this.performanceProfiler,
     );
+
+    const validationHarness = new WorkerValidationHarness(WORLD_SEED, this.atlas);
+    (window as unknown as { __mcDebug?: Record<string, unknown> }).__mcDebug = {
+      validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
+      validateMeshWorkers: () => validationHarness.validateMeshWorker(),
+    };
   }
 
   /**
@@ -243,6 +254,7 @@ export class Engine {
     this.input.stop();
     this.debugOverlay.dispose();
     this.blockHighlight.dispose();
+    this.chunkStreamer.dispose();
     this.lightningRenderer.dispose();
     this.rainSplashRenderer.dispose();
     this.precipitationRenderer.dispose();
@@ -279,6 +291,8 @@ export class Engine {
    */
   private tick = (timeMs: number): void => {
     this.animationFrameId = requestAnimationFrame(this.tick);
+    this.performanceProfiler.beginFrame();
+    this.performanceProfiler.beginUpdate();
 
     const deltaSeconds =
       this.lastFrameTimeMs === null
@@ -440,14 +454,40 @@ export class Engine {
     );
 
     // 9. Stream chunks around the player
-    this.chunkStreamer.update(camera.position.x, camera.position.z);
+    const preStreamMeshingStats = this.chunkRenderer.getMeshingStats();
+    this.chunkStreamer.update(
+      camera.position.x,
+      camera.position.z,
+      this.cameraController.getYaw(),
+      this.player.velocity.x,
+      this.player.velocity.z,
+      preStreamMeshingStats.queued,
+      preStreamMeshingStats.pendingUploads,
+    );
+    const generationStats = this.chunkStreamer.getGenerationStats();
+    const meshingStats = this.chunkRenderer.getMeshingStats();
+    this.performanceProfiler.setQueues(
+      generationStats.queued,
+      meshingStats.queued + meshingStats.pendingUploads,
+      generationStats.activeWorkers + meshingStats.activeWorkers,
+      generationStats.oldestCriticalAgeMs,
+    );
+    this.performanceProfiler.setWorkerCounters(
+      generationStats.completed,
+      generationStats.stale,
+      generationStats.errors,
+    );
 
     // 10. Update interaction (raycast targeting + break/place edits)
     this.interactionController.update();
 
     // 11. Rebuild dirty chunk meshes (budgeted, terrain + water together);
     // picks up this frame's edits
-    this.chunkRenderer.update();
+    this.chunkRenderer.update(
+      this.performanceProfiler.getSnapshot().frameTimeMs,
+      camera.position.x,
+      camera.position.z,
+    );
 
     // 11b. Stage 18: precipitation, splash particles, lightning.
     //      Precipitation depends on chunk heightmaps having been
@@ -508,9 +548,18 @@ export class Engine {
       system.update(deltaSeconds);
     }
 
+    this.performanceProfiler.recordMeshUpload(this.chunkRenderer.getMeshUploadsThisFrame());
+    this.performanceProfiler.setApproximateGeometryMemoryMb(
+      this.chunkRenderer.getApproximateGeometryMemoryBytes() / (1024 * 1024),
+    );
+    this.performanceProfiler.endUpdate();
+
     // 15. Render terrain + water (both drawn in the one WebGL pass; the
     // debug overlay is a separate plain-HTML element composited by the
     // browser on top, not part of this render call).
+    this.performanceProfiler.beginRender();
     this.renderer.render();
+    this.performanceProfiler.endRender();
+    this.performanceProfiler.endFrame();
   };
 }

@@ -147,6 +147,7 @@ export class PrecipitationRenderer {
   private lastCameraCellZ = Number.NaN;
   private lastRenderRadius = Number.NaN;
   private lastRainOn = false;
+  private readonly sampledWeatherRevisions = new Map<string, number>();
 
   private columns: ColumnInfo[] = [];
   private rainingColumns: ColumnInfo[] = [];
@@ -154,6 +155,10 @@ export class PrecipitationRenderer {
 
   private rainActiveCount = 0;
   private snowActiveCount = 0;
+  private lastBuildMs = 0;
+  private lastUpdateMs = 0;
+  private lastVertexCount = 0;
+  private lastIndexCount = 0;
 
   public constructor(
     scene: THREE.Scene,
@@ -185,7 +190,7 @@ export class PrecipitationRenderer {
       opacity: 1,
       depthTest: true,
       depthWrite: false,
-      fog: false, // precipitation cylinder is tight; fog would flatten it
+      fog: true,
       side: THREE.DoubleSide,
       blending: THREE.NormalBlending,
       vertexColors: true,
@@ -197,7 +202,7 @@ export class PrecipitationRenderer {
       opacity: 1,
       depthTest: true,
       depthWrite: false,
-      fog: false,
+      fog: true,
       side: THREE.DoubleSide,
       blending: THREE.NormalBlending,
       vertexColors: true,
@@ -228,20 +233,20 @@ export class PrecipitationRenderer {
     _worldTime: WorldTime,
   ): void {
     void _worldTime; // future: could drive lightning-flicker sync if needed
+    const updateStart = performance.now();
     this.scrollT += deltaSeconds;
 
     const rainOn = atmos.rainStrength > 0.001;
     if (!rainOn) {
       this.rainMesh.visible = false;
       this.snowMesh.visible = false;
+      this.lastUpdateMs = performance.now() - updateStart;
       return;
     }
 
-    // Rebuild geometry only when the camera crosses a cell boundary
-    // (X, Z, OR Y — Stage 18B fix so precipitation follows vertical
-    // movement, including jumps and F6 no-clip flight), or when
-    // transitioning into/out of rain, or when a visible chunk becomes
-    // dirty.
+    // Rebuild geometry only when the camera crosses a cell boundary,
+    // vertical storm band changes, rain toggles, or sampled weather-blocking
+    // height data changes. Mesh dirty state alone must not trigger rain rebuilds.
     const cx = Math.floor(cameraX);
     const cy = Math.floor(cameraY);
     const cz = Math.floor(cameraZ);
@@ -287,6 +292,7 @@ export class PrecipitationRenderer {
 
     this.rainMesh.visible = this.rainActiveCount > 0;
     this.snowMesh.visible = this.snowActiveCount > 0;
+    this.lastUpdateMs = performance.now() - updateStart;
   }
 
   /** Splash renderer needs to know where rain actually lands. */
@@ -294,11 +300,15 @@ export class PrecipitationRenderer {
     return this.rainingColumns;
   }
 
-  public getStats(): { rain: number; snow: number; total: number } {
+  public getStats(): { rain: number; snow: number; total: number; buildMs: number; updateMs: number; vertices: number; indices: number } {
     return {
       rain: this.rainActiveCount,
       snow: this.snowActiveCount,
       total: this.columns.length,
+      buildMs: this.lastBuildMs,
+      updateMs: this.lastUpdateMs,
+      vertices: this.lastVertexCount,
+      indices: this.lastIndexCount,
     };
   }
 
@@ -326,6 +336,7 @@ export class PrecipitationRenderer {
     const R = this.getRenderRadius();
     const eyeBlockY = Math.floor(cameraY);
     const columns: ColumnInfo[] = [];
+    this.sampledWeatherRevisions.clear();
 
     // ClimateSampler.sampleRegion returns row-major; we walk +Z outer, +X inner.
     const climates = this.climateSampler.sampleRegion(
@@ -350,7 +361,9 @@ export class PrecipitationRenderer {
         const distZ = dz;
         const distFrac = Math.sqrt(distX * distX + distZ * distZ) / R;
         if (distFrac > 1) continue;
-        const edgeFade = (1 - distFrac * distFrac) * 0.5 + 0.5; // Beta
+        const betaEdgeFade = (1 - distFrac * distFrac) * 0.5 + 0.5;
+        const outerFade = distFrac < 0.85 ? 1 : Math.max(0, (1 - distFrac) / 0.15);
+        const edgeFade = betaEdgeFade * outerFade;
 
         // Top solid block in this column.
         const topY = this.getTopSolidBlockY(wx, wz);
@@ -376,20 +389,13 @@ export class PrecipitationRenderer {
   }
 
   private needsHeightmapResample(): boolean {
-    // Cheap poll: if any of the visible chunks became dirty since last
-    // rebuild, force a resample.
-    const R = this.getRenderRadius();
-    const cx = this.lastCameraCellX;
-    const cz = this.lastCameraCellZ;
-    if (Number.isNaN(cx) || Number.isNaN(cz)) return false;
-    const minChunkX = Math.floor((cx - R) / CHUNK_SIZE_X);
-    const maxChunkX = Math.floor((cx + R) / CHUNK_SIZE_X);
-    const minChunkZ = Math.floor((cz - R) / CHUNK_SIZE_Z);
-    const maxChunkZ = Math.floor((cz + R) / CHUNK_SIZE_Z);
-    for (let cxi = minChunkX; cxi <= maxChunkX; cxi++) {
-      for (let czi = minChunkZ; czi <= maxChunkZ; czi++) {
-        const chunk = this.chunkManager.getChunk(cxi, czi);
-        if (chunk && chunk.isDirty()) return true;
+    for (const [key, revision] of this.sampledWeatherRevisions) {
+      const comma = key.indexOf(',');
+      const chunkX = Number(key.slice(0, comma));
+      const chunkZ = Number(key.slice(comma + 1));
+      const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+      if (chunk === undefined || chunk.getWeatherRevision() !== revision) {
+        return true;
       }
     }
     return false;
@@ -400,6 +406,7 @@ export class PrecipitationRenderer {
     const chunkZ = Math.floor(worldZ / CHUNK_SIZE_Z);
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
     if (chunk === undefined) return CHUNK_SIZE_Y;
+    this.sampledWeatherRevisions.set(`${chunkX},${chunkZ}`, chunk.getWeatherRevision());
     const localX = ((worldX % CHUNK_SIZE_X) + CHUNK_SIZE_X) % CHUNK_SIZE_X;
     const localZ = ((worldZ % CHUNK_SIZE_Z) + CHUNK_SIZE_Z) % CHUNK_SIZE_Z;
     return chunk.getPrecipitationHeight(
@@ -419,6 +426,7 @@ export class PrecipitationRenderer {
     cz: number,
     atmos: AtmosphericState,
   ): void {
+    const buildStart = performance.now();
     // Two orthogonal quads per column, one per material. Emit separate
     // arrays for rain vs snow so we can bind different textures.
     const rain: BuildBuffers = new BuildBuffers();
@@ -492,6 +500,9 @@ export class PrecipitationRenderer {
 
     swapGeometry(this.rainMesh, rain);
     swapGeometry(this.snowMesh, snow);
+    this.lastVertexCount = rain.positions.length / 3 + snow.positions.length / 3;
+    this.lastIndexCount = rain.indices.length + snow.indices.length;
+    this.lastBuildMs = performance.now() - buildStart;
     // First-frame vertex-alpha scale by weather strength.
     this.updateVertexAlphaFromStrength(atmos);
     void cx; void cz;

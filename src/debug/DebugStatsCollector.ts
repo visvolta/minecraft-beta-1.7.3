@@ -15,6 +15,7 @@ import type { WeatherController } from '../world/weather/WeatherController';
 import type { PrecipitationRenderer } from '../rendering/weather/PrecipitationRenderer';
 import type { RainSplashRenderer } from '../rendering/weather/RainSplashRenderer';
 import type { LightningRenderer } from '../rendering/weather/LightningRenderer';
+import type { PerformanceProfiler } from './PerformanceProfiler';
 
 function formatHexColor(hex: number): string {
   return `#${hex.toString(16).padStart(6, '0').toUpperCase()}`;
@@ -35,6 +36,7 @@ export class DebugStatsCollector {
   private readonly worldSeed: bigint;
   private readonly climateSampler: ClimateSampler;
   private readonly worldTime: WorldTime;
+  private readonly performanceProfiler: PerformanceProfiler;
   private readonly frameTimeTracker = new FrameTimeTracker();
 
   public constructor(
@@ -51,6 +53,7 @@ export class DebugStatsCollector {
     threeRenderer: THREE.WebGLRenderer,
     worldSeed: bigint,
     worldTime: WorldTime,
+    performanceProfiler: PerformanceProfiler,
   ) {
     this.player = player;
     this.chunkManager = chunkManager;
@@ -65,6 +68,7 @@ export class DebugStatsCollector {
     this.threeRenderer = threeRenderer;
     this.worldSeed = worldSeed;
     this.worldTime = worldTime;
+    this.performanceProfiler = performanceProfiler;
     this.climateSampler = new ClimateSampler(worldSeed);
   }
 
@@ -110,6 +114,7 @@ export class DebugStatsCollector {
     const fog = this.sceneRenderer.getCurrentFogState();
     const sky = this.skyRenderer.getCurrentState();
     const cloudInfo = this.cloudRenderer.getDebugInfo();
+    const perf = this.performanceProfiler.getSnapshot();
 
     // Stage 18: weather stats.
     const w = this.weatherController.getState();
@@ -129,6 +134,9 @@ export class DebugStatsCollector {
     return {
       fps: this.frameTimeTracker.getFps(),
       frameTimeMs: this.frameTimeTracker.getAverageFrameTimeMs(),
+      worstFrameTimeMs: perf.worstFrameTimeMs,
+      updateTimeMs: perf.updateTimeMs,
+      renderTimeMs: perf.renderTimeMs,
 
       playerX: this.player.position.x,
       playerY: this.player.position.y,
@@ -148,6 +156,14 @@ export class DebugStatsCollector {
       triangleCount: info.render.triangles,
       drawCalls: info.render.calls,
       dirtyChunkQueueSize: this.chunkManager.countDirtyChunks(),
+      chunkGenerationQueueSize: perf.generationQueueSize,
+      oldestCriticalGenerationAgeMs: perf.oldestCriticalGenerationAgeMs,
+      chunkMeshingQueueSize: perf.meshingQueueSize,
+      activeWorkerCount: perf.activeWorkerCount,
+      completedWorkerJobs: perf.completedWorkerJobs,
+      staleWorkerJobs: perf.staleWorkerJobs,
+      meshUploadsThisFrame: perf.meshUploadsThisFrame,
+      approximateGeometryMemoryMb: perf.approximateGeometryMemoryMb,
 
       fogMode: fog.mode,
       fogKind: fog.kind,
@@ -184,6 +200,9 @@ export class DebugStatsCollector {
       thunderTime: weatherStats.thunderTime,
       precipitationRain: precipStats.rain,
       precipitationSnow: precipStats.snow,
+      precipitationBuildMs: precipStats.buildMs,
+      precipitationUpdateMs: precipStats.updateMs,
+      precipitationVertices: precipStats.vertices,
       splashActive: this.rainSplashRenderer.getActiveCount(),
       lightningActive: this.lightningRenderer.getActiveBoltCount(),
       lightningFlash: this.lightningRenderer.getFlashStrength(),

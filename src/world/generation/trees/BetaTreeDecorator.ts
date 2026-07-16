@@ -14,8 +14,8 @@ import { WorldGenLakes } from '../decoration/WorldGenLakes';
 import { WorldGenDungeons } from '../decoration/WorldGenDungeons';
 import { BetaBiomeDecorator } from '../decoration/BetaBiomeDecorator';
 
-/** Matches Beta's `IChunkProvider.a`'s neighbour-reach radius assumption. */
-const NEIGHBOUR_RADIUS = 1;
+/** Replay source chunks far enough for large tree leaves/branches to cross target borders. */
+const NEIGHBOUR_RADIUS = 2;
 
 export class BetaTreeDecorator {
   private readonly worldSeed: bigint;
@@ -44,14 +44,14 @@ export class BetaTreeDecorator {
   /**
    * Decorates `targetBlocks` (the target chunk's own already-generated,
    * already-cave-carved block array — mutated in place) with the complete
-   * decoration sequence, replaying placement from the target chunk and
-   * its immediate neighbours to prevent boundary artifacts.
+   * decoration sequence, replaying placement from every nearby source
+   * chunk whose trees can write into the target chunk.
    */
   public decorate(targetChunkX: number, targetChunkZ: number, targetBlocks: Uint8Array): void {
     const scratch = new ScratchTreeWorld(this.worldSeed, this.terrainGenerator, this.enableCaves);
     scratch.seedTargetChunk(targetChunkX, targetChunkZ, targetBlocks);
 
-    // Decorate the source chunk and its immediate neighbors (radius 1)
+    // Decorate source chunks whose tree/lake/decorator writes can reach this target.
     for (let sourceX = targetChunkX - NEIGHBOUR_RADIUS; sourceX <= targetChunkX + NEIGHBOUR_RADIUS; sourceX++) {
       for (let sourceZ = targetChunkZ - NEIGHBOUR_RADIUS; sourceZ <= targetChunkZ + NEIGHBOUR_RADIUS; sourceZ++) {
         this.decorateSourceChunk(sourceX, sourceZ, scratch);

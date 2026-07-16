@@ -14,6 +14,7 @@ import {
   CHUNK_SIZE_Y,
   CHUNK_SIZE_Z,
 } from '../world/chunkConstants';
+import { clampedVisibility, getLightBrightness } from './voxelLighting';
 
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
@@ -156,61 +157,6 @@ function localCornerToTextureUv(face: FaceDef, corner: Corner): readonly [number
 
   const v = face.dy > 0 ? z : 1 - z;
   return [x, v];
-}
-
-/**
- * Beta 1.7.3 voxel brightness curve (Chunk.getLightBrightnessTable):
- *   float f = 1 - i/15;
- *   brightness = (1 - f) / (f * 3 + 1);
- *
- * Beta itself has NO minimum-brightness floor for the Overworld
- * (WorldProviderSurface.generateLightBrightnessTable passes `f = 0`).
- * Stage 16 removed the earlier `* 0.95 + 0.05` grey floor here so the
- * voxel lighting itself remains truly at 0 for enclosed / midnight cells.
- * `getLightBrightness(0) === 0`, matching Beta exactly.
- */
-function getLightBrightness(lightLevel: number): number {
-  const clamped = THREE.MathUtils.clamp(lightLevel, 0, 15);
-  const darkness = 1 - clamped / 15;
-  return (1 - darkness) / (darkness * 3 + 1);
-}
-
-/**
- * Stage 16E minimum-visibility floor for the LIGHT MULTIPLIER only.
- *
- * The voxel-lighting pipeline stays Beta-authentic (no lighting floor).
- * However a fully unlit textured surface at (voxel_light * sun) === 0
- * produces perfect-black pixels — impossible to read for navigation in
- * caves and enclosed nights.
- *
- * Applied ONLY to the light multiplier — NOT to the AO factor — so
- * ambient-occlusion contrast is preserved even after the clamp:
- *
- *   visibility = max(rawBrightness, TEXTURE_MIN_BRIGHTNESS) * ao
- *
- * At night, a dark-corner vertex (ao=0.4, brightness≈0.02) still
- * renders darker than an adjacent exposed-surface vertex (ao=1.0,
- * same brightness); prior Stage 16D order `max(brightness*ao, floor)`
- * flattened both to the same floor and erased AO at night — the exact
- * "flat night terrain" bug the Stage 16E brief flags.
- *
- * Value lowered from Stage 16D's 5% → 1.5% per Stage 16E brief. Fully
- * unlit surfaces now render at ~4/255 grey rather than ~13/255,
- * matching Beta's dark cave feel while keeping barely enough visibility
- * for navigation. The value must stay in sync with the copy in
- * ChunkRenderer.ts's updateDynamicColorAttributes path.
- */
-export const TEXTURE_MIN_BRIGHTNESS = 0.015;
-
-/**
- * Applies the Stage 16E clamp: floor the light multiplier only, then
- * multiply by AO. Do NOT clamp the product — that erases AO variation
- * at night. See TEXTURE_MIN_BRIGHTNESS's comment for details.
- */
-function clampedVisibility(rawBrightness: number, ao: number): number {
-  const clampedLight =
-    rawBrightness < TEXTURE_MIN_BRIGHTNESS ? TEXTURE_MIN_BRIGHTNESS : rawBrightness;
-  return clampedLight * ao;
 }
 
 function vertexAO(side1: boolean, side2: boolean, diagonal: boolean): number {
@@ -604,7 +550,7 @@ export class ChunkMesher {
       return false;
     }
 
-    return definition.renderType === 'opaque' || definition.renderType === 'cactus';
+    return definition.contributesAmbientOcclusion ?? (definition.renderType === 'opaque' || definition.renderType === 'cactus');
   }
 
   private receivesAmbientOcclusion(blockId: BlockId): boolean {
@@ -613,7 +559,7 @@ export class ChunkMesher {
       return false;
     }
 
-    return definition.renderType === 'opaque' || definition.renderType === 'cactus';
+    return definition.receivesAmbientOcclusion ?? (definition.renderType === 'opaque' || definition.renderType === 'cactus');
   }
 
   private isOccluderAt(chunk: Chunk, lx: number, ly: number, lz: number): boolean {
@@ -816,8 +762,8 @@ export class ChunkMesher {
               const textureName = resolveBlockTexture(definition, face.slot);
               const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
               const tint = resolveBlockTint(definition, face.slot);
-              const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-              buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
+              const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
+              buffers.pushFace(face, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
             }
           } else if (renderType === 'cutout') {
             for (const face of FACES) {
@@ -910,12 +856,8 @@ export class ChunkMesher {
     return neighbourDef.solid && !neighbourDef.transparent && neighbourDef.renderType === 'opaque';
   }
 
-  private hidesLeafFace(neighbourId: BlockId): boolean {
-    const neighbourDef = this.blockRegistry.getById(neighbourId);
-    if (neighbourDef === undefined) {
-      return false;
-    }
-    return (neighbourDef.solid && !neighbourDef.transparent && neighbourDef.renderType === 'opaque') || neighbourDef.renderType === 'leaves';
+  private hidesLeafFace(_neighbourId: BlockId): boolean {
+    return false;
   }
 
   private hidesCactusFace(faceIndex: number, neighbourId: BlockId): boolean {

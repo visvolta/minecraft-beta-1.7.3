@@ -178,7 +178,8 @@ export function buildBetaWeatherColors(
     thunder,
     lightningFlashStrength,
   );
-  const cloud = applyBetaCloudWeather(skyState.sunBrightnessFactor, rain, thunder);
+  const cloudDayFactor = Math.max(0, Math.min(1, Math.cos(skyState.celestialAngle * Math.PI * 2) * 2 + 0.5));
+  const cloud = applyBetaCloudWeather(cloudDayFactor, rain, thunder);
 
   return {
     rainStrength: rain,

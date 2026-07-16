@@ -86,6 +86,7 @@ export const VISIBLE_DISTANCE_CHUNK_BUFFER = 2.0;
  * for. Chunks past `fogFar` are almost completely hidden; nearby
  * terrain remains readable.
  */
+export const CLEAR_WEATHER_FOG_DISTANCE_SCALE = 1.125;
 const FOG_DENSITY_FACTOR = 2.0;
 
 /** Water/lava (linear) fog band retained from Stage 17. Never migrated to exp2. */
@@ -100,7 +101,8 @@ const LAVA_FOG_FAR = 4;
  * without duplicating the formula.
  */
 export function overworldFogFarDistance(): number {
-  return Math.max(CHUNK_SIZE_X, (CHUNK_LOAD_RADIUS - VISIBLE_DISTANCE_CHUNK_BUFFER) * CHUNK_SIZE_X);
+  const baseDistance = Math.max(CHUNK_SIZE_X, (CHUNK_LOAD_RADIUS - VISIBLE_DISTANCE_CHUNK_BUFFER) * CHUNK_SIZE_X);
+  return baseDistance * CLEAR_WEATHER_FOG_DISTANCE_SCALE;
 }
 
 /** Compute the exp2 density from the current fog far distance. */

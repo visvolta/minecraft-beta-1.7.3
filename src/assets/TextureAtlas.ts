@@ -146,6 +146,10 @@ export class TextureAtlas {
     return this.uvByName.get(name);
   }
 
+  public getAllUvRects(): ReadonlyArray<readonly [string, AtlasUvRect]> {
+    return Array.from(this.uvByName.entries());
+  }
+
   public dispose(): void {
     this.texture.dispose();
     this.debugTexture.dispose();
