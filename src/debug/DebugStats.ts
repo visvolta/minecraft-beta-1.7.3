@@ -103,6 +103,18 @@ export interface DebugStats {
   readonly windX: number;
   readonly windZ: number;
 
+  readonly scheduledTicksPending: number;
+  readonly scheduledTicksOverdue: number;
+  readonly scheduledTicksProcessed: number;
+  readonly neighbourUpdatesPending: number;
+  readonly neighbourUpdatesProcessed: number;
+  readonly randomTicksProcessed: number;
+  readonly skippedStaleTicks: number;
+  readonly duplicateScheduledTicks: number;
+  readonly tickDispatcherTimeMs: number;
+  readonly oldestScheduledTickAge: number;
+  readonly detachedTickQueues: number;
+
   readonly noClip: boolean;
 }
 

@@ -14,6 +14,11 @@ import { SkyRenderer } from '../rendering/sky/SkyRenderer';
 import { CloudRenderer } from '../rendering/sky/CloudRenderer';
 import { WorldTime } from '../world/WorldTime';
 import { ChunkManager } from '../world/ChunkManager';
+import { BlockUpdateWorld } from '../world/BlockUpdateWorld';
+import { BlockBehaviourRegistry } from '../world/BlockBehaviour';
+import { RandomTickScheduler } from '../world/ticks/RandomTickScheduler';
+import { WorldTickScheduler } from '../world/ticks/WorldTickScheduler';
+import { registerFluidBehaviours } from '../world/fluid/FluidBehaviour';
 import { ChunkStreamer } from '../world/ChunkStreamer';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
@@ -76,6 +81,9 @@ export class Engine {
   private readonly chunkRenderer: ChunkRenderer;
   private readonly chunkStreamer: ChunkStreamer;
   private readonly lightEngine: LightEngine;
+  private readonly blockUpdateWorld: BlockUpdateWorld;
+  private readonly blockBehaviourRegistry: BlockBehaviourRegistry;
+  private readonly worldTickScheduler: WorldTickScheduler;
   private readonly worldTime: WorldTime;
   private readonly fogController: FogController;
   private readonly skyRenderer: SkyRenderer;
@@ -127,6 +135,18 @@ export class Engine {
     this.playerPhysics = new PlayerPhysics(this.chunkManager, blockRegistry);
 
     this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
+    this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
+    this.blockBehaviourRegistry = new BlockBehaviourRegistry();
+    registerFluidBehaviours(this.blockBehaviourRegistry);
+    this.worldTickScheduler = new WorldTickScheduler(
+      this.chunkManager,
+      this.blockUpdateWorld,
+      this.blockBehaviourRegistry,
+      new RandomTickScheduler(WORLD_SEED),
+    );
+    this.blockUpdateWorld.setScheduleCallback((x, y, z, id, delay) =>
+      this.worldTickScheduler.schedule(x, y, z, id, delay),
+    );
     this.fogController = new FogController(this.lightEngine);
     this.skyRenderer = new SkyRenderer(this.renderer.scene);
     this.cloudRenderer = new CloudRenderer(this.renderer.scene);
@@ -157,7 +177,7 @@ export class Engine {
       this.player,
       this.chunkManager,
       blockRegistry,
-      this.lightEngine,
+      this.blockUpdateWorld,
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
 
@@ -196,12 +216,14 @@ export class Engine {
       WORLD_SEED,
       this.worldTime,
       this.performanceProfiler,
+      this.worldTickScheduler,
     );
 
     const validationHarness = new WorkerValidationHarness(WORLD_SEED, this.atlas);
     (window as unknown as { __mcDebug?: Record<string, unknown> }).__mcDebug = {
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
       validateMeshWorkers: () => validationHarness.validateMeshWorker(),
+      getTickMetrics: () => this.worldTickScheduler.getMetrics(),
     };
   }
 
@@ -362,8 +384,9 @@ export class Engine {
       this.worldTime.setNight();
     }
 
-    // 3. Advance world time.
+    // 3. Advance world time and world block-tick infrastructure.
     this.worldTime.update(deltaSeconds);
+    this.worldTickScheduler.update(deltaSeconds);
 
     // 4. Update camera look
     this.cameraController.update();

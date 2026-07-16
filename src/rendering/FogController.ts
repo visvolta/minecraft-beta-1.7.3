@@ -155,7 +155,7 @@ export class FogController {
     const eyeBlockZ = Math.floor(inputs.eyeZ);
     const eyeBlockId = this.lightEngine.getBlock(eyeBlockX, eyeBlockY, eyeBlockZ);
 
-    if (eyeBlockId === BlockIds.Lava || eyeBlockId === BlockIds.LavaStill) {
+    if (eyeBlockId === BlockIds.LavaFlowing || eyeBlockId === BlockIds.LavaStill) {
       return {
         mode: 'lava',
         kind: 'linear',
@@ -167,7 +167,7 @@ export class FogController {
       };
     }
 
-    if (eyeBlockId === BlockIds.Water) {
+    if (eyeBlockId === BlockIds.WaterFlowing || eyeBlockId === BlockIds.WaterStill) {
       return {
         mode: 'water',
         kind: 'linear',

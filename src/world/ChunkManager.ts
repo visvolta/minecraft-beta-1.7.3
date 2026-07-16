@@ -6,6 +6,8 @@ import { Chunk } from './Chunk';
  */
 export class ChunkManager {
   private readonly chunks = new Map<string, Chunk>();
+  private readonly removeListeners: Array<(chunk: Chunk) => void> = [];
+  private readonly createListeners: Array<(chunk: Chunk) => void> = [];
 
   public get size(): number {
     return this.chunks.size;
@@ -35,6 +37,7 @@ export class ChunkManager {
 
     const chunk = new Chunk(chunkX, chunkZ);
     this.chunks.set(mapKey, chunk);
+    for (const listener of this.createListeners) listener(chunk);
     return chunk;
   }
 
@@ -43,7 +46,23 @@ export class ChunkManager {
    * @returns true if a chunk was removed, false if it was not loaded.
    */
   public removeChunk(chunkX: number, chunkZ: number): boolean {
-    return this.chunks.delete(this.key(chunkX, chunkZ));
+    const mapKey = this.key(chunkX, chunkZ);
+    const chunk = this.chunks.get(mapKey);
+    if (chunk === undefined) return false;
+    for (const listener of this.removeListeners) listener(chunk);
+    return this.chunks.delete(mapKey);
+  }
+
+  public addRemoveListener(listener: (chunk: Chunk) => void): void {
+    if (!this.removeListeners.includes(listener)) {
+      this.removeListeners.push(listener);
+    }
+  }
+
+  public addCreateListener(listener: (chunk: Chunk) => void): void {
+    if (!this.createListeners.includes(listener)) {
+      this.createListeners.push(listener);
+    }
   }
 
   public clear(): void {

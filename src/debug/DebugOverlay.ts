@@ -120,6 +120,15 @@ export class DebugOverlay {
       `Skylight penalty: ${stats.weatherSkylightPenalty.toFixed(2)}  ` +
         `→ effective sub: ${stats.effectiveSkylightSubtracted}`,
       `Wind: (${stats.windX.toFixed(2)}, ${stats.windZ.toFixed(2)})`,
+      '',
+      '-- Block updates --',
+      `Scheduled: pending ${stats.scheduledTicksPending} overdue ${stats.scheduledTicksOverdue} processed ${stats.scheduledTicksProcessed}`,
+      `Neighbours: pending ${stats.neighbourUpdatesPending} processed ${stats.neighbourUpdatesProcessed}`,
+      `Random ticks: ${stats.randomTicksProcessed}`,
+      `Stale/duplicate ticks: ${stats.skippedStaleTicks}/${stats.duplicateScheduledTicks}`,
+      `Tick dispatcher: ${stats.tickDispatcherTimeMs.toFixed(2)} ms`,
+      `Oldest scheduled age: ${stats.oldestScheduledTickAge}`,
+      `Detached tick queues: ${stats.detachedTickQueues}`,
     ];
   }
 

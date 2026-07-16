@@ -1,5 +1,6 @@
 import type { BlockId } from '../blocks/BlockId';
 import { BlockIds } from '../blocks/BlockId';
+import { ScheduledTickQueue } from './ticks/ScheduledTickQueue';
 import {
   AIR_BLOCK_ID,
   CHUNK_SIZE_X,
@@ -44,10 +45,15 @@ export class Chunk {
   public readonly chunkZ: number;
 
   private readonly blocks: Uint8Array;
+  private readonly metadata: Uint8Array;
   private readonly light: Uint8Array;
   private dirty: boolean;
-  private revision = 0;
+  private blockRevision = 0;
+  private metadataRevision = 0;
+  private meshRevision = 0;
+  private lightRevision = 0;
   private weatherRevision = 0;
+  private readonly scheduledTicks = new ScheduledTickQueue();
 
   /**
    * Cached per-column height: for each (localX, localZ), one past the
@@ -74,6 +80,7 @@ export class Chunk {
     this.chunkX = chunkX;
     this.chunkZ = chunkZ;
     this.blocks = new Uint8Array(CHUNK_VOLUME);
+    this.metadata = new Uint8Array(CHUNK_VOLUME);
     this.light = new Uint8Array(CHUNK_VOLUME);
     // Air is 0; Uint8Array is zero-filled by default.
     this.dirty = true;
@@ -85,20 +92,37 @@ export class Chunk {
 
   public markDirty(): void {
     this.dirty = true;
-    this.revision += 1;
+    this.meshRevision += 1;
   }
 
   public getRevision(): number {
-    return this.revision;
+    return this.meshRevision;
+  }
+
+  public getBlockRevision(): number {
+    return this.blockRevision;
+  }
+
+  public getMetadataRevision(): number {
+    return this.metadataRevision;
+  }
+
+  public getLightRevision(): number {
+    return this.lightRevision;
   }
 
   public getWeatherRevision(): number {
     return this.weatherRevision;
   }
 
+  public getScheduledTicks(): ScheduledTickQueue {
+    return this.scheduledTicks;
+  }
+
   private markBlockDataChanged(): void {
     this.heightmap = undefined;
     this.precipitationHeightmap = undefined;
+    this.blockRevision += 1;
     this.weatherRevision += 1;
     this.markDirty();
   }
@@ -143,6 +167,7 @@ export class Chunk {
     }
     const idx = this.index(localX, localY, localZ);
     this.light[idx] = (this.light[idx]! & 0xF0) | (value & 0x0F);
+    this.lightRevision += 1;
     this.markDirty();
   }
 
@@ -159,7 +184,57 @@ export class Chunk {
     }
     const idx = this.index(localX, localY, localZ);
     this.light[idx] = (this.light[idx]! & 0x0F) | ((value & 0x0F) << 4);
+    this.lightRevision += 1;
     this.markDirty();
+  }
+
+  public getBlockMetadata(localX: number, localY: number, localZ: number): number {
+    if (!this.isInBounds(localX, localY, localZ)) {
+      return 0;
+    }
+    return this.metadata[this.index(localX, localY, localZ)]!;
+  }
+
+  public setBlockMetadata(
+    localX: number,
+    localY: number,
+    localZ: number,
+    value: number,
+    options: { readonly affectsMesh?: boolean; readonly affectsWeather?: boolean; readonly affectsLight?: boolean } = {},
+  ): boolean {
+    if (!this.isInBounds(localX, localY, localZ)) {
+      throw new RangeError(`Local block coordinates out of bounds: (${localX}, ${localY}, ${localZ})`);
+    }
+    if (value < 0 || value > 255) {
+      throw new RangeError(`Block metadata ${value} does not fit in Uint8 storage (0–255).`);
+    }
+    const idx = this.index(localX, localY, localZ);
+    if (this.metadata[idx] === value) {
+      return false;
+    }
+    this.metadata[idx] = value;
+    this.metadataRevision += 1;
+    if (options.affectsWeather === true) {
+      this.precipitationHeightmap = undefined;
+      this.weatherRevision += 1;
+    }
+    if (options.affectsLight === true) {
+      this.lightRevision += 1;
+    }
+    if (options.affectsMesh ?? true) {
+      this.markDirty();
+    }
+    return true;
+  }
+
+  public updateBlockMetadata(
+    localX: number,
+    localY: number,
+    localZ: number,
+    updater: (metadata: number) => number,
+    options: { readonly affectsMesh?: boolean; readonly affectsWeather?: boolean; readonly affectsLight?: boolean } = {},
+  ): boolean {
+    return this.setBlockMetadata(localX, localY, localZ, updater(this.getBlockMetadata(localX, localY, localZ)), options);
   }
 
   /**
@@ -274,8 +349,21 @@ export class Chunk {
     return new Uint8Array(this.blocks);
   }
 
+  public copyMetadata(): Uint8Array {
+    return new Uint8Array(this.metadata);
+  }
+
   public copyLight(): Uint8Array {
     return new Uint8Array(this.light);
+  }
+
+  public loadGeneratedMetadata(data: Uint8Array): void {
+    if (data.length !== CHUNK_VOLUME) {
+      throw new RangeError(`Metadata array length ${data.length} does not match chunk volume ${CHUNK_VOLUME}.`);
+    }
+    this.metadata.set(data);
+    this.metadataRevision += 1;
+    this.markDirty();
   }
 
   public loadLightData(data: Uint8Array): void {

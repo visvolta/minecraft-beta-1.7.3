@@ -91,6 +91,7 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
     for (const snapshot of job.chunks) {
       const chunk = manager.getOrCreateChunk(snapshot.chunkX, snapshot.chunkZ);
       chunk.loadGeneratedBlocks(new Uint8Array(snapshot.blocks));
+      chunk.loadGeneratedMetadata(new Uint8Array(snapshot.metadata));
       chunk.loadLightData(new Uint8Array(snapshot.light));
       chunk.markClean();
     }

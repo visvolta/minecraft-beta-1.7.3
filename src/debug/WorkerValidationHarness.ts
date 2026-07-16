@@ -44,12 +44,15 @@ export class WorkerValidationHarness {
   public async validateGenerationWorker(): Promise<ValidationResult> {
     for (const [chunkX, chunkZ] of VALIDATION_CHUNKS) {
       const sync = this.generateSync(chunkX, chunkZ);
-      const workerBlocks = await this.generateWorker(chunkX, chunkZ);
-      const mismatch = compareBytes(sync.copyBlocks(), workerBlocks, chunkX, chunkZ);
+      const workerResult = await this.generateWorker(chunkX, chunkZ);
+      const mismatch = compareBytes(sync.copyBlocks(), workerResult.blocks, chunkX, chunkZ);
       if (mismatch !== null) return { ok: false, message: mismatch };
+      const metadataMismatch = compareBytes(sync.copyMetadata(), workerResult.metadata, chunkX, chunkZ);
+      if (metadataMismatch !== null) return { ok: false, message: `metadata ${metadataMismatch}` };
 
       const workerChunk = new Chunk(chunkX, chunkZ);
-      workerChunk.loadGeneratedBlocks(workerBlocks);
+      workerChunk.loadGeneratedBlocks(workerResult.blocks);
+      workerChunk.loadGeneratedMetadata(workerResult.metadata);
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
         for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const sh = sync.getHeight(x, z);
@@ -144,12 +147,14 @@ export class WorkerValidationHarness {
       const chunks = [];
       for (const chunk of manager) {
         const blocks = chunk.copyBlocks();
+        const metadata = chunk.copyMetadata();
         const light = chunk.copyLight();
         chunks.push({
           chunkX: chunk.chunkX,
           chunkZ: chunk.chunkZ,
           revision: chunk.getRevision(),
           blocks: blocks.buffer as ArrayBuffer,
+          metadata: metadata.buffer as ArrayBuffer,
           light: light.buffer as ArrayBuffer,
         });
       }
@@ -162,11 +167,11 @@ export class WorkerValidationHarness {
         chunks,
         atlasUvs: this.atlas!.getAllUvRects().map(([name, rect]) => ({ name, rect })),
       };
-      worker.postMessage(job, chunks.flatMap((chunk) => [chunk.blocks, chunk.light]));
+      worker.postMessage(job, chunks.flatMap((chunk) => [chunk.blocks, chunk.metadata, chunk.light]));
     });
   }
 
-  private generateWorker(chunkX: number, chunkZ: number): Promise<Uint8Array> {
+  private generateWorker(chunkX: number, chunkZ: number): Promise<{ blocks: Uint8Array; metadata: Uint8Array }> {
     return new Promise((resolve, reject) => {
       const worker = new Worker(new URL('../workers/chunkGenerationWorker.ts', import.meta.url), { type: 'module' });
       worker.onerror = (): void => {
@@ -180,7 +185,7 @@ export class WorkerValidationHarness {
           reject(new Error(message.message));
           return;
         }
-        resolve(new Uint8Array(message.blocks));
+        resolve({ blocks: new Uint8Array(message.blocks), metadata: new Uint8Array(message.metadata) });
       };
       const job: ChunkGenerationJob = {
         type: 'generate',

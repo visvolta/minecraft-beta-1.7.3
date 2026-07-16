@@ -12,6 +12,7 @@ export interface ChunkGenerationResult {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly blocks: ArrayBuffer;
+  readonly metadata: ArrayBuffer;
   readonly durationMs: number;
 }
 

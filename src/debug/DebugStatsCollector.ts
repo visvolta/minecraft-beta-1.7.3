@@ -16,6 +16,7 @@ import type { PrecipitationRenderer } from '../rendering/weather/PrecipitationRe
 import type { RainSplashRenderer } from '../rendering/weather/RainSplashRenderer';
 import type { LightningRenderer } from '../rendering/weather/LightningRenderer';
 import type { PerformanceProfiler } from './PerformanceProfiler';
+import type { WorldTickScheduler } from '../world/ticks/WorldTickScheduler';
 
 function formatHexColor(hex: number): string {
   return `#${hex.toString(16).padStart(6, '0').toUpperCase()}`;
@@ -37,6 +38,7 @@ export class DebugStatsCollector {
   private readonly climateSampler: ClimateSampler;
   private readonly worldTime: WorldTime;
   private readonly performanceProfiler: PerformanceProfiler;
+  private readonly worldTickScheduler: WorldTickScheduler;
   private readonly frameTimeTracker = new FrameTimeTracker();
 
   public constructor(
@@ -54,6 +56,7 @@ export class DebugStatsCollector {
     worldSeed: bigint,
     worldTime: WorldTime,
     performanceProfiler: PerformanceProfiler,
+    worldTickScheduler: WorldTickScheduler,
   ) {
     this.player = player;
     this.chunkManager = chunkManager;
@@ -69,6 +72,7 @@ export class DebugStatsCollector {
     this.worldSeed = worldSeed;
     this.worldTime = worldTime;
     this.performanceProfiler = performanceProfiler;
+    this.worldTickScheduler = worldTickScheduler;
     this.climateSampler = new ClimateSampler(worldSeed);
   }
 
@@ -115,6 +119,7 @@ export class DebugStatsCollector {
     const sky = this.skyRenderer.getCurrentState();
     const cloudInfo = this.cloudRenderer.getDebugInfo();
     const perf = this.performanceProfiler.getSnapshot();
+    const tickMetrics = this.worldTickScheduler.getMetrics();
 
     // Stage 18: weather stats.
     const w = this.weatherController.getState();
@@ -211,6 +216,18 @@ export class DebugStatsCollector {
       effectiveSkylightSubtracted: this.stormReadout.effectiveSkylightSubtracted,
       windX: this.stormReadout.windX,
       windZ: this.stormReadout.windZ,
+
+      scheduledTicksPending: tickMetrics.pendingScheduledTicks,
+      scheduledTicksOverdue: tickMetrics.overdueScheduledTicks,
+      scheduledTicksProcessed: tickMetrics.processedScheduledTicks,
+      neighbourUpdatesPending: tickMetrics.pendingNeighbourUpdates,
+      neighbourUpdatesProcessed: tickMetrics.processedNeighbourUpdates,
+      randomTicksProcessed: tickMetrics.randomTicksProcessed,
+      skippedStaleTicks: tickMetrics.skippedStaleTicks,
+      duplicateScheduledTicks: tickMetrics.duplicateSuppressedTicks,
+      tickDispatcherTimeMs: tickMetrics.dispatcherTimeMs,
+      oldestScheduledTickAge: tickMetrics.oldestPendingScheduledTickAge,
+      detachedTickQueues: tickMetrics.detachedChunkTickQueues,
 
       noClip,
     };

@@ -15,6 +15,7 @@ import {
   CHUNK_SIZE_Z,
 } from '../world/chunkConstants';
 import { clampedVisibility, getLightBrightness } from './voxelLighting';
+import { fluidSurfaceHeight, isFallingFluid } from '../world/fluid/FluidMetadata';
 
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
@@ -434,6 +435,39 @@ class MeshBuffers {
     }
   }
 
+  public pushQuad(
+    vertices: readonly [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]],
+    normal: readonly [number, number, number],
+    uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
+    tint: readonly [number, number, number],
+    light: LightSample,
+    ao = 1,
+  ): void {
+    const [tintR, tintG, tintB] = getLinearTint(tint);
+    const vertexOffset = this.positions.length / 3;
+    const rawBrightness = getLightBrightness(Math.max(light.sky, light.block));
+    const visibility = clampedVisibility(rawBrightness, ao);
+    const u0 = uvRect?.u0 ?? 0;
+    const v0 = uvRect?.v0 ?? 0;
+    const u1 = uvRect?.u1 ?? 1;
+    const v1 = uvRect?.v1 ?? 1;
+    const uvs: readonly [number, number, number, number, number, number, number, number] = [u0, v1, u1, v1, u1, v0, u0, v0];
+    for (let i = 0; i < 4; i++) {
+      const vertex = vertices[i]!;
+      this.positions.push(vertex[0], vertex[1], vertex[2]);
+      this.normals.push(normal[0], normal[1], normal[2]);
+      this.uvs.push(uvs[i * 2]!, uvs[i * 2 + 1]!);
+      this.normalColors.push(tintR * visibility, tintG * visibility, tintB * visibility);
+      this.debugColors.push(rawBrightness, rawBrightness, rawBrightness);
+      this.aoColors.push(ao, ao, ao);
+      this.tintColors.push(tintR, tintG, tintB);
+      this.skyLightLevels.push(light.sky);
+      this.blockLightLevels.push(light.block);
+      this.aoFactorScalars.push(ao);
+    }
+    this.indices.push(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset, vertexOffset + 2, vertexOffset + 3);
+  }
+
   public toGeometry(): THREE.BufferGeometry {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));
@@ -812,26 +846,45 @@ export class ChunkMesher {
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
         for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
-          if (!this.isFluid(blockId)) {
-            continue;
-          }
-
+          if (!this.isFluid(blockId)) continue;
           const definition = this.blockRegistry.getById(blockId);
-          if (definition === undefined) {
-            continue;
+          if (definition === undefined) continue;
+          const textureName = resolveBlockTexture(definition, 'side');
+          const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+          const tint = resolveBlockTint(definition, 'side');
+          const light = this.getLightComponentsAt(chunk, x, y, z);
+          const h00 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 0);
+          const h10 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 0);
+          const h11 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 1);
+          const h01 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 1);
+
+          if (!this.sameFluidMaterial(blockId, this.getBlockAt(chunk, x, y + 1, z))) {
+            buffers.pushQuad([
+              [x, y + h01, z + 1],
+              [x + 1, y + h11, z + 1],
+              [x + 1, y + h10, z],
+              [x, y + h00, z],
+            ], [0, 1, 0], uvRect, tint, light);
           }
 
-          for (const face of FACES) {
-            const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-            if (this.hidesFluidFace(blockId, neighbourId)) {
-              continue;
-            }
-
-            const textureName = resolveBlockTexture(definition, face.slot);
-            const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-            const tint = resolveBlockTint(definition, face.slot);
-            const light = this.getLightComponentsAt(chunk, x, y, z);
-            buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
+          // +X
+          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x + 1, y, z))) {
+            buffers.pushQuad([[x + 1, y, z], [x + 1, y + h10, z], [x + 1, y + h11, z + 1], [x + 1, y, z + 1]], [1, 0, 0], uvRect, tint, light);
+          }
+          // -X
+          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x - 1, y, z))) {
+            buffers.pushQuad([[x, y, z + 1], [x, y + h01, z + 1], [x, y + h00, z], [x, y, z]], [-1, 0, 0], uvRect, tint, light);
+          }
+          // +Z
+          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y, z + 1))) {
+            buffers.pushQuad([[x + 1, y, z + 1], [x + 1, y + h11, z + 1], [x, y + h01, z + 1], [x, y, z + 1]], [0, 0, 1], uvRect, tint, light);
+          }
+          // -Z
+          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y, z - 1))) {
+            buffers.pushQuad([[x, y, z], [x, y + h00, z], [x + 1, y + h10, z], [x + 1, y, z]], [0, 0, -1], uvRect, tint, light);
+          }
+          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y - 1, z))) {
+            buffers.pushQuad([[x, y, z], [x + 1, y, z], [x + 1, y, z + 1], [x, y, z + 1]], [0, -1, 0], uvRect, tint, light);
           }
         }
       }
@@ -872,11 +925,51 @@ export class ChunkMesher {
   }
 
   private isFluid(blockId: BlockId): boolean {
-    return blockId === BlockIds.Water || blockId === BlockIds.Lava || blockId === BlockIds.LavaStill;
+    return blockId === BlockIds.WaterFlowing || blockId === BlockIds.WaterStill || blockId === BlockIds.LavaFlowing || blockId === BlockIds.LavaStill;
+  }
+
+  private sameFluidMaterial(a: BlockId, b: BlockId): boolean {
+    const waterA = a === BlockIds.WaterFlowing || a === BlockIds.WaterStill;
+    const waterB = b === BlockIds.WaterFlowing || b === BlockIds.WaterStill;
+    const lavaA = a === BlockIds.LavaFlowing || a === BlockIds.LavaStill;
+    const lavaB = b === BlockIds.LavaFlowing || b === BlockIds.LavaStill;
+    return (waterA && waterB) || (lavaA && lavaB);
+  }
+
+  private getFluidCornerHeight(chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, dx: number, dz: number): number {
+    if (this.sameFluidMaterial(blockId, this.getBlockAt(chunk, x, y + 1, z))) return 1;
+    let total = 0;
+    let count = 0;
+    for (const [ox, oz] of [[0, 0], [dx === 0 ? -1 : 1, 0], [0, dz === 0 ? -1 : 1], [dx === 0 ? -1 : 1, dz === 0 ? -1 : 1]] as const) {
+      const sx = x + ox;
+      const sz = z + oz;
+      const sampleId = this.getBlockAt(chunk, sx, y, sz);
+      if (this.sameFluidMaterial(blockId, sampleId)) {
+        const meta = this.getMetadataAt(chunk, sx, y, sz);
+        total += isFallingFluid(meta) ? 1 : fluidSurfaceHeight(meta);
+        count += 1;
+      } else if (!this.isSolidForFluidHeight(sampleId)) {
+        total += 1;
+        count += 1;
+      }
+    }
+    return count === 0 ? 1 : total / count;
+  }
+
+  private getMetadataAt(chunk: Chunk, lx: number, ly: number, lz: number): number {
+    if (ly < 0 || ly >= CHUNK_SIZE_Y) return 0;
+    if (chunk.isInBounds(lx, ly, lz)) return chunk.getBlockMetadata(lx, ly, lz);
+    const neighbour = this.getChunkAndLocal(chunk, lx, lz);
+    return neighbour?.chunk.getBlockMetadata(neighbour.localX, ly, neighbour.localZ) ?? 0;
+  }
+
+  private isSolidForFluidHeight(blockId: BlockId): boolean {
+    const def = this.blockRegistry.getById(blockId);
+    return def !== undefined && def.solid && def.renderType !== 'leaves';
   }
 
   private hidesFluidFace(fluidBlockId: BlockId, neighbourId: BlockId): boolean {
-    if (neighbourId === fluidBlockId) {
+    if (this.sameFluidMaterial(fluidBlockId, neighbourId)) {
       return true;
     }
 

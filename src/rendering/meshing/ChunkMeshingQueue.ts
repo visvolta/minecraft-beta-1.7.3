@@ -228,7 +228,7 @@ export class ChunkMeshingQueue {
       });
       const transfers: Transferable[] = [];
       for (const snapshot of job.chunks) {
-        transfers.push(snapshot.blocks, snapshot.light);
+        transfers.push(snapshot.blocks, snapshot.metadata, snapshot.light);
       }
       worker.postMessage(job, transfers);
     }
@@ -259,12 +259,14 @@ export class ChunkMeshingQueue {
         const chunk = this.chunkManager.getChunk(target.chunkX + dx, target.chunkZ + dz);
         if (chunk === undefined) continue;
         const blocks = chunk.copyBlocks();
+        const metadata = chunk.copyMetadata();
         const light = chunk.copyLight();
         chunks.push({
           chunkX: chunk.chunkX,
           chunkZ: chunk.chunkZ,
           revision: chunk.getRevision(),
           blocks: blocks.buffer as ArrayBuffer,
+          metadata: metadata.buffer as ArrayBuffer,
           light: light.buffer as ArrayBuffer,
         });
       }

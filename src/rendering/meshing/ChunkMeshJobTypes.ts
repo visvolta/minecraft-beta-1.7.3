@@ -6,6 +6,7 @@ export interface ChunkSnapshotPayload {
   readonly chunkZ: number;
   readonly revision: number;
   readonly blocks: ArrayBuffer;
+  readonly metadata: ArrayBuffer;
   readonly light: ArrayBuffer;
 }
 

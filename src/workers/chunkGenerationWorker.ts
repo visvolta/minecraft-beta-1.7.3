@@ -29,16 +29,19 @@ workerSelf.onmessage = (event: MessageEvent<ChunkGenerationJob>): void => {
     const chunk = new Chunk(job.chunkX, job.chunkZ);
     getGenerator(job.seed).populate(chunk);
     const blocks = chunk.copyBlocks();
-    const buffer = blocks.buffer as ArrayBuffer;
+    const metadata = chunk.copyMetadata();
+    const blockBuffer = blocks.buffer as ArrayBuffer;
+    const metadataBuffer = metadata.buffer as ArrayBuffer;
     const result: ChunkGenerationResult = {
       type: 'generated',
       jobId: job.jobId,
       chunkX: job.chunkX,
       chunkZ: job.chunkZ,
-      blocks: buffer,
+      blocks: blockBuffer,
+      metadata: metadataBuffer,
       durationMs: performance.now() - start,
     };
-    workerSelf.postMessage(result, [buffer]);
+    workerSelf.postMessage(result, [blockBuffer, metadataBuffer]);
   } catch (error) {
     const result: ChunkWorkerError = {
       type: 'error',

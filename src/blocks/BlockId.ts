@@ -9,17 +9,15 @@ export const BlockIds = {
   Dirt: 3,
   Cobblestone: 4,
   Bedrock: 7,
-  /** Still water (Beta's flowing-water id 8 is not used; terrain generates only still water). */
+  /** Beta 1.7.3 flowing water. */
+  WaterFlowing: 8,
+  /** Beta 1.7.3 stationary/source water. */
+  WaterStill: 9,
+  /** Temporary compatibility alias; new code should use WaterStill. */
   Water: 9,
-  /**
-   * Flowing lava (Beta 1.7.3 real id). Cave generation (Stage 12B)
-   * places this exact id for carved blocks below world Y=10, matching
-   * MapGenCaves's `Block.C` (flowing lava) placement precisely — real
-   * Beta does not place stationary lava (id 11) during cave carving.
-   * Like Water, this project has no fluid-flow simulation; Lava is
-   * static world data + a still (non-animated) render, the same
-   * deliberate deferral already applied to Water.
-   */
+  /** Beta 1.7.3 flowing lava. */
+  LavaFlowing: 10,
+  /** Temporary compatibility alias; new code should use LavaFlowing. */
   Lava: 10,
   Sand: 12,
   Gravel: 13,
@@ -53,6 +51,7 @@ export const BlockIds = {
   SpruceLog: 252,
   /** TEMPORARY, project-internal ID — see SpruceLog's doc comment; the Leaves equivalent for the same reason. */
   SpruceLeaves: 253,
+  Obsidian: 49,
   MossyCobblestone: 48,
   CoalOre: 16,
   IronOre: 15,

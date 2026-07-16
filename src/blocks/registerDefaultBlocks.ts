@@ -151,7 +151,21 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   });
 
   registry.register({
-    id: BlockIds.Water,
+    id: BlockIds.WaterFlowing,
+    name: 'flowing_water',
+    displayName: 'Flowing Water',
+    solid: false,
+    transparent: true,
+    replaceable: false,
+    blocksWeather: true,
+    isLiquid: true,
+    textures: { all: 'water' },
+    renderType: 'fluid',
+    lightOpacity: 3,
+  });
+
+  registry.register({
+    id: BlockIds.WaterStill,
     name: 'water',
     displayName: 'Water',
     solid: false,
@@ -165,9 +179,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   });
 
   registry.register({
-    id: BlockIds.Lava,
-    name: 'lava',
-    displayName: 'Lava',
+    id: BlockIds.LavaFlowing,
+    name: 'flowing_lava',
+    displayName: 'Flowing Lava',
     solid: false,
     transparent: true,
     replaceable: false,
@@ -212,6 +226,8 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     },
     renderType: 'leaves',
     lightOpacity: 1,
+    receivesAmbientOcclusion: true,
+    contributesAmbientOcclusion: false,
   });
 
   registry.register({
@@ -247,6 +263,21 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     },
     renderType: 'leaves',
     lightOpacity: 1,
+    receivesAmbientOcclusion: true,
+    contributesAmbientOcclusion: false,
+  });
+
+
+  registry.register({
+    id: BlockIds.Obsidian,
+    name: 'obsidian',
+    displayName: 'Obsidian',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    blocksWeather: true,
+    textures: { all: 'bedrock' },
+    renderType: 'opaque',
   });
 
   // Ores and other Blocks added for Stage 12D

@@ -62,6 +62,7 @@ for (const [chunkX, chunkZ] of TEST_CHUNKS) {
   const expected = generate(chunkX, chunkZ);
   const actual = generate(chunkX, chunkZ);
   compareBytes(expected.copyBlocks(), actual.copyBlocks(), 'blocks', chunkX, chunkZ);
+  compareBytes(expected.copyMetadata(), actual.copyMetadata(), 'metadata', chunkX, chunkZ);
   compareDerivedHeights(expected, actual);
   console.log(`OK generation deterministic: ${chunkX},${chunkZ}`);
 }

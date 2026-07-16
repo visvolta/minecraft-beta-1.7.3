@@ -272,6 +272,7 @@ export class ChunkGenerationQueue {
 
       const chunk = this.chunkManager.getOrCreateChunk(result.chunkX, result.chunkZ);
       chunk.loadGeneratedBlocks(new Uint8Array(result.blocks));
+      chunk.loadGeneratedMetadata(new Uint8Array(result.metadata));
       this.recordDuration(result.durationMs);
       this.completed += 1;
       completed.push({ chunk, durationMs: result.durationMs });
