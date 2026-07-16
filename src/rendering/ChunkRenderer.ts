@@ -53,63 +53,11 @@ export const FOG_HEIGHT_END = 96;
  * final `mix()`.
  */
 function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
-  material.userData.heightFogStart = { value: FOG_HEIGHT_START };
-  material.userData.heightFogEnd = { value: FOG_HEIGHT_END };
-  material.onBeforeCompile = (shader): void => {
-    shader.uniforms.uFogHeightStart = material.userData.heightFogStart;
-    shader.uniforms.uFogHeightEnd = material.userData.heightFogEnd;
-
-    // Vertex shader: add a world-Y varying alongside Three's existing
-    // fog vertex chunk. We compute worldPosition ourselves rather than
-    // relying on the `<worldpos_vertex>` chunk, because that chunk is
-    // only emitted when specific features are active — this way we
-    // stay a strictly additive, dependency-free injection.
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-        #ifdef USE_FOG
-          varying float vHeightFogWorldY;
-        #endif`,
-      )
-      .replace(
-        '#include <fog_vertex>',
-        `#include <fog_vertex>
-        #ifdef USE_FOG
-          vHeightFogWorldY = (modelMatrix * vec4(transformed, 1.0)).y;
-        #endif`,
-      );
-
-    // Fragment shader: replace Three's stock <fog_fragment> chunk with
-    // the same code plus a single-line height-taper multiplication on
-    // the fogFactor. This is the minimal change that lets Three's
-    // FogExp2/Fog branches keep computing themselves.
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        `#include <common>
-        #ifdef USE_FOG
-          varying float vHeightFogWorldY;
-          uniform float uFogHeightStart;
-          uniform float uFogHeightEnd;
-        #endif`,
-      )
-      .replace(
-        '#include <fog_fragment>',
-        `
-        #ifdef USE_FOG
-          #ifdef FOG_EXP2
-            float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
-          #else
-            float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
-          #endif
-          fogFactor *= 1.0 - smoothstep( uFogHeightStart, uFogHeightEnd, vHeightFogWorldY );
-          gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
-        #endif
-        `,
-      );
-  };
-  // Ensure Three recompiles the shader next render.
+  // Focused bug-fix pass: Beta terrain fog is vertically complete. The
+  // previous height taper removed fog from high terrain, exposing the
+  // chunk boundary from mountains or no-clip altitude. Keep Three's stock
+  // fog shader untouched so distant terrain always fades fully into the
+  // shared horizon/fog colour at every world Y.
   material.needsUpdate = true;
 }
 

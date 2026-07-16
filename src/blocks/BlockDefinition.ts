@@ -51,6 +51,15 @@ export interface BlockDefinition {
   /** How much light this block emits, from 0 to 15. Defaults to 0. */
   readonly lightEmission?: number;
   /**
+   * Beta Material-style precipitation blocker. True for materials that
+   * stop rain/snow when Chunk.precipitationHeightMap scans downward:
+   * solid blocks and liquids, including transparent solid materials such
+   * as glass/leaves/ice. Do not infer this from render transparency.
+   */
+  readonly blocksWeather?: boolean;
+  /** Beta Material-style liquid flag, used by weather blocking and future fluids. */
+  readonly isLiquid?: boolean;
+  /**
    * True for blocks that render via a binary alpha-test ("cutout") pass
    * instead of the normal opaque pass or the blended fluid pass — every
    * pixel is either fully opaque or fully transparent (no blending), and

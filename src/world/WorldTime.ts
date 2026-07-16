@@ -150,7 +150,8 @@ export class WorldTime {
     let value = 1 - (Math.cos(celestialAngle * Math.PI * 2) * 2 + 0.2);
 
     value = Math.max(0, Math.min(1, value));
-    return 1 - value;
+    value = 1 - value;
+    return value * 0.8 + 0.2;
   }
 
   public getSkyPhase(): string {

@@ -26,6 +26,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: true,
+    blocksWeather: false,
     textures: {},
     renderType: 'fluid',
   });
@@ -37,6 +38,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'stone' },
     renderType: 'opaque',
   });
@@ -48,6 +50,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: {
       top: 'grass_top',
       bottom: 'dirt',
@@ -66,6 +69,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'dirt' },
     renderType: 'opaque',
   });
@@ -77,6 +81,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'cobblestone' },
     renderType: 'opaque',
   });
@@ -88,6 +93,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'bedrock' },
     renderType: 'opaque',
   });
@@ -99,6 +105,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'sand' },
     renderType: 'opaque',
   });
@@ -110,6 +117,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'gravel' },
     renderType: 'opaque',
   });
@@ -121,6 +129,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'clay' },
     renderType: 'opaque',
   });
@@ -132,6 +141,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: {
       top: 'podzol_top',
       bottom: 'dirt',
@@ -147,6 +157,8 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: false,
+    blocksWeather: true,
+    isLiquid: true,
     textures: { all: 'water' },
     renderType: 'fluid',
     lightOpacity: 3,
@@ -159,6 +171,8 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: false,
+    blocksWeather: true,
+    isLiquid: true,
     textures: { all: 'lava' },
     renderType: 'fluid',
     lightOpacity: 3,
@@ -172,6 +186,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: {
       top: 'oak_top',
       bottom: 'oak_top',
@@ -188,6 +203,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: false,
     cutout: true,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'oak_leaves' },
     tints: {
       top: LEAF_TINT,
@@ -205,6 +221,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: {
       top: 'spruce_top',
       bottom: 'spruce_top',
@@ -221,6 +238,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: false,
     cutout: true,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'spruce_leaves' },
     tints: {
       top: LEAF_TINT,
@@ -239,6 +257,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'mossy_cobble' },
     renderType: 'opaque',
   });
@@ -250,6 +269,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'coal_ore' },
     renderType: 'opaque',
   });
@@ -261,6 +281,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'iron_ore' },
     renderType: 'opaque',
   });
@@ -272,6 +293,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'gold_ore' },
     renderType: 'opaque',
   });
@@ -283,6 +305,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'redstone_ore' },
     renderType: 'opaque',
   });
@@ -294,6 +317,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'diamond_ore' },
     renderType: 'opaque',
   });
@@ -305,6 +329,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'lapis_ore' },
     renderType: 'opaque',
   });
@@ -316,6 +341,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: {
       top: 'singlechest_top',
       bottom: 'singlechest_top',
@@ -332,6 +358,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: true,
     cutout: true,
     replaceable: false,
+    blocksWeather: true,
     textures: { all: 'monster_spawner' },
     renderType: 'cutout',
   });
@@ -343,6 +370,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: true,
+    blocksWeather: false,
     textures: { all: 'dandi' },
     renderType: 'cross',
   });
@@ -354,6 +382,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: true,
+    blocksWeather: false,
     textures: { all: 'rose' },
     renderType: 'cross',
   });
@@ -365,6 +394,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: true,
+    blocksWeather: false,
     textures: { all: 'brown_mush' },
     renderType: 'cross',
   });
@@ -376,6 +406,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: true,
+    blocksWeather: false,
     textures: { all: 'red_mush' },
     renderType: 'cross',
   });
@@ -387,6 +418,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: true,
+    blocksWeather: false,
     textures: { all: 'tall_grass' },
     tints: {
       top: GRASS_TOP_TINT,
@@ -403,6 +435,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: true,
+    blocksWeather: false,
     textures: { all: 'dead_bush' },
     renderType: 'cross',
   });
@@ -414,6 +447,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: true,
+    blocksWeather: false,
     textures: { all: 'reeds' },
     renderType: 'cross',
   });
@@ -425,6 +459,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: false,
     replaceable: false,
+    blocksWeather: true,
     textures: {
       top: 'pumpkin_top',
       bottom: 'pumpkin_top',
@@ -440,6 +475,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: true,
     transparent: true,
     replaceable: false,
+    blocksWeather: true,
     textures: {
       top: 'cactus_top',
       bottom: 'cactus_bottom',
@@ -456,6 +492,8 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     solid: false,
     transparent: true,
     replaceable: false,
+    blocksWeather: true,
+    isLiquid: true,
     textures: { all: 'lava' },
     renderType: 'fluid',
     lightOpacity: 3,

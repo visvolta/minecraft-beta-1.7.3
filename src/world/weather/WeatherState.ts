@@ -1,3 +1,5 @@
+import { WEATHER_STRENGTH_DELTA_PER_TICK } from './BetaWeatherMath';
+
 /**
  * Weather simulation data & Beta-accurate strength interpolation.
  *
@@ -35,7 +37,7 @@ export interface WeatherStateSnapshot {
 }
 
 /** Per-tick delta applied to rain/thunder strengths in Beta. */
-export const STRENGTH_DELTA_PER_TICK = 0.01;
+export const STRENGTH_DELTA_PER_TICK = WEATHER_STRENGTH_DELTA_PER_TICK;
 
 export class WeatherState {
   public raining = false;

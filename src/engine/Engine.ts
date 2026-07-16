@@ -19,9 +19,10 @@ import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
 import { ClimateSampler } from '../world/generation/climate/ClimateSampler';
 import { WeatherController } from '../world/weather/WeatherController';
-import { PrecipitationRenderer, WEATHER_RENDER_RADIUS } from '../rendering/weather/PrecipitationRenderer';
+import { PrecipitationRenderer } from '../rendering/weather/PrecipitationRenderer';
 import { RainSplashRenderer } from '../rendering/weather/RainSplashRenderer';
 import { LightningRenderer } from '../rendering/weather/LightningRenderer';
+import { LightningManager } from '../world/weather/LightningManager';
 import { buildAtmosphericState, previewWeatherFade } from '../rendering/AtmosphericState';
 import { DebugController } from '../debug/DebugController';
 import { DebugOverlay } from '../debug/DebugOverlay';
@@ -81,6 +82,7 @@ export class Engine {
   private readonly climateSampler: ClimateSampler;
   private readonly precipitationRenderer: PrecipitationRenderer;
   private readonly rainSplashRenderer: RainSplashRenderer;
+  private readonly lightningManager: LightningManager;
   private readonly lightningRenderer: LightningRenderer;
   private readonly updatables: IUpdatable[] = [];
 
@@ -135,13 +137,16 @@ export class Engine {
       this.renderer.scene,
       this.chunkManager,
       this.climateSampler,
+      blockRegistry,
+      () => this.renderer.isFancyGraphicsEnabled(),
     );
     this.rainSplashRenderer = new RainSplashRenderer(this.renderer.scene);
-    this.lightningRenderer = new LightningRenderer(
-      this.renderer.scene,
+    this.lightningManager = new LightningManager(
       this.chunkManager,
+      blockRegistry,
       sessionSeed,
     );
+    this.lightningRenderer = new LightningRenderer(this.renderer.scene);
 
     this.interactionController = new InteractionController(
       this.input,
@@ -400,43 +405,19 @@ export class Engine {
     const atmos = buildAtmosphericState(
       this.skyRenderer.getCurrentColorState(),
       weatherState,
+      this.lightningManager.getState().getFlashStrength(weatherState.partialTick),
     );
+    this.skyRenderer.applyAtmosphericState(atmos);
 
-    // Stage 18B: unified skylight computation. The weather penalty
-    // adds to the base skylight subtraction (never mutates arrays,
-    // never causes chunk remesh). Lightning flash is a temporary
-    // negative penalty that briefly brightens the scene.
-    //
-    // We deliberately do NOT also apply a weather multiplier to
-    // sunBrightnessFactor (Stage 18 did; Stage 18B q2 removed it) —
-    // otherwise brightness gets dimmed twice and the effective light
-    // levels no longer match the brief's target table.
-    //
-    // Formula:
-    //   effectiveSub = clamp(baseSub + weatherPenalty − 15*flash, 0, 15)
-    // where flash ∈ [0, 1] and 15*flash is enough to zero any base +
-    // penalty combination during a full-strength strike.
-    const baseSkylightSubtracted = this.worldTime.getSkylightSubtracted();
-    const flashStrength = this.lightningRenderer.getFlashStrength();
-    const effectiveSubtracted = Math.max(
-      0,
-      Math.min(
-        15,
-        Math.round(baseSkylightSubtracted + atmos.weatherSkylightPenalty - 15 * flashStrength),
-      ),
-    );
-    this.chunkRenderer.setSkylightSubtracted(effectiveSubtracted);
-    // Sun-brightness factor: only the base (time-of-day) factor + a
-    // flash bump. Weather influence lives entirely in the skylight
-    // penalty above so we don't double-dim.
-    const baseSunBrightness = this.worldTime.getSunBrightnessFactor();
-    const sunBrightness = Math.min(1.0, baseSunBrightness + flashStrength);
-    this.chunkRenderer.setSunBrightnessFactor(sunBrightness);
+    // Beta weather lighting: calculateSkylightSubtracted and sun brightness
+    // are produced by the shared weather math. Lightning flash is visual
+    // only and brightens via the same derived atmospheric snapshot.
+    this.chunkRenderer.setSkylightSubtracted(atmos.effectiveSkylightSubtracted);
+    this.chunkRenderer.setSunBrightnessFactor(atmos.sunBrightnessFactor);
 
-    // Stage 18B: publish the derived storm readout to the debug HUD.
     this.debugStatsCollector.setStormReadout({
       weatherSkylightPenalty: atmos.weatherSkylightPenalty,
-      effectiveSkylightSubtracted: effectiveSubtracted,
+      effectiveSkylightSubtracted: atmos.effectiveSkylightSubtracted,
       windX: atmos.wind.x,
       windZ: atmos.wind.z,
     });
@@ -480,15 +461,14 @@ export class Engine {
       this.worldTime,
     );
     this.rainSplashRenderer.update(camera, deltaSeconds, atmos, this.precipitationRenderer);
-    this.lightningRenderer.update(
+    this.lightningManager.update(
+      deltaSeconds,
+      weatherState,
       camera.position.x,
       camera.position.y,
       camera.position.z,
-      deltaSeconds,
-      atmos,
-      WEATHER_RENDER_RADIUS * 2,
-      camera, // Stage 18B: perpendicular math for camera-facing quad strips
     );
+    this.lightningRenderer.update(this.lightningManager.getState());
 
     // 12. Apply fog from the camera eye position after streaming so any
     // newly entered fluid volume is already loaded when sampled.

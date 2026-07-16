@@ -1,38 +1,25 @@
 import { JavaRandom } from '../generation/random/JavaRandom';
 import { WeatherState, type WeatherMode } from './WeatherState';
+import {
+  GAME_TICKS_PER_SECOND,
+  RAIN_OFF_MAX,
+  RAIN_OFF_MIN_OFFSET,
+  RAIN_ON_MAX,
+  RAIN_ON_MIN_OFFSET,
+  THUNDER_OFF_MAX,
+  THUNDER_OFF_MIN_OFFSET,
+  THUNDER_ON_MAX,
+  THUNDER_ON_MIN_OFFSET,
+} from './BetaWeatherMath';
 
 /**
  * Beta 1.7.3 weather simulation controller (renderer-independent).
  *
- * Ports `World.updateWeather()` from mc-dev verbatim, plus adds three
- * debug override paths (F8/F9/F10 in Engine) that force clear/rain/
- * thunder and can return to automatic simulation.
- *
- * Determinism (per Stage 18 answer q3):
- *   The `JavaRandom` this controller uses is seeded once per session
- *   (not per world seed). Beta itself reseeds `world.rand` on load,
- *   so weather sequences differ across sessions in vanilla; matching
- *   that behaviour lets `world seed` remain a pure terrain-generator
- *   input while weather still uses Java's exact RNG algorithm.
- *
- * Timers (all in game ticks; 20 tps):
- *   OFF (clear) : rand.nextInt(0x29040) + 12000        = 12000..180000 (10 min..2h30m)
- *   Rain ON     : rand.nextInt(12000) + 12000          = 12000..24000 (10..20 min)
- *   Thunder ON  : rand.nextInt(12000) + 3600           = 3600..15600  (3..13 min)
- *
- * Strengths advance ±0.01/tick (WeatherState.advanceStrengthsOneTick).
+ * Ports `World.updateWeather()` from mc-dev verbatim, plus adds debug
+ * override paths (F8/F9/F10 in Engine) that force clear/rain/thunder and
+ * can return to automatic simulation. Timer constants live in
+ * BetaWeatherMath.ts so rendering and debug code share the same source.
  */
-const GAME_TICKS_PER_SECOND = 20;
-
-/** Beta constants. */
-const RAIN_OFF_MAX = 0x29040; // 168000; +12000 = 180000 max off period
-const RAIN_OFF_MIN_OFFSET = 12000;
-const RAIN_ON_MAX = 12000;
-const RAIN_ON_MIN_OFFSET = 12000;
-const THUNDER_OFF_MAX = 0x29040;
-const THUNDER_OFF_MIN_OFFSET = 12000;
-const THUNDER_ON_MAX = 12000;
-const THUNDER_ON_MIN_OFFSET = 3600;
 
 /** Debug override mode. `null` means fully automatic. */
 type ForcedMode = WeatherMode | null;

@@ -257,7 +257,8 @@ function computeSkylightSubtracted(celestialAngle: number): number {
 function computeSunBrightnessFactor(celestialAngle: number): number {
   let f = 1 - (Math.cos(celestialAngle * Math.PI * 2) * 2 + 0.2);
   f = clamp01(f);
-  return 1 - f;
+  f = 1 - f;
+  return f * 0.8 + 0.2;
 }
 
 /**
@@ -364,11 +365,12 @@ export class SkyColorController {
       horizonB = horizonB * (1 - strength) + sunriseRaw[2] * strength;
     }
 
-    // Bottom (below horizon) is a slightly dimmed horizon; Beta's void plane
-    // uses `f * 0.2 + 0.04` per channel — same principle here.
-    const bottomR = fog.r * 0.2 + 0.04;
-    const bottomG = fog.g * 0.2 + 0.04;
-    const bottomB = fog.b * 0.6 + 0.1;
+    // Bottom below horizon now uses the same colour as the horizon/fog
+    // source so distant chunk edges never reveal a differently coloured
+    // lower sky when viewed from high altitude.
+    const bottomR = horizonR;
+    const bottomG = horizonG;
+    const bottomB = horizonB;
 
     const sunriseSunset: SunriseSunsetColors | null =
       sunriseRaw === null

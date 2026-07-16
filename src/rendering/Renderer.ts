@@ -13,6 +13,14 @@ const CAMERA_NEAR = 0.05;
 const CAMERA_FAR = 1024;
 const PIXEL_RATIO = 1;
 
+function readFancyGraphicsSetting(): boolean {
+  try {
+    return window.localStorage.getItem('minecraft.graphics') !== 'fast';
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Owns the Three.js scene, camera, and WebGL renderer.
  * Rendering and resize only — the Engine owns the game loop.
@@ -44,6 +52,14 @@ export class Renderer {
     density: overworldFogDensity(),
   };
 
+  /**
+   * Beta graphics setting bridge. `fast` uses precipitation radius 5;
+   * fancy/default uses radius 10. A future UI can own this value; for now
+   * localStorage lets the renderer read a real setting without hardcoding
+   * the weather radius in PrecipitationRenderer.
+   */
+  private readonly fancyGraphics = readFancyGraphicsSetting();
+
   private readonly onResizeBound = (): void => {
     this.handleResize();
   };
@@ -74,6 +90,10 @@ export class Renderer {
 
   public getCurrentFogState(): FogState {
     return this.currentFogState;
+  }
+
+  public isFancyGraphicsEnabled(): boolean {
+    return this.fancyGraphics;
   }
 
   /**

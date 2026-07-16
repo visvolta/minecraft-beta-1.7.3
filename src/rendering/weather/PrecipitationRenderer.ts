@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import type { ChunkManager } from '../../world/ChunkManager';
-import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from '../../world/chunkConstants';
+import type { BlockRegistry } from '../../blocks/BlockRegistry';
+import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../../world/chunkConstants';
 import { ClimateSampler } from '../../world/generation/climate/ClimateSampler';
 import { selectBiome } from '../../world/generation/climate/BiomeSelector';
 import type { BiomeId } from '../../world/generation/climate/biomes';
 import type { AtmosphericState } from '../AtmosphericState';
+import { blockIdBlocksWeather } from '../../world/weather/WeatherBlocking';
 
 /**
  * Beta-style batched precipitation renderer (Rain + Snow).
@@ -47,8 +49,10 @@ import type { AtmosphericState } from '../AtmosphericState';
 
 import type { WorldTime } from '../../world/WorldTime';
 
-/** Beta fancy-graphics radius. Fast graphics would set this to 5. */
-export const WEATHER_RENDER_RADIUS = 10;
+export const WEATHER_RENDER_RADIUS_FAST = 5;
+export const WEATHER_RENDER_RADIUS_FANCY = 10;
+/** Back-compat export: fancy radius, matching Beta's default fancy setting. */
+export const WEATHER_RENDER_RADIUS = WEATHER_RENDER_RADIUS_FANCY;
 
 /**
  * Rain texture V-scroll rate — full-texture loops per real-time second.
@@ -86,8 +90,8 @@ export const RAIN_SLANT_Z = 0.0;
  */
 const RAIN_UV_HORIZONTAL_DRIFT = 0.05; // U units per V loop, in wind sign
 
-/** Y limits Beta uses when trimming the vertical strip around the camera. */
-const VERTICAL_HALF_HEIGHT = WEATHER_RENDER_RADIUS; // Beta: same as horizontal radius
+/** Tiny lift above the weather-blocking top face to avoid water-surface precision bleed. */
+const PRECIPITATION_SURFACE_EPSILON = 0.01;
 
 /** Precipitation categories per column. */
 type PrecipKind = 'none' | 'rain' | 'snow';
@@ -135,13 +139,17 @@ export class PrecipitationRenderer {
   private readonly snowMesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
   private readonly climateSampler: ClimateSampler;
   private readonly chunkManager: ChunkManager;
+  private readonly blockRegistry: BlockRegistry;
+  private readonly isFancyGraphicsEnabled: () => boolean;
 
   private lastCameraCellX = Number.NaN;
   private lastCameraCellY = Number.NaN;
   private lastCameraCellZ = Number.NaN;
+  private lastRenderRadius = Number.NaN;
   private lastRainOn = false;
 
   private columns: ColumnInfo[] = [];
+  private rainingColumns: ColumnInfo[] = [];
   private scrollT = 0; // accumulated seconds — drives UV scroll
 
   private rainActiveCount = 0;
@@ -151,9 +159,13 @@ export class PrecipitationRenderer {
     scene: THREE.Scene,
     chunkManager: ChunkManager,
     climateSampler: ClimateSampler,
+    blockRegistry: BlockRegistry,
+    isFancyGraphicsEnabled: () => boolean,
   ) {
     this.chunkManager = chunkManager;
     this.climateSampler = climateSampler;
+    this.blockRegistry = blockRegistry;
+    this.isFancyGraphicsEnabled = isFancyGraphicsEnabled;
 
     this.root = new THREE.Group();
     this.root.name = 'precipitationLayer';
@@ -233,10 +245,12 @@ export class PrecipitationRenderer {
     const cx = Math.floor(cameraX);
     const cy = Math.floor(cameraY);
     const cz = Math.floor(cameraZ);
+    const renderRadius = this.getRenderRadius();
     if (
       cx !== this.lastCameraCellX ||
       cy !== this.lastCameraCellY ||
       cz !== this.lastCameraCellZ ||
+      renderRadius !== this.lastRenderRadius ||
       rainOn !== this.lastRainOn ||
       this.needsHeightmapResample()
     ) {
@@ -245,6 +259,7 @@ export class PrecipitationRenderer {
       this.lastCameraCellX = cx;
       this.lastCameraCellY = cy;
       this.lastCameraCellZ = cz;
+      this.lastRenderRadius = renderRadius;
       this.lastRainOn = rainOn;
       // snowActiveCount is tracked purely so `getStats()` can report it;
       // no need to store lastSnowOn separately.
@@ -257,18 +272,18 @@ export class PrecipitationRenderer {
     // Root follows the camera by translation only (no rotation).
     this.root.position.set(0, 0, 0);
 
-    // Rain: fast downward scroll.
+    // Rain: fast downward scroll. Quad V increases with world Y
+    // (`v = y / 4`), and Three's positive texture offset adds to sampled
+    // V; therefore a positive V offset moves texture features downward
+    // in world space, matching Beta's `v + f10` renderRainSnow math.
     const rainV = (this.scrollT * RAIN_SCROLL_SPEED) % 1;
-    // Stage 18B: small horizontal UV drift matching the geometric
-    // slant direction so texels look like they travel down the tilted
-    // sheet (not straight down a leaning wall).
     const rainU = (Math.sign(RAIN_SLANT_X) * this.scrollT * RAIN_SCROLL_SPEED * RAIN_UV_HORIZONTAL_DRIFT) % 1;
-    (this.rainMaterial.map as THREE.Texture).offset.set(rainU, -rainV);
-    // Snow: slow scroll + horizontal sway.
+    (this.rainMaterial.map as THREE.Texture).offset.set(rainU, rainV);
+    // Snow: same V convention as rain, but slower and with horizontal sway.
     const snowV = (this.scrollT * SNOW_SCROLL_SPEED) % 1;
     const snowU =
       Math.sin(this.scrollT * SNOW_SWAY_FREQUENCY * 2 * Math.PI) * SNOW_SWAY_AMPLITUDE;
-    (this.snowMaterial.map as THREE.Texture).offset.set(snowU, -snowV);
+    (this.snowMaterial.map as THREE.Texture).offset.set(snowU, snowV);
 
     this.rainMesh.visible = this.rainActiveCount > 0;
     this.snowMesh.visible = this.snowActiveCount > 0;
@@ -276,7 +291,7 @@ export class PrecipitationRenderer {
 
   /** Splash renderer needs to know where rain actually lands. */
   public getRainingColumns(): readonly ColumnInfo[] {
-    return this.columns.filter((c) => c.kind === 'rain');
+    return this.rainingColumns;
   }
 
   public getStats(): { rain: number; snow: number; total: number } {
@@ -285,6 +300,12 @@ export class PrecipitationRenderer {
       snow: this.snowActiveCount,
       total: this.columns.length,
     };
+  }
+
+  public getRenderRadius(): number {
+    return this.isFancyGraphicsEnabled()
+      ? WEATHER_RENDER_RADIUS_FANCY
+      : WEATHER_RENDER_RADIUS_FAST;
   }
 
   public dispose(): void {
@@ -302,7 +323,7 @@ export class PrecipitationRenderer {
   // ---------------------------------------------------------------------------
 
   private rebuildColumns(cameraCellX: number, cameraY: number, cameraCellZ: number): void {
-    const R = WEATHER_RENDER_RADIUS;
+    const R = this.getRenderRadius();
     const eyeBlockY = Math.floor(cameraY);
     const columns: ColumnInfo[] = [];
 
@@ -334,7 +355,7 @@ export class PrecipitationRenderer {
         // Top solid block in this column.
         const topY = this.getTopSolidBlockY(wx, wz);
         // Skip columns where eye is entirely above the storm band.
-        const bandTop = eyeBlockY + VERTICAL_HALF_HEIGHT;
+        const bandTop = eyeBlockY + R;
         if (topY >= bandTop) continue;
 
         columns.push({
@@ -349,14 +370,15 @@ export class PrecipitationRenderer {
     }
 
     this.columns = columns;
-    this.rainActiveCount = columns.filter((c) => c.kind === 'rain').length;
-    this.snowActiveCount = columns.filter((c) => c.kind === 'snow').length;
+    this.rainingColumns = columns.filter((c) => c.kind === 'rain');
+    this.rainActiveCount = this.rainingColumns.length;
+    this.snowActiveCount = columns.length - this.rainActiveCount;
   }
 
   private needsHeightmapResample(): boolean {
     // Cheap poll: if any of the visible chunks became dirty since last
     // rebuild, force a resample.
-    const R = WEATHER_RENDER_RADIUS;
+    const R = this.getRenderRadius();
     const cx = this.lastCameraCellX;
     const cz = this.lastCameraCellZ;
     if (Number.isNaN(cx) || Number.isNaN(cz)) return false;
@@ -377,10 +399,14 @@ export class PrecipitationRenderer {
     const chunkX = Math.floor(worldX / CHUNK_SIZE_X);
     const chunkZ = Math.floor(worldZ / CHUNK_SIZE_Z);
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    if (chunk === undefined) return 0;
+    if (chunk === undefined) return CHUNK_SIZE_Y;
     const localX = ((worldX % CHUNK_SIZE_X) + CHUNK_SIZE_X) % CHUNK_SIZE_X;
     const localZ = ((worldZ % CHUNK_SIZE_Z) + CHUNK_SIZE_Z) % CHUNK_SIZE_Z;
-    return chunk.getHeight(localX, localZ);
+    return chunk.getPrecipitationHeight(
+      localX,
+      localZ,
+      (blockId) => blockIdBlocksWeather(this.blockRegistry, blockId),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -399,10 +425,11 @@ export class PrecipitationRenderer {
     const snow: BuildBuffers = new BuildBuffers();
 
     const eyeBlockY = Math.floor(cameraY);
+    const R = this.getRenderRadius();
 
     for (const col of this.columns) {
-      const bandBottom = Math.max(col.topY, eyeBlockY - VERTICAL_HALF_HEIGHT);
-      const bandTop = Math.max(col.topY, eyeBlockY + VERTICAL_HALF_HEIGHT);
+      const bandBottom = Math.max(col.topY + PRECIPITATION_SURFACE_EPSILON, eyeBlockY - R);
+      const bandTop = Math.max(col.topY + PRECIPITATION_SURFACE_EPSILON, eyeBlockY + R);
       if (bandBottom >= bandTop) continue;
 
       const buffers = col.kind === 'rain' ? rain : snow;

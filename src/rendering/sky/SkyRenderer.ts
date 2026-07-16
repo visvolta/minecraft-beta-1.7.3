@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { WorldTime } from '../../world/WorldTime';
+import type { AtmosphericState } from '../AtmosphericState';
 import { CelestialRenderer } from './CelestialRenderer';
 import {
   SkyColorController,
@@ -188,9 +189,61 @@ export class SkyRenderer {
     return this.lastState;
   }
 
-  /** Latest colour state, consumed by FogController for overworld fog colour. */
+  /** Latest colour state, consumed by the shared atmospheric builder. */
   public getCurrentColorState(): SkyColorState {
     return this.mostRecentColorState;
+  }
+
+  /**
+   * Applies the shared weather-blended sky/horizon colour after the base
+   * Beta time-of-day state has been computed. Fog consumes the same
+   * `atmos.horizon.hex`, keeping sky and fog matched by construction.
+   */
+  public applyAtmosphericState(atmos: AtmosphericState): void {
+    scratchTop.setRGB(atmos.sky.r, atmos.sky.g, atmos.sky.b, THREE.SRGBColorSpace);
+    scratchHorizon.setRGB(atmos.horizon.r, atmos.horizon.g, atmos.horizon.b, THREE.SRGBColorSpace);
+    scratchBottom.setRGB(atmos.horizon.r, atmos.horizon.g, atmos.horizon.b, THREE.SRGBColorSpace);
+
+    const positions = this.domeMesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const count = positions.count;
+    const array = this.colorAttribute.array as Float32Array;
+
+    for (let i = 0; i < count; i++) {
+      const y = positions.getY(i) / SKY_RADIUS;
+      let r: number;
+      let g: number;
+      let b: number;
+
+      if (y >= HORIZON_BAND_HALF_WIDTH) {
+        const t = smoothstep01((y - HORIZON_BAND_HALF_WIDTH) / (1 - HORIZON_BAND_HALF_WIDTH));
+        r = scratchHorizon.r + (scratchTop.r - scratchHorizon.r) * t;
+        g = scratchHorizon.g + (scratchTop.g - scratchHorizon.g) * t;
+        b = scratchHorizon.b + (scratchTop.b - scratchHorizon.b) * t;
+      } else if (y <= -HORIZON_BAND_HALF_WIDTH) {
+        const t = smoothstep01((-y - HORIZON_BAND_HALF_WIDTH) / (1 - HORIZON_BAND_HALF_WIDTH));
+        r = scratchHorizon.r + (scratchBottom.r - scratchHorizon.r) * t;
+        g = scratchHorizon.g + (scratchBottom.g - scratchHorizon.g) * t;
+        b = scratchHorizon.b + (scratchBottom.b - scratchHorizon.b) * t;
+      } else {
+        r = scratchHorizon.r;
+        g = scratchHorizon.g;
+        b = scratchHorizon.b;
+      }
+
+      array[i * 3] = r;
+      array[i * 3 + 1] = g;
+      array[i * 3 + 2] = b;
+    }
+
+    this.colorAttribute.needsUpdate = true;
+    this.lastState = {
+      ...this.lastState,
+      skyColorHex: atmos.sky.hex,
+      horizonColorHex: atmos.horizon.hex,
+      fogColorHex: atmos.fog.hex,
+      skylightSubtracted: atmos.effectiveSkylightSubtracted,
+      sunBrightnessFactor: atmos.sunBrightnessFactor,
+    };
   }
 
   /**

@@ -1,0 +1,194 @@
+import type { SkyColorState } from '../../rendering/sky/SkyColorController';
+import type { WeatherState } from './WeatherState';
+
+export const GAME_TICKS_PER_SECOND = 20;
+export const RAIN_OFF_MAX = 0x29040;
+export const RAIN_OFF_MIN_OFFSET = 12000;
+export const RAIN_ON_MAX = 12000;
+export const RAIN_ON_MIN_OFFSET = 12000;
+export const THUNDER_OFF_MAX = 0x29040;
+export const THUNDER_OFF_MIN_OFFSET = 12000;
+export const THUNDER_ON_MAX = 12000;
+export const THUNDER_ON_MIN_OFFSET = 3600;
+export const WEATHER_STRENGTH_DELTA_PER_TICK = 0.01;
+
+export interface BetaColor {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+  readonly hex: number;
+}
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
+export function packHex(r: number, g: number, b: number): number {
+  const rr = Math.round(clamp01(r) * 255) & 0xff;
+  const gg = Math.round(clamp01(g) * 255) & 0xff;
+  const bb = Math.round(clamp01(b) * 255) & 0xff;
+  return (rr << 16) | (gg << 8) | bb;
+}
+
+function luminance(r: number, g: number, b: number): number {
+  return r * 0.3 + g * 0.59 + b * 0.11;
+}
+
+function color(r: number, g: number, b: number): BetaColor {
+  return { r, g, b, hex: packHex(r, g, b) };
+}
+
+/** Beta World.getSkyColor weather branches. */
+export function applyBetaSkyWeather(
+  r: number,
+  g: number,
+  b: number,
+  rainStrength: number,
+  weightedThunderStrength: number,
+  lightningFlashStrength = 0,
+): BetaColor {
+  let rr = r;
+  let gg = g;
+  let bb = b;
+
+  const rain = clamp01(rainStrength);
+  if (rain > 0) {
+    const grey = luminance(rr, gg, bb) * 0.6;
+    const mix = 1 - rain * 0.75;
+    rr = rr * mix + grey * (1 - mix);
+    gg = gg * mix + grey * (1 - mix);
+    bb = bb * mix + grey * (1 - mix);
+  }
+
+  const thunder = clamp01(weightedThunderStrength);
+  if (thunder > 0) {
+    const grey = luminance(rr, gg, bb) * 0.2;
+    const mix = 1 - thunder * 0.75;
+    rr = rr * mix + grey * (1 - mix);
+    gg = gg * mix + grey * (1 - mix);
+    bb = bb * mix + grey * (1 - mix);
+  }
+
+  const flash = clamp01(lightningFlashStrength) * 0.45;
+  if (flash > 0) {
+    rr = rr * (1 - flash) + 0.8 * flash;
+    gg = gg * (1 - flash) + 0.8 * flash;
+    bb = bb * (1 - flash) + 1.0 * flash;
+  }
+
+  return color(rr, gg, bb);
+}
+
+/** Beta World.drawClouds weather branches. */
+export function applyBetaCloudWeather(
+  dayFactor: number,
+  rainStrength: number,
+  weightedThunderStrength: number,
+): BetaColor {
+  let r = 1;
+  let g = 1;
+  let b = 1;
+
+  const rain = clamp01(rainStrength);
+  if (rain > 0) {
+    const grey = luminance(r, g, b) * 0.6;
+    const mix = 1 - rain * 0.95;
+    r = r * mix + grey * (1 - mix);
+    g = g * mix + grey * (1 - mix);
+    b = b * mix + grey * (1 - mix);
+  }
+
+  const f = clamp01(dayFactor);
+  r *= f * 0.9 + 0.1;
+  g *= f * 0.9 + 0.1;
+  b *= f * 0.85 + 0.15;
+
+  const thunder = clamp01(weightedThunderStrength);
+  if (thunder > 0) {
+    const grey = luminance(r, g, b) * 0.2;
+    const mix = 1 - thunder * 0.95;
+    r = r * mix + grey * (1 - mix);
+    g = g * mix + grey * (1 - mix);
+    b = b * mix + grey * (1 - mix);
+  }
+
+  return color(r, g, b);
+}
+
+/** Beta World.calculateSkylightSubtracted with rain/thunder terms. */
+export function calculateBetaSkylightSubtracted(
+  celestialAngle: number,
+  rainStrength: number,
+  weightedThunderStrength: number,
+): number {
+  let value = 1 - (Math.cos(celestialAngle * Math.PI * 2) * 2 + 0.5);
+  value = clamp01(value);
+  value = 1 - value;
+  value *= 1 - (clamp01(rainStrength) * 5) / 16;
+  value *= 1 - (clamp01(weightedThunderStrength) * 5) / 16;
+  value = 1 - value;
+  return Math.floor(value * 11);
+}
+
+/** Beta World.func_35464_b / sun brightness with weather terms. */
+export function calculateBetaSunBrightnessFactor(
+  celestialAngle: number,
+  rainStrength: number,
+  weightedThunderStrength: number,
+): number {
+  let value = 1 - (Math.cos(celestialAngle * Math.PI * 2) * 2 + 0.2);
+  value = clamp01(value);
+  value = 1 - value;
+  value *= 1 - (clamp01(rainStrength) * 5) / 16;
+  value *= 1 - (clamp01(weightedThunderStrength) * 5) / 16;
+  return value * 0.8 + 0.2;
+}
+
+export function getBetaCelestialAlpha(rainStrength: number): number {
+  return clamp01(1 - rainStrength);
+}
+
+/** Shared colour state for sky/fog/cloud/celestial consumers. */
+export function buildBetaWeatherColors(
+  skyState: SkyColorState,
+  weather: WeatherState,
+  lightningFlashStrength = 0,
+): {
+  readonly rainStrength: number;
+  readonly thunderStrength: number;
+  readonly sky: BetaColor;
+  readonly horizon: BetaColor;
+  readonly fog: BetaColor;
+  readonly cloud: BetaColor;
+  readonly celestialAlpha: number;
+  readonly skylightSubtracted: number;
+  readonly sunBrightnessFactor: number;
+} {
+  const rain = clamp01(weather.getRainStrength(weather.partialTick));
+  const thunder = clamp01(weather.getThunderStrength(weather.partialTick));
+
+  // Project rule for this overhaul: one shared weather/horizon/fog colour.
+  // The colour is generated by Beta's sky weather branches and consumed by
+  // fog directly, so no renderer owns an independent fog colour calculation.
+  const sharedSky = applyBetaSkyWeather(
+    skyState.skyR,
+    skyState.skyG,
+    skyState.skyB,
+    rain,
+    thunder,
+    lightningFlashStrength,
+  );
+  const cloud = applyBetaCloudWeather(skyState.sunBrightnessFactor, rain, thunder);
+
+  return {
+    rainStrength: rain,
+    thunderStrength: thunder,
+    sky: sharedSky,
+    horizon: sharedSky,
+    fog: sharedSky,
+    cloud,
+    celestialAlpha: getBetaCelestialAlpha(rain),
+    skylightSubtracted: calculateBetaSkylightSubtracted(skyState.celestialAngle, rain, thunder),
+    sunBrightnessFactor: calculateBetaSunBrightnessFactor(skyState.celestialAngle, rain, thunder),
+  };
+}

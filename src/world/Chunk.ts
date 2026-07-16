@@ -60,6 +60,14 @@ export class Chunk {
    */
   private heightmap: Int16Array | undefined;
 
+  /**
+   * Dedicated Beta precipitation-height cache. This is NOT the same as
+   * the normal heightmap: vanilla rain/snow stops on the first solid OR
+   * liquid material, so water/glass/leaves can block weather even when
+   * other systems treat them as transparent/non-opaque.
+   */
+  private precipitationHeightmap: Int16Array | undefined;
+
   public constructor(chunkX: number, chunkZ: number) {
     this.chunkX = chunkX;
     this.chunkZ = chunkZ;
@@ -165,6 +173,8 @@ export class Chunk {
     }
 
     this.blocks[i] = blockId;
+    this.heightmap = undefined;
+    this.precipitationHeightmap = undefined;
     this.dirty = true;
   }
 
@@ -189,6 +199,8 @@ export class Chunk {
     }
 
     if (changed) {
+      this.heightmap = undefined;
+      this.precipitationHeightmap = undefined;
       this.dirty = true;
     }
   }
@@ -221,6 +233,8 @@ export class Chunk {
     }
 
     if (changed) {
+      this.heightmap = undefined;
+      this.precipitationHeightmap = undefined;
       this.dirty = true;
     }
   }
@@ -242,9 +256,9 @@ export class Chunk {
 
     this.blocks.set(data);
     this.dirty = true;
-    // Any previously cached heightmap is now stale; recomputed lazily
-    // the next time getHeight()/recomputeHeightmap() is called.
+    // Any previously cached heightmaps are now stale; recomputed lazily.
     this.heightmap = undefined;
+    this.precipitationHeightmap = undefined;
   }
 
   /**
@@ -266,6 +280,46 @@ export class Chunk {
     }
 
     return this.heightmap![localZ * CHUNK_SIZE_X + localX]!;
+  }
+
+  /**
+   * Beta precipitation-height lookup for rain/snow/lightning/splash
+   * placement: one past the highest weather-blocking block. The caller
+   * provides the block predicate so Chunk storage stays independent of
+   * BlockRegistry while still caching the expensive vertical scan.
+   */
+  public getPrecipitationHeight(
+    localX: number,
+    localZ: number,
+    blocksWeather: (blockId: BlockId) => boolean,
+  ): number {
+    if (!this.isInBounds(localX, 0, localZ)) {
+      throw new RangeError(`Local X/Z out of bounds: (${localX}, ${localZ})`);
+    }
+
+    if (this.precipitationHeightmap === undefined) {
+      this.recomputePrecipitationHeightmap(blocksWeather);
+    }
+
+    return this.precipitationHeightmap![localZ * CHUNK_SIZE_X + localX]!;
+  }
+
+  public recomputePrecipitationHeightmap(blocksWeather: (blockId: BlockId) => boolean): void {
+    const map = new Int16Array(CHUNK_SIZE_X * CHUNK_SIZE_Z);
+
+    for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+      for (let x = 0; x < CHUNK_SIZE_X; x++) {
+        let y = CHUNK_SIZE_Y - 1;
+
+        while (y > 0 && !blocksWeather(this.blocks[this.index(x, y, z)]!)) {
+          y--;
+        }
+
+        map[z * CHUNK_SIZE_X + x] = y > 0 ? y + 1 : -1;
+      }
+    }
+
+    this.precipitationHeightmap = map;
   }
 
   /**
