@@ -83,10 +83,10 @@ export class WorkerValidationHarness {
     }
     const target = manager.getChunk(0, 0)!;
     const mesher = new ChunkMesher(manager, this.registry, this.atlas);
-    const expected = [mesher.build(target), mesher.buildFluids(target), mesher.buildCutouts(target)];
+    const expected = [mesher.build(target), mesher.buildWater(target), mesher.buildLava(target), mesher.buildCutouts(target)];
     const result = await this.meshWorker(manager, target);
-    const actual = [result.terrain, result.fluid, result.cutout];
-    const names = ['terrain', 'fluid', 'cutout'];
+    const actual = [result.terrain, result.water, result.lava, result.cutout];
+    const names = ['terrain', 'water', 'lava', 'cutout'];
     for (let i = 0; i < expected.length; i++) {
       const mismatch = this.compareGeometry(expected[i]!, actual[i]!, names[i]!);
       expected[i]!.dispose();

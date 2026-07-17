@@ -78,31 +78,31 @@ export class FluidAnimationSystem {
   }
 
   public applyUniforms(uniforms: {
-    uWaterStillTexture: { value: THREE.Texture };
-    uWaterFlowTexture: { value: THREE.Texture };
-    uLavaStillTexture: { value: THREE.Texture };
-    uLavaFlowTexture: { value: THREE.Texture };
-    uWaterStillFrame: { value: number };
-    uWaterFlowFrame: { value: number };
-    uLavaStillFrame: { value: number };
-    uLavaFlowFrame: { value: number };
-    uWaterStillFrameCount: { value: number };
-    uWaterFlowFrameCount: { value: number };
-    uLavaStillFrameCount: { value: number };
-    uLavaFlowFrameCount: { value: number };
+    uWaterStillTexture?: { value: THREE.Texture };
+    uWaterFlowTexture?: { value: THREE.Texture };
+    uLavaStillTexture?: { value: THREE.Texture };
+    uLavaFlowTexture?: { value: THREE.Texture };
+    uWaterStillFrame?: { value: number };
+    uWaterFlowFrame?: { value: number };
+    uLavaStillFrame?: { value: number };
+    uLavaFlowFrame?: { value: number };
+    uWaterStillFrameCount?: { value: number };
+    uWaterFlowFrameCount?: { value: number };
+    uLavaStillFrameCount?: { value: number };
+    uLavaFlowFrameCount?: { value: number };
   }): void {
-    uniforms.uWaterStillTexture.value = this.waterStillTexture;
-    uniforms.uWaterFlowTexture.value = this.waterFlowTexture;
-    uniforms.uLavaStillTexture.value = this.lavaStillTexture;
-    uniforms.uLavaFlowTexture.value = this.lavaFlowTexture;
-    uniforms.uWaterStillFrame.value = this.waterStillFrame;
-    uniforms.uWaterFlowFrame.value = this.waterFlowFrame;
-    uniforms.uLavaStillFrame.value = this.lavaStillFrame;
-    uniforms.uLavaFlowFrame.value = this.lavaFlowFrame;
-    uniforms.uWaterStillFrameCount.value = this.waterStillDescriptor.frameCount;
-    uniforms.uWaterFlowFrameCount.value = this.waterFlowDescriptor.frameCount;
-    uniforms.uLavaStillFrameCount.value = this.lavaStillDescriptor.frameCount;
-    uniforms.uLavaFlowFrameCount.value = this.lavaFlowDescriptor.frameCount;
+    if (uniforms.uWaterStillTexture) uniforms.uWaterStillTexture.value = this.waterStillTexture;
+    if (uniforms.uWaterFlowTexture) uniforms.uWaterFlowTexture.value = this.waterFlowTexture;
+    if (uniforms.uLavaStillTexture) uniforms.uLavaStillTexture.value = this.lavaStillTexture;
+    if (uniforms.uLavaFlowTexture) uniforms.uLavaFlowTexture.value = this.lavaFlowTexture;
+    if (uniforms.uWaterStillFrame) uniforms.uWaterStillFrame.value = this.waterStillFrame;
+    if (uniforms.uWaterFlowFrame) uniforms.uWaterFlowFrame.value = this.waterFlowFrame;
+    if (uniforms.uLavaStillFrame) uniforms.uLavaStillFrame.value = this.lavaStillFrame;
+    if (uniforms.uLavaFlowFrame) uniforms.uLavaFlowFrame.value = this.lavaFlowFrame;
+    if (uniforms.uWaterStillFrameCount) uniforms.uWaterStillFrameCount.value = this.waterStillDescriptor.frameCount;
+    if (uniforms.uWaterFlowFrameCount) uniforms.uWaterFlowFrameCount.value = this.waterFlowDescriptor.frameCount;
+    if (uniforms.uLavaStillFrameCount) uniforms.uLavaStillFrameCount.value = this.lavaStillDescriptor.frameCount;
+    if (uniforms.uLavaFlowFrameCount) uniforms.uLavaFlowFrameCount.value = this.lavaFlowDescriptor.frameCount;
   }
 
   public getWaterFrame(): number {

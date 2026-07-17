@@ -36,7 +36,8 @@ export interface ChunkMeshGeometrySet {
   readonly chunkZ: number;
   readonly targetRevision: number;
   readonly terrain: THREE.BufferGeometry;
-  readonly fluid: THREE.BufferGeometry;
+  readonly water: THREE.BufferGeometry;
+  readonly lava: THREE.BufferGeometry;
   readonly cutout: THREE.BufferGeometry;
   readonly fire: THREE.BufferGeometry;
   readonly translucent: THREE.BufferGeometry;
@@ -183,7 +184,8 @@ export class ChunkMeshingQueue {
         chunkZ: result.chunkZ,
         targetRevision: result.targetRevision,
         terrain: geometryFromBuffers(result.terrain),
-        fluid: geometryFromBuffers(result.fluid),
+        water: geometryFromBuffers(result.water),
+        lava: geometryFromBuffers(result.lava),
         cutout: geometryFromBuffers(result.cutout),
         fire: geometryFromBuffers(result.fire),
         translucent: geometryFromBuffers(result.translucent),

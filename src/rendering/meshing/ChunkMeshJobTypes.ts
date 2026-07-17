@@ -51,7 +51,8 @@ export interface ChunkMeshResult {
   readonly chunkZ: number;
   readonly targetRevision: number;
   readonly terrain: MeshAttributeBuffers;
-  readonly fluid: MeshAttributeBuffers;
+  readonly water: MeshAttributeBuffers;
+  readonly lava: MeshAttributeBuffers;
   readonly cutout: MeshAttributeBuffers;
   readonly fire: MeshAttributeBuffers;
   readonly translucent: MeshAttributeBuffers;

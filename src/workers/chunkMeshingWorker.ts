@@ -61,7 +61,7 @@ function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
 
 function transferList(result: ChunkMeshResult): Transferable[] {
   const list: Transferable[] = [];
-  for (const mesh of [result.terrain, result.fluid, result.cutout, result.fire, result.translucent]) {
+  for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.fire, result.translucent]) {
     list.push(
       mesh.positions,
       mesh.normals,
@@ -111,7 +111,8 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
     atlas.set(job.atlasUvs);
     const mesher = new ChunkMesher(manager, registry, atlas as never);
     const terrainGeometry = mesher.build(target);
-    const fluidGeometry = mesher.buildFluids(target);
+    const waterGeometry = mesher.buildWater(target);
+    const lavaGeometry = mesher.buildLava(target);
     const cutoutGeometry = mesher.buildCutouts(target);
     const fireGeometry = mesher.buildFires(target);
     const translucentGeometry = mesher.buildTranslucent(target);
@@ -123,14 +124,16 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
       chunkZ: job.targetChunkZ,
       targetRevision: job.targetRevision,
       terrain: extractGeometry(terrainGeometry),
-      fluid: extractGeometry(fluidGeometry),
+      water: extractGeometry(waterGeometry),
+      lava: extractGeometry(lavaGeometry),
       cutout: extractGeometry(cutoutGeometry),
       fire: extractGeometry(fireGeometry),
       translucent: extractGeometry(translucentGeometry),
       durationMs: performance.now() - start,
     };
     terrainGeometry.dispose();
-    fluidGeometry.dispose();
+    waterGeometry.dispose();
+    lavaGeometry.dispose();
     cutoutGeometry.dispose();
     fireGeometry.dispose();
     translucentGeometry.dispose();

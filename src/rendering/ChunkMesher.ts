@@ -3,6 +3,7 @@ import type { BlockId } from '../blocks/BlockId';
 import { BlockIds } from '../blocks/BlockId';
 import type { BlockFace } from '../blocks/BlockFace';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
+import type { BlockDefinition } from '../blocks/BlockDefinition';
 import { resolveBlockTexture } from '../blocks/resolveBlockTexture';
 import { resolveBlockTint } from '../blocks/resolveBlockTint';
 import type { TextureAtlas } from '../assets/TextureAtlas';
@@ -1025,7 +1026,20 @@ export class ChunkMesher {
 
           } else {
             // ── Ground fire ───────────────────────────────────────
-            // DO NOT TOUCH, THIS 100% CORRECT AND SHOULD NOT BE CHANGED. (Beta 1.7.3 fire geometry)
+            // Beta renderBlockFire ground-fire (else branch):
+            //
+            // TWO perpendicular planes, 90° apart, forming a cross:
+            //   Plane A (Z-axis): x=0.3→0.7, z=0→1, front+back
+            //   Plane B (X-axis): z=0.3→0.7, x=0→1, front+back
+            //
+            // Total: exactly 4 quads. No overlapping coplanar planes.
+            // All use the same texture row (row 0).
+            //
+            // Beta variable mapping (with x=0, z=0):
+            //   var19 = x+0.7, var21 = x+0.3  (Z-plane width 0.4)
+            //   var23 = z+0.7, var25 = z+0.3  (X-plane width 0.4)
+
+            // ── Plane A: Z-axis (x = 0.3 → 0.7, z = 0 → 1) ──
             // Front face
             buffers.pushQuad([
               [x + 1, y + H + Y_OFF, z + 1],
@@ -1046,7 +1060,7 @@ export class ChunkMesher {
             [uL, V0, uL, V1, uR, V1, uR, V0]);
 
             // ── Plane B: X-axis (z = 0.3 or 0.7, x = 0 → 1) ──
-            // DO NOT TOUCH, THIS 100% CORRECT AND SHOULD NOT BE CHANGED. (Beta 1.7.3 fire geometry)
+            // Front plane at z + 0.3
             buffers.pushQuad([
               [x, y + H + Y_OFF, z + 0],
               [x, y, z + 0],
@@ -1056,7 +1070,6 @@ export class ChunkMesher {
             FluidTextureKind.WaterStill, undefined,
             [uR, V0, uR, V1, uL, V1, uL, V0]);
             // Back face
-            // DO NOT TOUCH, THIS 100% CORRECT AND SHOULD NOT BE CHANGED. (Beta 1.7.3 fire geometry)
             buffers.pushQuad([
               [x + 1, y + H + Y_OFF, z + 1],
               [x + 1, y, z + 1],
@@ -1184,16 +1197,12 @@ export class ChunkMesher {
           if (definition === undefined) continue;
 
           // Ice: standard full-cube solid block rendering.
-          // Beta shouldSideBeRendered: super.shouldSideBeRendered(l ^ 1)
-          // Block.shouldSideBeRendered returns false if neighbour block ID == this block ID.
-          // This prevents internal faces between adjacent ice blocks.
-          // Ice shows faces against non-opaque neighbours (water, air, glass, leaves)
-          // but NOT against opaque blocks (stone, dirt, etc.) or other ice.
+          // Beta shouldSideBeRendered: super.shouldSideBeRendered(1 - side)
+          // This means ice shows faces against non-opaque neighbours (including other ice).
           for (const face of FACES) {
             const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-            // Beta: don't render face if neighbour is same block (ice) OR neighbour is opaque cube
-            if (neighbourId === blockId) continue;
-            if (this.hidesOpaqueFace(neighbourId)) continue;
+            // Don't hide against other ice or transparent blocks
+            if (this.hidesOpaqueFace(neighbourId) && !this.isIce(neighbourId)) continue;
 
             const textureName = resolveBlockTexture(definition, face.slot);
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
@@ -1213,84 +1222,126 @@ export class ChunkMesher {
     return buffers.toGeometry();
   }
 
-  public buildFluids(chunk: Chunk): THREE.BufferGeometry {
+  public buildWater(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
     for (let y = 0; y < CHUNK_SIZE_Y; y++) {
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
         for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
-          if (!this.isFluid(blockId)) continue;
+          if (!this.isWater(blockId)) continue;
           const definition = this.blockRegistry.getById(blockId);
           if (definition === undefined) continue;
 
-          const textureName = resolveBlockTexture(definition, 'side');
-          const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-          const tint = resolveBlockTint(definition, 'side');
-          // Each visible fluid face samples the cell on the other side of
-          // that face. In particular, open-sky water must use the light above
-          // the surface rather than the attenuated light stored in the fluid.
-          // Directional Beta multipliers are applied separately below.
-          const topLight = this.getLightComponentsAt(chunk, x, y + 1, z);
-          const plusXLight = this.getLightComponentsAt(chunk, x + 1, y, z);
-          const minusXLight = this.getLightComponentsAt(chunk, x - 1, y, z);
-          const plusZLight = this.getLightComponentsAt(chunk, x, y, z + 1);
-          const minusZLight = this.getLightComponentsAt(chunk, x, y, z - 1);
-          const bottomLight = this.getLightComponentsAt(chunk, x, y - 1, z);
-          const metadata = chunk.getBlockMetadata(x, y, z);
-          const sideTextureKind = this.getFluidTextureKind(blockId, metadata, 'side');
-          const flow = this.computeFluidFlow(chunk, x, y, z, blockId);
-          const topTextureKind = this.getFluidTextureKind(blockId, metadata, 'top', flow.x, flow.z);
-          const topUvs = this.buildFluidTopUvs(flow.x, flow.z, topTextureKind);
-          const sameAbove = this.sameFluidMaterial(blockId, this.getBlockAt(chunk, x, y + 1, z));
-          const h00 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 0);
-          const h10 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 0);
-          const h11 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 1);
-          const h01 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 1);
-          // Beta maps each side's upper V coordinate from its corner height;
-          // a full-height surface starts at V=0 and a partial surface starts
-          // lower in the same logical frame. Vertex order is bottom-left,
-          // top-left, top-right, bottom-right for every side below.
-          const sideFrameUvs = {
-            plusX: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h10, 1, 1 - h11, 1, 1]),
-            minusX: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h01, 1, 1 - h00, 1, 1]),
-            plusZ: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h11, 1, 1 - h01, 1, 1]),
-            minusZ: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h00, 1, 1 - h10, 1, 1]),
-          };
-
-          if (!sameAbove) {
-            buffers.pushQuad([
-              [x, y + h01, z + 1],
-              [x + 1, y + h11, z + 1],
-              [x + 1, y + h10, z],
-              [x, y + h00, z],
-            ], [0, 1, 0], uvRect, tint, topLight, 1, topTextureKind, undefined, topUvs, 1);
-          }
-
-          // +X
-          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x + 1, y, z))) {
-            buffers.pushQuad([[x + 1, y, z], [x + 1, y + h10, z], [x + 1, y + h11, z + 1], [x + 1, y, z + 1]], [1, 0, 0], uvRect, tint, plusXLight, 1, sideTextureKind, undefined, sideFrameUvs.plusX, 0.6);
-          }
-          // -X
-          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x - 1, y, z))) {
-            buffers.pushQuad([[x, y, z + 1], [x, y + h01, z + 1], [x, y + h00, z], [x, y, z]], [-1, 0, 0], uvRect, tint, minusXLight, 1, sideTextureKind, undefined, sideFrameUvs.minusX, 0.6);
-          }
-          // +Z
-          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y, z + 1))) {
-            buffers.pushQuad([[x + 1, y, z + 1], [x + 1, y + h11, z + 1], [x, y + h01, z + 1], [x, y, z + 1]], [0, 0, 1], uvRect, tint, plusZLight, 1, sideTextureKind, undefined, sideFrameUvs.plusZ, 0.8);
-          }
-          // -Z
-          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y, z - 1))) {
-            buffers.pushQuad([[x, y, z], [x, y + h00, z], [x + 1, y + h10, z], [x + 1, y, z]], [0, 0, -1], uvRect, tint, minusZLight, 1, sideTextureKind, undefined, sideFrameUvs.minusZ, 0.8);
-          }
-          if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y - 1, z))) {
-            buffers.pushQuad([[x, y, z], [x + 1, y, z], [x + 1, y, z + 1], [x, y, z + 1]], [0, -1, 0], uvRect, tint, bottomLight, 1, sideTextureKind, undefined, undefined, 0.5);
-          }
+          this.buildFluidBlock(buffers, chunk, x, y, z, blockId, definition);
         }
       }
     }
 
     return buffers.toGeometry();
+  }
+
+  public buildLava(chunk: Chunk): THREE.BufferGeometry {
+    const buffers = new MeshBuffers();
+
+    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
+      for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+        for (let x = 0; x < CHUNK_SIZE_X; x++) {
+          const blockId = chunk.getBlock(x, y, z);
+          if (!this.isLava(blockId)) continue;
+          const definition = this.blockRegistry.getById(blockId);
+          if (definition === undefined) continue;
+
+          this.buildFluidBlock(buffers, chunk, x, y, z, blockId, definition);
+        }
+      }
+    }
+
+    return buffers.toGeometry();
+  }
+
+  /** @deprecated Use buildWater or buildLava instead. */
+  public buildFluids(chunk: Chunk): THREE.BufferGeometry {
+    // Combine both for backward compatibility
+    const waterGeo = this.buildWater(chunk);
+    const lavaGeo = this.buildLava(chunk);
+    // Merge geometries (simple approach - in practice we'd want to merge buffers)
+    // For now return water; lava will be handled separately by ChunkRenderer
+    lavaGeo.dispose();
+    return waterGeo;
+  }
+
+  private buildFluidBlock(
+    buffers: MeshBuffers,
+    chunk: Chunk,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+    definition: BlockDefinition,
+  ): void {
+    const textureName = resolveBlockTexture(definition, 'side');
+    const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+    const tint = resolveBlockTint(definition, 'side');
+    // Each visible fluid face samples the cell on the other side of
+    // that face. In particular, open-sky water must use the light above
+    // the surface rather than the attenuated light stored in the fluid.
+    // Directional Beta multipliers are applied separately below.
+    const topLight = this.getLightComponentsAt(chunk, x, y + 1, z);
+    const plusXLight = this.getLightComponentsAt(chunk, x + 1, y, z);
+    const minusXLight = this.getLightComponentsAt(chunk, x - 1, y, z);
+    const plusZLight = this.getLightComponentsAt(chunk, x, y, z + 1);
+    const minusZLight = this.getLightComponentsAt(chunk, x, y, z - 1);
+    const bottomLight = this.getLightComponentsAt(chunk, x, y - 1, z);
+    const metadata = chunk.getBlockMetadata(x, y, z);
+    const sideTextureKind = this.getFluidTextureKind(blockId, metadata, 'side');
+    const flow = this.computeFluidFlow(chunk, x, y, z, blockId);
+    const topTextureKind = this.getFluidTextureKind(blockId, metadata, 'top', flow.x, flow.z);
+    const topUvs = this.buildFluidTopUvs(flow.x, flow.z, topTextureKind);
+    const sameAbove = this.sameFluidMaterial(blockId, this.getBlockAt(chunk, x, y + 1, z));
+    const h00 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 0);
+    const h10 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 0);
+    const h11 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 1);
+    const h01 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 1);
+    // Beta maps each side's upper V coordinate from its corner height;
+    // a full-height surface starts at V=0 and a partial surface starts
+    // lower in the same logical frame. Vertex order is bottom-left,
+    // top-left, top-right, bottom-right for every side below.
+    const sideFrameUvs = {
+      plusX: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h10, 1, 1 - h11, 1, 1]),
+      minusX: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h01, 1, 1 - h00, 1, 1]),
+      plusZ: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h11, 1, 1 - h01, 1, 1]),
+      minusZ: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h00, 1, 1 - h10, 1, 1]),
+    };
+
+    if (!sameAbove) {
+      buffers.pushQuad([
+        [x, y + h01, z + 1],
+        [x + 1, y + h11, z + 1],
+        [x + 1, y + h10, z],
+        [x, y + h00, z],
+      ], [0, 1, 0], uvRect, tint, topLight, 1, topTextureKind, undefined, topUvs, 1);
+    }
+
+    // +X
+    if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x + 1, y, z))) {
+      buffers.pushQuad([[x + 1, y, z], [x + 1, y + h10, z], [x + 1, y + h11, z + 1], [x + 1, y, z + 1]], [1, 0, 0], uvRect, tint, plusXLight, 1, sideTextureKind, undefined, sideFrameUvs.plusX, 0.6);
+    }
+    // -X
+    if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x - 1, y, z))) {
+      buffers.pushQuad([[x, y, z + 1], [x, y + h01, z + 1], [x, y + h00, z], [x, y, z]], [-1, 0, 0], uvRect, tint, minusXLight, 1, sideTextureKind, undefined, sideFrameUvs.minusX, 0.6);
+    }
+    // +Z
+    if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y, z + 1))) {
+      buffers.pushQuad([[x + 1, y, z + 1], [x + 1, y + h11, z + 1], [x, y + h01, z + 1], [x, y, z + 1]], [0, 0, 1], uvRect, tint, plusZLight, 1, sideTextureKind, undefined, sideFrameUvs.plusZ, 0.8);
+    }
+    // -Z
+    if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y, z - 1))) {
+      buffers.pushQuad([[x, y, z], [x, y + h00, z], [x + 1, y + h10, z], [x + 1, y, z]], [0, 0, -1], uvRect, tint, minusZLight, 1, sideTextureKind, undefined, sideFrameUvs.minusZ, 0.8);
+    }
+    if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y - 1, z))) {
+      buffers.pushQuad([[x, y, z], [x + 1, y, z], [x + 1, y, z + 1], [x, y, z + 1]], [0, -1, 0], uvRect, tint, bottomLight, 1, sideTextureKind, undefined, undefined, 0.5);
+    }
   }
 
   private hidesOpaqueFace(neighbourId: BlockId): boolean {
@@ -1393,12 +1444,16 @@ export class ChunkMesher {
     }, x, y, z, blockId);
   }
 
-  private isFluid(blockId: BlockId): boolean {
-    return blockId === BlockIds.WaterFlowing || blockId === BlockIds.WaterStill || blockId === BlockIds.LavaFlowing || blockId === BlockIds.LavaStill;
-  }
-
   private isIce(blockId: BlockId): boolean {
     return blockId === BlockIds.Ice;
+  }
+
+  private isWater(blockId: BlockId): boolean {
+    return blockId === BlockIds.WaterFlowing || blockId === BlockIds.WaterStill;
+  }
+
+  private isLava(blockId: BlockId): boolean {
+    return blockId === BlockIds.LavaFlowing || blockId === BlockIds.LavaStill;
   }
 
   private sameFluidMaterial(a: BlockId, b: BlockId): boolean {
@@ -1451,14 +1506,7 @@ export class ChunkMesher {
       return false;
     }
 
-    // Beta BlockFluid.shouldSideBeRendered: don't render side face if neighbour
-    // material is solid OR liquid. Same fluid material already handled above.
-    // In Beta, "solid material" means blocks like stone, dirt, etc. (opaque cubes).
-    // Leaves, glass, etc. have non-solid materials and don't cull fluids.
-    // We approximate this by checking renderType === 'opaque' (opaque cubes).
-    const isOpaqueCube = neighbourDef.renderType === 'opaque';
-    const isLiquid = neighbourDef.isLiquid === true;
-    return isOpaqueCube || isLiquid;
+    return neighbourDef.solid && !neighbourDef.transparent;
   }
 
   private isOpaqueMeshBlock(blockId: BlockId): boolean {

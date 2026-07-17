@@ -14,49 +14,10 @@ import type { FireAnimationSystem } from './fire/FireAnimationSystem';
 /** Max dirty chunk meshes rebuilt in a single frame. */
 export const MESH_REBUILD_BUDGET = 4;
 
-/**
- * Stage 17B height-aware fog constants.
- *
- * Terrain materials use Three.js's stock fog (FogExp2 for overworld,
- * Fog for water/lava) but multiply the shader-computed `fogFactor` by
- * `1 - smoothstep(FOG_HEIGHT_START, FOG_HEIGHT_END, worldY)` so:
- *
- *   worldY ≤ FOG_HEIGHT_START : full-strength horizon fog
- *   worldY ≥ FOG_HEIGHT_END   : no fog contribution
- *   between                    : smooth taper
- *
- * Purpose: keep the horizon-fog band concentrated near terrain, so
- * looking upward reveals a clear sky and the cloud layer (Y=108..112)
- * is not washed out by a distant chunk edge's fog.
- *
- * Values chosen so:
- *   FOG_HEIGHT_START = 62  — right around sea level; peaks of low
- *                            hills sit inside the fog band and get the
- *                            expected atmospheric fade.
- *   FOG_HEIGHT_END   = 96  — safely below cloud altitude (108), so the
- *                            cloud layer sees no fog contribution from
- *                            terrain surfaces at any horizontal
- *                            distance. Tall mountains (Y ≥ 96) also
- *                            escape the fog band and read as crisp
- *                            silhouettes against the sky.
- *
- * Weather (future) may want to lower FOG_HEIGHT_END during rain so
- * clouds appear grounded — tuning knobs are exposed here so it's a
- * one-line change.
- */
+/** Stage 17B height-aware fog constants. */
 export const FOG_HEIGHT_START = 62;
 export const FOG_HEIGHT_END = 96;
 
-/**
- * Injects a small vertex-fragment shader modification into the passed
- * MeshBasicMaterial so its fog is height-attenuated. Uniforms
- * `uFogHeightStart` / `uFogHeightEnd` are added; a `vHeightFogWorldY`
- * varying carries the world-space Y of each fragment.
- *
- * We reuse Three's own `<fog_fragment>` computation entirely and only
- * multiply the resulting `fogFactor` by the height taper before the
- * final `mix()`.
- */
 function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
   const uniforms = {
     uSkylightSubtracted: { value: 0 },
@@ -110,16 +71,10 @@ function attachFluidAnimationShader(material: THREE.MeshBasicMaterial, fluidAnim
   const uniforms = {
     uWaterStillTexture: { value: fluidAnimationSystem.waterStillTexture },
     uWaterFlowTexture: { value: fluidAnimationSystem.waterFlowTexture },
-    uLavaStillTexture: { value: fluidAnimationSystem.lavaStillTexture },
-    uLavaFlowTexture: { value: fluidAnimationSystem.lavaFlowTexture },
     uWaterStillFrame: { value: 0 },
     uWaterFlowFrame: { value: 0 },
-    uLavaStillFrame: { value: 0 },
-    uLavaFlowFrame: { value: 0 },
     uWaterStillFrameCount: { value: fluidAnimationSystem.waterStillDescriptor.frameCount },
     uWaterFlowFrameCount: { value: fluidAnimationSystem.waterFlowDescriptor.frameCount },
-    uLavaStillFrameCount: { value: fluidAnimationSystem.lavaStillDescriptor.frameCount },
-    uLavaFlowFrameCount: { value: fluidAnimationSystem.lavaFlowDescriptor.frameCount },
     uWaterFlowBrightness: { value: FLUID_RENDER_SETTINGS.waterFlowBrightness },
   };
   material.userData.fluidAnimationUniforms = uniforms;
@@ -141,35 +96,72 @@ function attachFluidAnimationShader(material: THREE.MeshBasicMaterial, fluidAnim
         varying vec2 vFluidFrameUv;
         uniform sampler2D uWaterStillTexture;
         uniform sampler2D uWaterFlowTexture;
-        uniform sampler2D uLavaStillTexture;
-        uniform sampler2D uLavaFlowTexture;
         uniform float uWaterStillFrame;
         uniform float uWaterFlowFrame;
-        uniform float uLavaStillFrame;
-        uniform float uLavaFlowFrame;
         uniform float uWaterStillFrameCount;
         uniform float uWaterFlowFrameCount;
-        uniform float uLavaStillFrameCount;
-        uniform float uLavaFlowFrameCount;
         uniform float uWaterFlowBrightness;
         vec2 fluidFrameUv(vec2 uv, float frame, float frameCount) {
-          // Existing still/lava animation convention. Keep this path
-          // unchanged for those selectors.
           float frameLocalY = mod(uv.y + frameCount - frame, frameCount);
           return vec2(uv.x, frameLocalY / frameCount);
         }
         vec2 waterFlowFrameUv(vec2 uv, float frame, float frameCount) {
-          // Reverse only flowing water relative to the current direction.
           return vec2(uv.x, mod(uv.y + frame, frameCount) / frameCount);
         }`)
       .replace('#include <map_fragment>', `#ifdef USE_MAP
           vec4 sampledDiffuseColor;
           if (vFluidTextureKind < 0.5) {
             sampledDiffuseColor = texture2D(uWaterStillTexture, fluidFrameUv(vFluidFrameUv, uWaterStillFrame, uWaterStillFrameCount));
-          } else if (vFluidTextureKind < 1.5) {
+          } else {
             sampledDiffuseColor = texture2D(uWaterFlowTexture, waterFlowFrameUv(vFluidFrameUv, uWaterFlowFrame, uWaterFlowFrameCount));
             sampledDiffuseColor.rgb *= uWaterFlowBrightness;
-          } else if (vFluidTextureKind < 2.5) {
+          }
+          diffuseColor *= sampledDiffuseColor;
+        #endif`);
+  };
+  material.needsUpdate = true;
+}
+
+function attachLavaAnimationShader(material: THREE.MeshBasicMaterial, fluidAnimationSystem: FluidAnimationSystem): void {
+  const previous = material.onBeforeCompile;
+  const uniforms = {
+    uLavaStillTexture: { value: fluidAnimationSystem.lavaStillTexture },
+    uLavaFlowTexture: { value: fluidAnimationSystem.lavaFlowTexture },
+    uLavaStillFrame: { value: 0 },
+    uLavaFlowFrame: { value: 0 },
+    uLavaStillFrameCount: { value: fluidAnimationSystem.lavaStillDescriptor.frameCount },
+    uLavaFlowFrameCount: { value: fluidAnimationSystem.lavaFlowDescriptor.frameCount },
+  };
+  material.userData.lavaAnimationUniforms = uniforms;
+  material.onBeforeCompile = (shader): void => {
+    previous.call(material, shader, null as never);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute float fluidTextureKind;
+        attribute vec2 fluidFrameUv;
+        varying float vFluidTextureKind;
+        varying vec2 vFluidFrameUv;`)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+        vFluidTextureKind = fluidTextureKind;
+        vFluidFrameUv = fluidFrameUv;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying float vFluidTextureKind;
+        varying vec2 vFluidFrameUv;
+        uniform sampler2D uLavaStillTexture;
+        uniform sampler2D uLavaFlowTexture;
+        uniform float uLavaStillFrame;
+        uniform float uLavaFlowFrame;
+        uniform float uLavaStillFrameCount;
+        uniform float uLavaFlowFrameCount;
+        vec2 fluidFrameUv(vec2 uv, float frame, float frameCount) {
+          float frameLocalY = mod(uv.y + frameCount - frame, frameCount);
+          return vec2(uv.x, frameLocalY / frameCount);
+        }`)
+      .replace('#include <map_fragment>', `#ifdef USE_MAP
+          vec4 sampledDiffuseColor;
+          if (vFluidTextureKind < 2.5) {
             sampledDiffuseColor = texture2D(uLavaStillTexture, fluidFrameUv(vFluidFrameUv, uLavaStillFrame, uLavaStillFrameCount));
           } else {
             sampledDiffuseColor = texture2D(uLavaFlowTexture, fluidFrameUv(vFluidFrameUv, uLavaFlowFrame, uLavaFlowFrameCount));
@@ -191,11 +183,27 @@ function attachFireAnimationShader(material: THREE.MeshBasicMaterial, fireAnimat
     previous.call(material, shader, null as never);
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\n        attribute float fluidTextureKind;\n        attribute vec2 fluidFrameUv;\n        varying float vFluidTextureKind;\n        varying vec2 vFluidFrameUv;`)
-      .replace('#include <uv_vertex>', `#include <uv_vertex>\n        vFluidTextureKind = fluidTextureKind;\n        vFluidFrameUv = fluidFrameUv;`);
+      .replace('#include <common>', `#include <common>
+        attribute float fluidTextureKind;
+        attribute vec2 fluidFrameUv;
+        varying float vFluidTextureKind;
+        varying vec2 vFluidFrameUv;`)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+        vFluidTextureKind = fluidTextureKind;
+        vFluidFrameUv = fluidFrameUv;`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n        varying float vFluidTextureKind;\n        varying vec2 vFluidFrameUv;\n        uniform float uFireFrame;\n        uniform float uFireFrameCount;`)
-      .replace('#include <map_fragment>', `#ifdef USE_MAP\n          // Fire sprite sheet: vertical strip of 16x16 frames\n          // vFluidFrameUv.x = 0-1 within tile, vFluidFrameUv.y = row index (0 or 1)\n          // mod() wraps cleanly so the final frame transitions to the first without a hitch.\n          float fireFrameY = mod(vFluidFrameUv.y + uFireFrame, uFireFrameCount) / uFireFrameCount;\n          vec2 fireUv = vec2(vFluidFrameUv.x, fireFrameY);\n          vec4 sampledDiffuseColor = texture2D(map, fireUv);\n          if (sampledDiffuseColor.a < 0.1) discard;\n          diffuseColor *= sampledDiffuseColor;\n        #endif`);
+      .replace('#include <common>', `#include <common>
+        varying float vFluidTextureKind;
+        varying vec2 vFluidFrameUv;
+        uniform float uFireFrame;
+        uniform float uFireFrameCount;`)
+      .replace('#include <map_fragment>', `#ifdef USE_MAP
+          float fireFrameY = mod(vFluidFrameUv.y + uFireFrame, uFireFrameCount) / uFireFrameCount;
+          vec2 fireUv = vec2(vFluidFrameUv.x, fireFrameY);
+          vec4 sampledDiffuseColor = texture2D(map, fireUv);
+          if (sampledDiffuseColor.a < 0.1) discard;
+          diffuseColor *= sampledDiffuseColor;
+        #endif`);
   };
   material.needsUpdate = true;
 }
@@ -205,21 +213,31 @@ export class ChunkRenderer {
   private readonly chunkManager: ChunkManager;
   private readonly mesher: ChunkMesher;
   private readonly meshQueue: ChunkMeshingQueue;
+
+  // Render groups (ordered by renderOrder)
   private readonly terrainGroup: THREE.Group;
-  private readonly fluidGroup: THREE.Group;
-  private readonly translucentGroup: THREE.Group;
   private readonly cutoutGroup: THREE.Group;
+  private readonly waterGroup: THREE.Group;
+  private readonly lavaGroup: THREE.Group;
+  private readonly translucentGroup: THREE.Group;
   private readonly fireGroup: THREE.Group;
+
+  // Materials
   private readonly terrainMaterial: THREE.MeshBasicMaterial;
-  private readonly fluidMaterial: THREE.MeshBasicMaterial;
+  private readonly waterMaterial: THREE.MeshBasicMaterial;
+  private readonly lavaMaterial: THREE.MeshBasicMaterial;
   private readonly translucentMaterial: THREE.MeshBasicMaterial;
   private readonly cutoutMaterial: THREE.MeshBasicMaterial;
   private readonly fireMaterial: THREE.MeshBasicMaterial;
+
+  // Mesh maps
   private readonly terrainMeshes = new Map<string, THREE.Mesh>();
-  private readonly fluidMeshes = new Map<string, THREE.Mesh>();
+  private readonly waterMeshes = new Map<string, THREE.Mesh>();
+  private readonly lavaMeshes = new Map<string, THREE.Mesh>();
   private readonly translucentMeshes = new Map<string, THREE.Mesh>();
   private readonly cutoutMeshes = new Map<string, THREE.Mesh>();
   private readonly fireMeshes = new Map<string, THREE.Mesh>();
+
   private readonly atlas: TextureAtlas;
   private readonly fluidAnimationSystem: FluidAnimationSystem;
   private readonly fireAnimationSystem: FireAnimationSystem;
@@ -245,34 +263,46 @@ export class ChunkRenderer {
     this.fluidAnimationSystem = fluidAnimationSystem;
     this.fireAnimationSystem = fireAnimationSystem;
 
+    // Terrain material (opaque)
     this.terrainMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       vertexColors: true,
     });
     attachHeightAwareFog(this.terrainMaterial);
 
-    this.fluidMaterial = new THREE.MeshBasicMaterial({
+    // Water material (transparent fluid)
+    this.waterMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       vertexColors: true,
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    attachHeightAwareFog(this.fluidMaterial);
-    attachFluidAnimationShader(this.fluidMaterial, this.fluidAnimationSystem);
+    attachHeightAwareFog(this.waterMaterial);
+    attachFluidAnimationShader(this.waterMaterial, this.fluidAnimationSystem);
 
-    // Translucent material for ice: alpha blending, no fluid animation.
-    // Beta ice uses render pass 1 (translucent). Shares atlas texture.
+    // Lava material (separate from water for correct depth ordering)
+    this.lavaMaterial = new THREE.MeshBasicMaterial({
+      map: atlas.texture,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    attachHeightAwareFog(this.lavaMaterial);
+    attachLavaAnimationShader(this.lavaMaterial, this.fluidAnimationSystem);
+
+    // Translucent material for ice/glass (solid translucent blocks)
     this.translucentMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       vertexColors: true,
       transparent: true,
-      depthWrite: false,
+      depthWrite: true, // Ice/glass are solid translucent - write depth to occlude each other
       side: THREE.DoubleSide,
     });
     attachHeightAwareFog(this.translucentMaterial);
 
-    this.cutoutMaterial = new THREE.MeshBasicMaterial({ 
+    this.cutoutMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       vertexColors: true,
       alphaTest: 0.5,
@@ -280,36 +310,39 @@ export class ChunkRenderer {
     });
     attachHeightAwareFog(this.cutoutMaterial);
 
-    // Stage 17: explicit renderOrder assignment so the transparent
-    // queue is deterministic. Opaque terrain at 0 (default), clouds at
-    // 10 (see CloudRenderer.ts), water/lava + cutout leaves at 20.
-    // Clouds therefore correctly sit BEHIND water surfaces (a cloud
-    // reflected in a pond, say, still gets overpainted by the pond) —
-    // and clouds are IN FRONT of terrain in the transparent queue,
-    // which is what depthTest expects since terrain has already
-    // written its depths in the opaque pass.
+    // Render groups with explicit renderOrder
+    // 0: opaque terrain (writes depth)
+    // 10: cutout/alpha-test (writes depth via alphaTest)
+    // 20: water, lava, translucent solids (depthTest, depthWrite varies)
+    // 25: fire
+    // 30: precipitation (drawn last, depthTest against all above)
+
     this.terrainGroup = new THREE.Group();
     this.terrainGroup.name = 'chunks-terrain';
     this.terrainGroup.renderOrder = 0;
     scene.add(this.terrainGroup);
 
-    this.fluidGroup = new THREE.Group();
-    this.fluidGroup.name = 'chunks-fluids';
-    this.fluidGroup.renderOrder = 20;
-    scene.add(this.fluidGroup);
+    this.cutoutGroup = new THREE.Group();
+    this.cutoutGroup.name = 'chunks-cutouts';
+    this.cutoutGroup.renderOrder = 10;
+    scene.add(this.cutoutGroup);
+
+    this.waterGroup = new THREE.Group();
+    this.waterGroup.name = 'chunks-water';
+    this.waterGroup.renderOrder = 20;
+    scene.add(this.waterGroup);
+
+    this.lavaGroup = new THREE.Group();
+    this.lavaGroup.name = 'chunks-lava';
+    this.lavaGroup.renderOrder = 20;
+    scene.add(this.lavaGroup);
 
     this.translucentGroup = new THREE.Group();
     this.translucentGroup.name = 'chunks-translucent';
     this.translucentGroup.renderOrder = 20;
     scene.add(this.translucentGroup);
 
-    this.cutoutGroup = new THREE.Group();
-    this.cutoutGroup.name = 'chunks-cutouts';
-    this.cutoutGroup.renderOrder = 20;
-    scene.add(this.cutoutGroup);
-
-    // Fire material: separate sprite sheet with alpha test, double-sided.
-    // Uses the same attribute layout as terrain so lighting/fog works.
+    // Fire material
     this.fireMaterial = new THREE.MeshBasicMaterial({
       map: fireAnimationSystem.fireTexture,
       vertexColors: true,
@@ -328,6 +361,7 @@ export class ChunkRenderer {
   public update(recentFrameTimeMs = 0, cameraWorldX = 0, cameraWorldZ = 0): void {
     this.meshUploadsThisFrame = 0;
     this.updateFluidAnimationUniforms();
+    this.updateLavaAnimationUniforms();
     this.updateFireAnimationUniforms();
 
     if (this.meshQueue.isWorkerEnabled()) {
@@ -391,14 +425,8 @@ export class ChunkRenderer {
     this.applyDebugModeToAllMeshes();
   }
 
-  /**
-   * Applies the current global skylight subtraction (0-11). Updates only
-   * vertex colours, never geometry topology, so no chunk remesh is needed.
-   */
+  /** Applies the current global skylight subtraction (0-11). */
   public setSkylightSubtracted(value: number): void {
-    // Beta caps at 11 (see WorldTime.getSkylightSubtracted). Was 13 here,
-    // a 2-level deviation that kept outdoor terrain systematically
-    // brighter at night than Beta.
     const clamped = THREE.MathUtils.clamp(Math.round(value), 0, 11);
     if (clamped === this.skylightSubtracted) {
       return;
@@ -428,11 +456,18 @@ export class ChunkRenderer {
       this.terrainMeshes.delete(key);
     }
 
-    const fluidMesh = this.fluidMeshes.get(key);
-    if (fluidMesh !== undefined) {
-      this.fluidGroup.remove(fluidMesh);
-      fluidMesh.geometry.dispose();
-      this.fluidMeshes.delete(key);
+    const waterMesh = this.waterMeshes.get(key);
+    if (waterMesh !== undefined) {
+      this.waterGroup.remove(waterMesh);
+      waterMesh.geometry.dispose();
+      this.waterMeshes.delete(key);
+    }
+
+    const lavaMesh = this.lavaMeshes.get(key);
+    if (lavaMesh !== undefined) {
+      this.lavaGroup.remove(lavaMesh);
+      lavaMesh.geometry.dispose();
+      this.lavaMeshes.delete(key);
     }
 
     const cutoutMesh = this.cutoutMeshes.get(key);
@@ -465,11 +500,17 @@ export class ChunkRenderer {
     }
     this.terrainMeshes.clear();
 
-    for (const mesh of this.fluidMeshes.values()) {
-      this.fluidGroup.remove(mesh);
+    for (const mesh of this.waterMeshes.values()) {
+      this.waterGroup.remove(mesh);
       mesh.geometry.dispose();
     }
-    this.fluidMeshes.clear();
+    this.waterMeshes.clear();
+
+    for (const mesh of this.lavaMeshes.values()) {
+      this.lavaGroup.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this.lavaMeshes.clear();
 
     for (const mesh of this.cutoutMeshes.values()) {
       this.cutoutGroup.remove(mesh);
@@ -490,19 +531,21 @@ export class ChunkRenderer {
     this.translucentMeshes.clear();
 
     this.terrainMaterial.dispose();
-    this.fluidMaterial.dispose();
+    this.waterMaterial.dispose();
+    this.lavaMaterial.dispose();
     this.translucentMaterial.dispose();
     this.cutoutMaterial.dispose();
     this.fireMaterial.dispose();
     this.terrainGroup.removeFromParent();
-    this.fluidGroup.removeFromParent();
+    this.waterGroup.removeFromParent();
+    this.lavaGroup.removeFromParent();
     this.translucentGroup.removeFromParent();
     this.cutoutGroup.removeFromParent();
     this.fireGroup.removeFromParent();
   }
 
   public getVisibleMeshCount(): number {
-    return this.terrainMeshes.size + this.fluidMeshes.size + this.cutoutMeshes.size + this.fireMeshes.size + this.translucentMeshes.size;
+    return this.terrainMeshes.size + this.waterMeshes.size + this.lavaMeshes.size + this.cutoutMeshes.size + this.fireMeshes.size + this.translucentMeshes.size;
   }
 
   public getMeshUploadsThisFrame(): number {
@@ -536,7 +579,8 @@ export class ChunkRenderer {
       }
     };
     for (const mesh of this.terrainMeshes.values()) addGeometry(mesh.geometry);
-    for (const mesh of this.fluidMeshes.values()) addGeometry(mesh.geometry);
+    for (const mesh of this.waterMeshes.values()) addGeometry(mesh.geometry);
+    for (const mesh of this.lavaMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.cutoutMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.fireMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.translucentMeshes.values()) addGeometry(mesh.geometry);
@@ -547,7 +591,8 @@ export class ChunkRenderer {
     const chunk = this.chunkManager.getChunk(result.chunkX, result.chunkZ);
     if (chunk === undefined || chunk.getRevision() !== result.targetRevision) {
       result.terrain.dispose();
-      result.fluid.dispose();
+      result.water.dispose();
+      result.lava.dispose();
       result.cutout.dispose();
       result.fire.dispose();
       result.translucent.dispose();
@@ -557,7 +602,8 @@ export class ChunkRenderer {
     const key = this.key(result.chunkX, result.chunkZ);
     if (!this.validateGeometrySet(result)) {
       result.terrain.dispose();
-      result.fluid.dispose();
+      result.water.dispose();
+      result.lava.dispose();
       result.cutout.dispose();
       result.fire.dispose();
       result.translucent.dispose();
@@ -565,8 +611,10 @@ export class ChunkRenderer {
     }
     this.applyColorModeToGeometry(result.terrain);
     this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, result.terrain);
-    this.applyColorModeToGeometry(result.fluid);
-    this.upsertMesh(this.fluidMeshes, this.fluidGroup, this.fluidMaterial, chunk, key, result.fluid);
+    this.applyColorModeToGeometry(result.water);
+    this.upsertMesh(this.waterMeshes, this.waterGroup, this.waterMaterial, chunk, key, result.water);
+    this.applyColorModeToGeometry(result.lava);
+    this.upsertMesh(this.lavaMeshes, this.lavaGroup, this.lavaMaterial, chunk, key, result.lava);
     this.applyColorModeToGeometry(result.cutout);
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, result.cutout);
     this.applyColorModeToGeometry(result.fire);
@@ -579,7 +627,8 @@ export class ChunkRenderer {
 
   private validateGeometrySet(result: ChunkMeshGeometrySet): boolean {
     return this.validateGeometry(result.terrain, false)
-      && this.validateGeometry(result.fluid, true)
+      && this.validateGeometry(result.water, true)
+      && this.validateGeometry(result.lava, true)
       && this.validateGeometry(result.cutout, false)
       && this.validateGeometry(result.fire, true)
       && this.validateGeometry(result.translucent, false);
@@ -634,9 +683,13 @@ export class ChunkRenderer {
     this.applyColorModeToGeometry(terrainGeometry);
     this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, terrainGeometry);
 
-    const fluidGeometry = this.mesher.buildFluids(chunk);
-    this.applyColorModeToGeometry(fluidGeometry);
-    this.upsertMesh(this.fluidMeshes, this.fluidGroup, this.fluidMaterial, chunk, key, fluidGeometry);
+    const waterGeometry = this.mesher.buildWater(chunk);
+    this.applyColorModeToGeometry(waterGeometry);
+    this.upsertMesh(this.waterMeshes, this.waterGroup, this.waterMaterial, chunk, key, waterGeometry);
+
+    const lavaGeometry = this.mesher.buildLava(chunk);
+    this.applyColorModeToGeometry(lavaGeometry);
+    this.upsertMesh(this.lavaMeshes, this.lavaGroup, this.lavaMaterial, chunk, key, lavaGeometry);
 
     const cutoutGeometry = this.mesher.buildCutouts(chunk);
     this.applyColorModeToGeometry(cutoutGeometry);
@@ -654,17 +707,26 @@ export class ChunkRenderer {
   }
 
   private updateFluidAnimationUniforms(): void {
-    const uniforms = this.fluidMaterial.userData.fluidAnimationUniforms as {
+    const uniforms = this.waterMaterial.userData.fluidAnimationUniforms as {
       uWaterStillTexture: { value: THREE.Texture };
       uWaterFlowTexture: { value: THREE.Texture };
-      uLavaStillTexture: { value: THREE.Texture };
-      uLavaFlowTexture: { value: THREE.Texture };
       uWaterStillFrame: { value: number };
       uWaterFlowFrame: { value: number };
-      uLavaStillFrame: { value: number };
-      uLavaFlowFrame: { value: number };
       uWaterStillFrameCount: { value: number };
       uWaterFlowFrameCount: { value: number };
+      uWaterFlowBrightness: { value: number };
+    } | undefined;
+    if (uniforms !== undefined) {
+      this.fluidAnimationSystem.applyUniforms(uniforms);
+    }
+  }
+
+  private updateLavaAnimationUniforms(): void {
+    const uniforms = this.lavaMaterial.userData.lavaAnimationUniforms as {
+      uLavaStillTexture: { value: THREE.Texture };
+      uLavaFlowTexture: { value: THREE.Texture };
+      uLavaStillFrame: { value: number };
+      uLavaFlowFrame: { value: number };
       uLavaStillFrameCount: { value: number };
       uLavaFlowFrameCount: { value: number };
     } | undefined;
@@ -685,7 +747,7 @@ export class ChunkRenderer {
   }
 
   private updateDynamicLightingUniforms(): void {
-    for (const material of [this.terrainMaterial, this.fluidMaterial, this.cutoutMaterial, this.fireMaterial, this.translucentMaterial]) {
+    for (const material of [this.terrainMaterial, this.waterMaterial, this.lavaMaterial, this.cutoutMaterial, this.fireMaterial, this.translucentMaterial]) {
       const uniforms = material.userData.dynamicLightingUniforms as {
         uSkylightSubtracted: { value: number };
         uSunBrightnessFactor: { value: number };
@@ -706,7 +768,10 @@ export class ChunkRenderer {
     for (const mesh of this.terrainMeshes.values()) {
       this.applyColorModeToGeometry(mesh.geometry);
     }
-    for (const mesh of this.fluidMeshes.values()) {
+    for (const mesh of this.waterMeshes.values()) {
+      this.applyColorModeToGeometry(mesh.geometry);
+    }
+    for (const mesh of this.lavaMeshes.values()) {
       this.applyColorModeToGeometry(mesh.geometry);
     }
     for (const mesh of this.cutoutMeshes.values()) {
@@ -724,7 +789,10 @@ export class ChunkRenderer {
     for (const mesh of this.terrainMeshes.values()) {
       this.updateDynamicColorAttributes(mesh.geometry);
     }
-    for (const mesh of this.fluidMeshes.values()) {
+    for (const mesh of this.waterMeshes.values()) {
+      this.updateDynamicColorAttributes(mesh.geometry);
+    }
+    for (const mesh of this.lavaMeshes.values()) {
       this.updateDynamicColorAttributes(mesh.geometry);
     }
     for (const mesh of this.cutoutMeshes.values()) {
@@ -773,15 +841,6 @@ export class ChunkRenderer {
       const rawBrightness = getLightBrightness(Math.max(effectiveSky, block[i]!));
       const aoFactor = ao[i]!;
 
-      // Stage 16E: floor the LIGHT multiplier alone, then multiply by
-      // AO. Prior Stage 16D order `max(brightness*ao, floor)` flattened
-      // AO at night because both an exposed and a fully-occluded corner
-      // clamped to the same floor. This ordering preserves AO contrast:
-      //
-      //   occluded corner (ao=0.4, brightness≈0): floor * 0.4 ≈ 0.006
-      //   exposed surface (ao=1.0, brightness≈0): floor * 1.0 = 0.015
-      //
-      // Voxel light, AO factor, tint, and sun factor remain untouched.
       const clampedLight =
         shadedBrightness < TEXTURE_MIN_BRIGHTNESS ? TEXTURE_MIN_BRIGHTNESS : shadedBrightness;
       const visibility = clampedLight * aoFactor;
@@ -822,19 +881,22 @@ export class ChunkRenderer {
   private applyMaterialMode(): void {
     if (this.rawLightDebugMode || this.ambientOcclusionDebugMode) {
       this.terrainMaterial.map = null;
-      this.fluidMaterial.map = this.atlas.debugTexture;
+      this.waterMaterial.map = this.atlas.debugTexture;
+      this.lavaMaterial.map = this.atlas.debugTexture;
       this.cutoutMaterial.map = this.atlas.debugTexture;
       this.translucentMaterial.map = this.atlas.debugTexture;
     } else {
       this.terrainMaterial.map = this.atlas.texture;
-      this.fluidMaterial.map = this.atlas.texture;
+      this.waterMaterial.map = this.atlas.texture;
+      this.lavaMaterial.map = this.atlas.texture;
       this.cutoutMaterial.map = this.atlas.texture;
       this.translucentMaterial.map = this.atlas.texture;
     }
 
     this.updateDynamicLightingUniforms();
     this.terrainMaterial.needsUpdate = true;
-    this.fluidMaterial.needsUpdate = true;
+    this.waterMaterial.needsUpdate = true;
+    this.lavaMaterial.needsUpdate = true;
     this.cutoutMaterial.needsUpdate = true;
     this.fireMaterial.needsUpdate = true;
     this.translucentMaterial.needsUpdate = true;
@@ -861,9 +923,6 @@ export class ChunkRenderer {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(chunk.chunkX * CHUNK_SIZE_X, 0, chunk.chunkZ * CHUNK_SIZE_Z);
     mesh.name = `chunk_${key}`;
-    // Stage 17: per-mesh renderOrder mirrors the group's so Three's
-    // transparent-queue sorter picks it up (group.renderOrder alone
-    // does NOT propagate to children when the sort runs).
     mesh.renderOrder = group.renderOrder;
     group.add(mesh);
     meshes.set(key, mesh);
