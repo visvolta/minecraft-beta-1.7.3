@@ -38,6 +38,7 @@ export interface ChunkMeshGeometrySet {
   readonly terrain: THREE.BufferGeometry;
   readonly fluid: THREE.BufferGeometry;
   readonly cutout: THREE.BufferGeometry;
+  readonly fire: THREE.BufferGeometry;
 }
 
 function key(chunkX: number, chunkZ: number): string {
@@ -183,6 +184,7 @@ export class ChunkMeshingQueue {
         terrain: geometryFromBuffers(result.terrain),
         fluid: geometryFromBuffers(result.fluid),
         cutout: geometryFromBuffers(result.cutout),
+        fire: geometryFromBuffers(result.fire),
       });
     }
     this.lastUploadTime = performance.now() - start;

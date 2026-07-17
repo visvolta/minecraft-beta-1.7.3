@@ -513,6 +513,7 @@ export class ChunkRenderer {
       result.terrain.dispose();
       result.fluid.dispose();
       result.cutout.dispose();
+      result.fire.dispose();
       return;
     }
 
@@ -521,6 +522,7 @@ export class ChunkRenderer {
       result.terrain.dispose();
       result.fluid.dispose();
       result.cutout.dispose();
+      result.fire.dispose();
       return;
     }
     this.applyColorModeToGeometry(result.terrain);
@@ -529,6 +531,8 @@ export class ChunkRenderer {
     this.upsertMesh(this.fluidMeshes, this.fluidGroup, this.fluidMaterial, chunk, key, result.fluid);
     this.applyColorModeToGeometry(result.cutout);
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, result.cutout);
+    this.applyColorModeToGeometry(result.fire);
+    this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, result.fire);
     this.meshQueue.markUploaded(result.chunkX, result.chunkZ, result.targetRevision);
     chunk.markClean();
   }
@@ -536,7 +540,8 @@ export class ChunkRenderer {
   private validateGeometrySet(result: ChunkMeshGeometrySet): boolean {
     return this.validateGeometry(result.terrain, false)
       && this.validateGeometry(result.fluid, true)
-      && this.validateGeometry(result.cutout, false);
+      && this.validateGeometry(result.cutout, false)
+      && this.validateGeometry(result.fire, true);
   }
 
   private validateGeometry(geometry: THREE.BufferGeometry, fluid: boolean): boolean {

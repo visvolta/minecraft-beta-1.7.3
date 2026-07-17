@@ -61,7 +61,7 @@ function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
 
 function transferList(result: ChunkMeshResult): Transferable[] {
   const list: Transferable[] = [];
-  for (const mesh of [result.terrain, result.fluid, result.cutout]) {
+  for (const mesh of [result.terrain, result.fluid, result.cutout, result.fire]) {
     list.push(
       mesh.positions,
       mesh.normals,
@@ -113,6 +113,7 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
     const terrainGeometry = mesher.build(target);
     const fluidGeometry = mesher.buildFluids(target);
     const cutoutGeometry = mesher.buildCutouts(target);
+    const fireGeometry = mesher.buildFires(target);
 
     const result: ChunkMeshResult = {
       type: 'meshResult',
@@ -123,11 +124,13 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
       terrain: extractGeometry(terrainGeometry),
       fluid: extractGeometry(fluidGeometry),
       cutout: extractGeometry(cutoutGeometry),
+      fire: extractGeometry(fireGeometry),
       durationMs: performance.now() - start,
     };
     terrainGeometry.dispose();
     fluidGeometry.dispose();
     cutoutGeometry.dispose();
+    fireGeometry.dispose();
     workerSelf.postMessage(result, transferList(result));
   } catch (error) {
     workerSelf.postMessage({

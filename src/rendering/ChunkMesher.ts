@@ -907,8 +907,15 @@ export class ChunkMesher {
 
           const H = 1.4;  // fire plane height (Beta var18)
           const Y_OFF = 0.0625; // Y offset (Beta var20)
-          const cx = x + 0.5;
-          const cz = z + 0.5;
+
+          // Ground fire UV rows: narrow=row0, medium=row1, full=row0
+          const useAltGroundRow = ((x + y + z) & 1) === 1;
+          const v0P1 = useAltGroundRow ? ROW1_V0 : ROW0_V0;
+          const v1P1 = useAltGroundRow ? ROW1_V1 : ROW0_V1;
+          const v0P2 = useAltGroundRow ? ROW0_V0 : ROW1_V0;
+          const v1P2 = useAltGroundRow ? ROW0_V1 : ROW1_V1;
+          const v0P3 = v0P1;
+          const v1P3 = v1P1;
 
           if (!isGroundFire) {
             // ── Wall fire ─────────────────────────────────────────
@@ -1028,96 +1035,91 @@ export class ChunkMesher {
           } else {
             // ── Ground fire ───────────────────────────────────────
             // Beta renderBlockFire ground-fire branch (else block):
-            // Three pairs of diagonal planes at increasing widths.
-            // Each pair: 2 quads (one per diagonal), each double-sided
-            // via DoubleSide material.
+            // Three pairs of PARALLEL vertical planes running along Z axis.
+            // Each pair at a different X width, centred on the block.
+            // NOT diagonal crosses — all planes run z=0 → z=1.
             //
-            // Pair 1: narrow (±0.2),   UV row depends on (x+y+z)&1
-            // Pair 2: medium (±0.3),   opposite UV row
-            // Pair 3: full   (±0.5),   same UV row as pair 1
-
-            const narrowI = 0.2;
-            const mediumI = 0.3;
-            const fullI = 0.5;
-
-            // Beta UV row alternation for ground fire:
-            // (x+y+z) & 1 selects which row pair 1 uses.
-            const useAltRow = ((x + y + z) & 1) === 1;
-            const v0P1 = useAltRow ? ROW1_V0 : ROW0_V0;
-            const v1P1 = useAltRow ? ROW1_V1 : ROW0_V1;
-            const v0P2 = useAltRow ? ROW0_V0 : ROW1_V0;
-            const v1P2 = useAltRow ? ROW0_V1 : ROW1_V1;
-            // Pair 3 uses same row as pair 1
-            const v0P3 = v0P1;
-            const v1P3 = v1P1;
+            // Beta variables (x=0, z=0 for clarity):
+            //   var19 = x+0.7, var21 = x+0.3  (narrow: 0.4 wide)
+            //   var27 = x+0.2, var29 = x+0.8  (medium: 0.6 wide)
+            //   var19b= x+0.0, var21b= x+1.0  (full: 1.0 wide)
+            //   var27b= x+0.1, var29b= x+0.9  (full: 0.8 wide)
+            //
+            // UV rows: narrow=row0, medium=row1, full=row0
+            // Each plane rendered as front+back quads.
 
             const uL = flipUvs ? 1 : 0;
             const uR = flipUvs ? 0 : 1;
 
-            // ── Pair 1: narrow cross (±0.2) ──
-            // Plane A: runs along X axis (z=0 → z=1)
+            // Row UVs for each pair
+            const v0Narrow = v0P1; // row 0
+            const v1Narrow = v1P1;
+            const v0Medium = v0P2; // row 1
+            const v1Medium = v1P2;
+            const v0Full = v0P3;   // row 0
+            const v1Full = v1P3;
+
+            // ── Pair 1: narrow planes (width 0.4, x = 0.3 → 0.7) ──
+            // Front face
             buffers.pushQuad([
-              [cx - narrowI, y + H + Y_OFF, z + 1],
-              [cx + narrowI, y + Y_OFF, z + 1],
-              [cx + narrowI, y + Y_OFF, z],
-              [cx - narrowI, y + H + Y_OFF, z],
+              [x + 0.3, y + H + Y_OFF, z + 1],
+              [x + 0.7, y + Y_OFF, z + 1],
+              [x + 0.7, y + Y_OFF, z],
+              [x + 0.3, y + H + Y_OFF, z],
             ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill,
             undefined,
-            [uR, v0P1, uR, v1P1, uL, v1P1, uL, v0P1]);
-
-            // Plane B: runs along Z axis (x=0 → x=1)
+            [uR, v0Narrow, uR, v1Narrow, uL, v1Narrow, uL, v0Narrow]);
+            // Back face
             buffers.pushQuad([
-              [x + 1, y + H + Y_OFF, cz + narrowI],
-              [x + 1, y + Y_OFF, cz - narrowI],
-              [x, y + Y_OFF, cz - narrowI],
-              [x, y + H + Y_OFF, cz + narrowI],
-            ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
+              [x + 0.7, y + H + Y_OFF, z + 1],
+              [x + 0.3, y + Y_OFF, z + 1],
+              [x + 0.3, y + Y_OFF, z],
+              [x + 0.7, y + H + Y_OFF, z],
+            ], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill,
             undefined,
-            [uL, v0P1, uL, v1P1, uR, v1P1, uR, v0P1]);
+            [uL, v0Narrow, uL, v1Narrow, uR, v1Narrow, uR, v0Narrow]);
 
-            // ── Pair 2: medium cross (±0.3) ──
+            // ── Pair 2: medium planes (width 0.6, x = 0.2 → 0.8) ──
             buffers.pushQuad([
-              [cx - mediumI, y + H + Y_OFF, z + 1],
-              [cx + mediumI, y + Y_OFF, z + 1],
-              [cx + mediumI, y + Y_OFF, z],
-              [cx - mediumI, y + H + Y_OFF, z],
+              [x + 0.8, y + H + Y_OFF, z + 1],
+              [x + 0.2, y + Y_OFF, z + 1],
+              [x + 0.2, y + Y_OFF, z],
+              [x + 0.8, y + H + Y_OFF, z],
             ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill,
             undefined,
-            [uR, v0P2, uR, v1P2, uL, v1P2, uL, v0P2]);
-
+            [uR, v0Medium, uR, v1Medium, uL, v1Medium, uL, v0Medium]);
             buffers.pushQuad([
-              [x + 1, y + H + Y_OFF, cz + mediumI],
-              [x + 1, y + Y_OFF, cz - mediumI],
-              [x, y + Y_OFF, cz - mediumI],
-              [x, y + H + Y_OFF, cz + mediumI],
-            ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
+              [x + 0.2, y + H + Y_OFF, z + 1],
+              [x + 0.8, y + Y_OFF, z + 1],
+              [x + 0.8, y + Y_OFF, z],
+              [x + 0.2, y + H + Y_OFF, z],
+            ], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill,
             undefined,
-            [uL, v0P2, uL, v1P2, uR, v1P2, uR, v0P2]);
+            [uL, v0Medium, uL, v1Medium, uR, v1Medium, uR, v0Medium]);
 
-            // ── Pair 3: full-width cross (±0.5) ──
+            // ── Pair 3: full-width planes (width 0.8, x = 0.1 → 0.9) ──
             buffers.pushQuad([
-              [cx - fullI, y + H + Y_OFF, z + 1],
-              [cx + fullI, y + Y_OFF, z + 1],
-              [cx + fullI, y + Y_OFF, z],
-              [cx - fullI, y + H + Y_OFF, z],
+              [x + 0.1, y + H + Y_OFF, z + 1],
+              [x + 0.9, y + Y_OFF, z + 1],
+              [x + 0.9, y + Y_OFF, z],
+              [x + 0.1, y + H + Y_OFF, z],
             ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill,
             undefined,
-            [uR, v0P3, uR, v1P3, uL, v1P3, uL, v0P3]);
-
+            [uR, v0Full, uR, v1Full, uL, v1Full, uL, v0Full]);
             buffers.pushQuad([
-              [x + 1, y + H + Y_OFF, cz + fullI],
-              [x + 1, y + Y_OFF, cz - fullI],
-              [x, y + Y_OFF, cz - fullI],
-              [x, y + H + Y_OFF, cz + fullI],
-            ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
+              [x + 0.9, y + H + Y_OFF, z + 1],
+              [x + 0.1, y + Y_OFF, z + 1],
+              [x + 0.1, y + Y_OFF, z],
+              [x + 0.9, y + H + Y_OFF, z],
+            ], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill,
             undefined,
-            [uL, v0P3, uL, v1P3, uR, v1P3, uR, v0P3]);
+            [uL, v0Full, uL, v1Full, uR, v1Full, uR, v0Full]);
           }
         }
       }

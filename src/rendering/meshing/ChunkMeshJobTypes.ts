@@ -53,6 +53,7 @@ export interface ChunkMeshResult {
   readonly terrain: MeshAttributeBuffers;
   readonly fluid: MeshAttributeBuffers;
   readonly cutout: MeshAttributeBuffers;
+  readonly fire: MeshAttributeBuffers;
   readonly durationMs: number;
 }
 
