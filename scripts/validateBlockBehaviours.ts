@@ -12,8 +12,10 @@ import { FallingBlockManager } from '../src/world/entities/FallingBlockManager.t
 import { WorldEventQueue } from '../src/world/events/WorldEventQueue.ts';
 import { registerFallingBlockBehaviours } from '../src/world/behaviours/FallingBlockBehaviour.ts';
 import { registerFireBehaviour, getFireEncouragement, getFireAbility, FireBehaviour } from '../src/world/behaviours/FireBehaviour.ts';
+import { registerSnowIceBehaviours } from '../src/world/behaviours/registerSnowIceBehaviours.ts';
 import { WeatherController } from '../src/world/weather/WeatherController.ts';
 import { AABB } from '../src/physics/AABB.ts';
+import { BlockTestGrid } from '../src/debug/BlockTestGrid.ts';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -33,6 +35,7 @@ function setup(): { world: BlockUpdateWorld; scheduler: WorldTickScheduler; fall
   const weather = new WeatherController(12345n);
   registerFallingBlockBehaviours(behaviours, blocks, falling);
   registerFireBehaviour(behaviours, blocks, weather, chunks);
+  registerSnowIceBehaviours(behaviours);
   const scheduler = new WorldTickScheduler(chunks, world, behaviours, new RandomTickScheduler(123n));
   world.setScheduleCallback((x, y, z, id, delay) => scheduler.schedule(x, y, z, id, delay));
   return { world, scheduler, falling, events, chunks };
@@ -329,6 +332,182 @@ for (const fluid of [BlockIds.WaterStill, BlockIds.LavaStill]) {
   assert(Math.abs(calcY - (-0.5)) < 0.001, 'calculateYOffset should clamp');
 
   assert(box.getAverageEdgeLength() > 0, 'getAverageEdgeLength should be positive');
+}
+
+// ============================================================
+// Block test grid (F2)
+// ============================================================
+{
+  const blocks = new BlockRegistry();
+  registerDefaultBlocks(blocks);
+  const cm = new ChunkManager();
+  for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) cm.getOrCreateChunk(x, z);
+  const le = new LightEngine(cm, blocks);
+  const w = new BlockUpdateWorld(cm, blocks, le);
+  const grid = new BlockTestGrid(blocks, w);
+
+  // Generate the grid
+  grid.generate(0, 0);
+  const info = grid.getInfo();
+  const state = grid.getGridState();
+
+  // Air is excluded
+  assert(!info.some(b => b.blockId === BlockIds.Air), 'air should be excluded from test grid');
+
+  // All registered public blocks are included
+  const registeredIds: number[] = [];
+  for (const def of blocks.values()) {
+    if (def.id !== BlockIds.Air) registeredIds.push(def.id);
+  }
+  const gridIds = new Set(info.map(b => b.blockId));
+  for (const id of registeredIds) {
+    assert(gridIds.has(id), `registered block ${id} should be in test grid`);
+  }
+
+  // Blocks are sorted by ID
+  for (let i = 1; i < info.length; i++) {
+    assert(info[i]!.blockId > info[i - 1]!.blockId, 'blocks should be sorted by ID');
+  }
+
+  // Each block appears once
+  const idCounts = new Map<number, number>();
+  for (const b of info) idCounts.set(b.blockId, (idCounts.get(b.blockId) ?? 0) + 1);
+  for (const [id, count] of idCounts) {
+    assert(count === 1, `block ${id} should appear once, appeared ${count}`);
+  }
+
+  // Layout positions do not overlap
+  const positions = new Set<string>();
+  for (const cell of info) {
+    const key = `${cell.worldX},${cell.worldY},${cell.worldZ}`;
+    assert(!positions.has(key), `position ${key} should not overlap`);
+    positions.add(key);
+  }
+
+  // State metadata
+  assert(state !== null, 'grid state should exist');
+  assert(state!.columns > 0, 'should have columns');
+  assert(state!.rows > 0, 'should have rows');
+
+  // Rebuilding clears previous grid (no duplicates)
+  grid.generate(0, 0);
+  const info2 = grid.getInfo();
+  assert(info2.length === info.length, 'rebuilding should produce same block count');
+
+  // New registry entries appear automatically
+  const testBlocks = new BlockRegistry();
+  registerDefaultBlocks(testBlocks);
+  testBlocks.register({
+    id: 250,
+    name: 'test_block',
+    displayName: 'Test Block',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    blocksWeather: true,
+    textures: { all: 'stone' },
+    renderType: 'opaque',
+  });
+  const cm2 = new ChunkManager();
+  for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) cm2.getOrCreateChunk(x, z);
+  const le2 = new LightEngine(cm2, testBlocks);
+  const w2 = new BlockUpdateWorld(cm2, testBlocks, le2);
+  const grid2 = new BlockTestGrid(testBlocks, w2);
+  grid2.generate(0, 0);
+  const info3 = grid2.getInfo();
+  assert(info3.some(b => b.blockId === 250), 'new registered block should appear in grid');
+}
+
+// ============================================================
+// Snow & Ice
+// ============================================================
+
+// Snow: placement on valid support
+{
+  const { world } = setup();
+  world.setBlock(0, 10, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
+  world.setBlock(0, 11, 0, BlockIds.Snow, { notifyNeighbours: false, updateLighting: false });
+  assert(world.getBlock(0, 11, 0) === BlockIds.Snow, 'snow should be placeable on stone');
+}
+
+// Snow: not solid
+{
+  const blocks = new BlockRegistry();
+  registerDefaultBlocks(blocks);
+  const snowDef = blocks.getById(BlockIds.Snow);
+  assert(snowDef !== undefined && !snowDef.solid, 'snow must not be solid');
+}
+
+// Snow: removal when support removed
+{
+  const { world, scheduler } = setup();
+  world.setBlock(0, 10, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
+  world.setBlock(0, 11, 0, BlockIds.Snow, { notifyNeighbours: false, updateLighting: false });
+  // Remove stone support
+  world.setBlock(0, 10, 0, BlockIds.Air, { notifyNeighbours: true, updateLighting: false });
+  scheduler.update(0.05);
+  assert(world.getBlock(0, 11, 0) === BlockIds.Air, 'snow should be removed when support removed');
+}
+
+// Snow: block definition has correct properties
+{
+  const blocks = new BlockRegistry();
+  registerDefaultBlocks(blocks);
+  const snowDef = blocks.getById(BlockIds.Snow);
+  assert(snowDef !== undefined, 'snow should be registered');
+  assert(!snowDef!.solid, 'snow should not be solid');
+  assert(snowDef!.transparent, 'snow should be transparent');
+  assert(snowDef!.replaceable, 'snow should be replaceable');
+}
+
+// Ice: block definition has correct properties
+{
+  const blocks = new BlockRegistry();
+  registerDefaultBlocks(blocks);
+  const iceDef = blocks.getById(BlockIds.Ice);
+  assert(iceDef !== undefined, 'ice should be registered');
+  assert(iceDef!.solid, 'ice should be solid');
+  assert(iceDef!.transparent, 'ice should be transparent');
+  assert(!iceDef!.replaceable, 'ice should not be replaceable');
+}
+
+// Ice: onRemoved callback exists and places water when called
+{
+  const { world } = setup();
+  const blocks = new BlockRegistry();
+  registerDefaultBlocks(blocks);
+  const iceBehaviour = new (await import('../src/world/behaviours/IceBehaviour.ts')).IceBehaviour();
+  world.setBlock(0, 10, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
+  world.setBlock(0, 11, 0, BlockIds.Ice, { notifyNeighbours: false, updateLighting: false });
+  // Manually call onRemoved (same as what would happen when ice is broken)
+  iceBehaviour.onRemoved({ world, gameTick: 0 }, 0, 11, 0);
+  assert(world.getBlock(0, 11, 0) === BlockIds.WaterStill, 'ice onRemoved should place water');
+}
+
+// Biome: enableSnow flag
+{
+  const { BIOMES } = await import('../src/world/generation/climate/biomes.ts');
+  assert(BIOMES.taiga.enableSnow === true, 'taiga should have enableSnow=true');
+  assert(BIOMES.tundra.enableSnow === true, 'tundra should have enableSnow=true');
+  assert(BIOMES.forest.enableSnow === false, 'forest should have enableSnow=false');
+  assert(BIOMES.desert.enableSnow === false, 'desert should have enableSnow=false');
+  assert(BIOMES.rainforest.enableSnow === false, 'rainforest should have enableSnow=false');
+}
+
+// Snow: renderType is 'snow'
+{
+  const blocks = new BlockRegistry();
+  registerDefaultBlocks(blocks);
+  const snowDef = blocks.getById(BlockIds.Snow);
+  assert(snowDef?.renderType === 'snow', 'snow renderType should be snow');
+}
+
+// Ice: renderType is 'ice'
+{
+  const blocks = new BlockRegistry();
+  registerDefaultBlocks(blocks);
+  const iceDef = blocks.getById(BlockIds.Ice);
+  assert(iceDef?.renderType === 'ice', 'ice renderType should be ice');
 }
 
 console.log('Block behaviour validation passed.');

@@ -50,6 +50,7 @@ export class WorldTickScheduler {
   private metrics: TickSchedulerMetrics;
   private restoredDetachedTicks = 0;
   private discardedDetachedTicks = 0;
+  private readonly gameTickCallbacks: Array<() => void> = [];
 
   public constructor(
     private readonly chunkManager: ChunkManager,
@@ -80,12 +81,25 @@ export class WorldTickScheduler {
     while (this.accumulator >= 1) {
       this.gameTick += 1;
       this.tickOnce();
+      for (const cb of this.gameTickCallbacks) cb();
       this.accumulator -= 1;
     }
   }
 
   public getMetrics(): TickSchedulerMetrics {
     return this.metrics;
+  }
+
+  public getGameTick(): number {
+    return this.gameTick;
+  }
+
+  /**
+   * Registers a callback that fires once per game tick (20 TPS).
+   * Used by FallingBlockManager and PrecipitationSimulator.
+   */
+  public addGameTickCallback(callback: () => void): void {
+    this.gameTickCallbacks.push(callback);
   }
 
   public restoreDetachedTicks(chunk: Chunk): void {

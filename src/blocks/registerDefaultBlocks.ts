@@ -531,7 +531,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     lightEmission: 15,
   });
 
-  const registerSimple = (id: number, name: string, displayName: string, textures: { all?: string; top?: string; bottom?: string; side?: string }, options: { solid: boolean; transparent: boolean; replaceable: boolean; renderType: 'opaque' | 'cutout' | 'cross' | 'cactus'; blocksWeather?: boolean; lightOpacity?: number; lightEmission?: number }): void => {
+  const registerSimple = (id: number, name: string, displayName: string, textures: { all?: string; top?: string; bottom?: string; side?: string }, options: { solid: boolean; transparent: boolean; replaceable: boolean; renderType: 'opaque' | 'cutout' | 'cross' | 'cactus' | 'snow' | 'ice'; blocksWeather?: boolean; lightOpacity?: number; lightEmission?: number }): void => {
     registry.register({ id, name, displayName, textures, ...options });
   };
 
@@ -539,8 +539,14 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.Fire, 'fire', 'Fire', { all: 'fire_layer_0' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', blocksWeather: false, lightEmission: 15 });
   registerSimple(BlockIds.Farmland, 'farmland', 'Farmland', { top: 'farmland_dry', bottom: 'dirt', side: 'dirt' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Crops, 'wheat', 'Wheat', { all: 'wheat_stage_0' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross' });
-  registerSimple(BlockIds.Snow, 'snow', 'Snow', { all: 'snow' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout', blocksWeather: true, lightOpacity: 0 });
-  registerSimple(BlockIds.Ice, 'ice', 'Ice', { all: 'clear_ice' }, { solid: true, transparent: true, replaceable: false, renderType: 'opaque', blocksWeather: true, lightOpacity: 3 });
+  // Snow layer: non-solid, non-full block, cutout render with custom height
+  // Beta: Material.snow, isOpaqueCube=false, renderAsNormalBlock=false
+  // Height: 0.125 blocks (1/8), collision only at metadata >= 3
+  registerSimple(BlockIds.Snow, 'snow', 'Snow', { all: 'snow' }, { solid: false, transparent: true, replaceable: true, renderType: 'snow', blocksWeather: true, lightOpacity: 0 });
+
+  // Ice: transparent solid block, translucent render pass (pass 1)
+  // Beta: BlockBreakable with Material.ice, render pass 1
+  registerSimple(BlockIds.Ice, 'ice', 'Ice', { all: 'clear_ice' }, { solid: true, transparent: true, replaceable: false, renderType: 'ice', blocksWeather: true, lightOpacity: 3 });
   registerSimple(BlockIds.SnowBlock, 'snow_block', 'Snow Block', { all: 'snow' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Torch, 'torch', 'Torch', { all: 'torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', lightEmission: 14 });
   registerSimple(BlockIds.Ladder, 'ladder', 'Ladder', { all: 'ladder' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });

@@ -22,6 +22,8 @@ import { registerFluidBehaviours } from '../world/fluid/FluidBehaviour';
 import { registerPlantBehaviours } from '../world/behaviours/PlantBehaviours';
 import { registerSupportBehaviours } from '../world/behaviours/SupportBehaviours';
 import { registerFireBehaviour } from '../world/behaviours/FireBehaviour';
+import { registerSnowIceBehaviours } from '../world/behaviours/registerSnowIceBehaviours';
+import { PrecipitationSimulator } from '../world/weather/PrecipitationSimulator';
 import { registerFallingBlockBehaviours } from '../world/behaviours/FallingBlockBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
@@ -58,7 +60,7 @@ const MAX_DELTA_SECONDS = 0.1;
  *
  * Keep this in sync with scripts/verifyDefaultSeedHealth.ts.
  */
-const WORLD_SEED = 474747474747n;
+const WORLD_SEED = -3115700454n; //474747474747n
 
 /**
  * Player spawn (feet position). Fixed X/Z with a generously high Y so the
@@ -104,6 +106,7 @@ export class Engine {
   private readonly skyRenderer: SkyRenderer;
   private readonly cloudRenderer: CloudRenderer;
   private readonly weatherController: WeatherController;
+  private readonly precipitationSimulator: PrecipitationSimulator;
   private readonly climateSampler: ClimateSampler;
   private readonly precipitationRenderer: PrecipitationRenderer;
   private readonly rainSplashRenderer: RainSplashRenderer;
@@ -163,8 +166,11 @@ export class Engine {
     // timing is fresh each session, matching Beta behaviour.
     const sessionSeed = BigInt(Date.now()) & 0xffffffffffffffffn;
     this.weatherController = new WeatherController(sessionSeed);
+    this.precipitationSimulator = new PrecipitationSimulator(sessionSeed);
     registerFireBehaviour(this.blockBehaviourRegistry, blockRegistry, this.weatherController, this.chunkManager);
+    registerSnowIceBehaviours(this.blockBehaviourRegistry);
     registerFallingBlockBehaviours(this.blockBehaviourRegistry, blockRegistry, this.fallingBlockManager);
+
     this.worldTickScheduler = new WorldTickScheduler(
       this.chunkManager,
       this.blockUpdateWorld,
@@ -175,6 +181,21 @@ export class Engine {
     this.blockUpdateWorld.setScheduleCallback((x, y, z, id, delay) =>
       this.worldTickScheduler.schedule(x, y, z, id, delay),
     );
+
+    // Register precipitation tick as a game tick callback (runs at 20 TPS)
+    this.worldTickScheduler.addGameTickCallback(() => {
+      const weatherState = this.weatherController.getState();
+      if (weatherState.raining) {
+        this.precipitationSimulator.tick(
+          this.chunkManager,
+          this.blockUpdateWorld,
+          blockRegistry,
+          this.climateSampler,
+          weatherState,
+          this.worldTickScheduler.getGameTick(),
+        );
+      }
+    });
     this.fogController = new FogController(this.lightEngine);
     this.skyRenderer = new SkyRenderer(this.renderer.scene);
     this.cloudRenderer = new CloudRenderer(this.renderer.scene);
@@ -285,6 +306,11 @@ export class Engine {
           y: this.blockTestGrid.getGridState()!.originY,
           z: this.blockTestGrid.getGridState()!.originZ,
         } : null,
+      }),
+      getWeatherMetrics: () => ({
+        ...this.precipitationSimulator.getMetrics(),
+        activeSnowfall: this.weatherController.getState().raining,
+        weatherMode: this.weatherController.getState().getEffectiveMode(this.weatherController.getState().partialTick),
       }),
       inspectFluid: (x: number, y: number, z: number) => {
         const blockId = this.blockUpdateWorld.getBlock(x, y, z);

@@ -42,6 +42,12 @@ export interface BiomeDefinition {
   readonly topBlock: BlockId;
   /** Block placed in the layers just below the surface (e.g. Dirt, Sand). */
   readonly fillerBlock: BlockId;
+  /**
+   * Beta 1.7.3 BiomeGenBase.enableSnow.
+   * True for biomes where snow falls and water freezes (Taiga, Tundra).
+   * False for all other biomes.
+   */
+  readonly enableSnow: boolean;
 }
 
 export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
@@ -50,66 +56,69 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Rainforest',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+    enableSnow: false,
   },
   swampland: {
     id: 'swampland',
     displayName: 'Swampland',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+    enableSnow: false,
   },
   seasonalForest: {
     id: 'seasonalForest',
     displayName: 'Seasonal Forest',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+    enableSnow: false,
   },
   forest: {
     id: 'forest',
     displayName: 'Forest',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+    enableSnow: false,
   },
   savanna: {
     id: 'savanna',
     displayName: 'Savanna',
-    // Real Beta 1.7.3: MobSpawnerDesert-derived, but does not override
-    // o/p, so it keeps the MobSpawnerBase default (Grass/Dirt) — only
-    // Desert (reachable) and Ice Desert (unreachable) override to Sand.
-    // Verified from source: only `h` (Desert) and `j` (Ice Desert) get
-    // `.o = .p = Block.E` (Sand).
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+    enableSnow: false,
   },
   shrubland: {
     id: 'shrubland',
     displayName: 'Shrubland',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+    enableSnow: false,
   },
   taiga: {
     id: 'taiga',
     displayName: 'Taiga',
-    // Real Beta 1.7.3 Taiga uses plain Grass/Dirt (Podzol is a much later
-    // Minecraft addition) — Podzol is registered but never generated here.
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+    enableSnow: true,
   },
   desert: {
     id: 'desert',
     displayName: 'Desert',
     topBlock: BlockIds.Sand,
     fillerBlock: BlockIds.Sand,
+    enableSnow: false,
   },
   plains: {
     id: 'plains',
     displayName: 'Plains',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+    enableSnow: false,
   },
   tundra: {
     id: 'tundra',
     displayName: 'Tundra',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+    enableSnow: true,
   },
 };

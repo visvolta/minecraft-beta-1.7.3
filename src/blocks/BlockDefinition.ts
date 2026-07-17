@@ -28,7 +28,7 @@ export interface BlockTints {
   side?: TintColor;
 }
 
-export type BlockRenderType = 'opaque' | 'cutout' | 'leaves' | 'cross' | 'cactus' | 'fluid';
+export type BlockRenderType = 'opaque' | 'cutout' | 'leaves' | 'cross' | 'cactus' | 'fluid' | 'snow' | 'ice';
 
 /**
  * Immutable block data. Behaviour lives in other systems, not here.
