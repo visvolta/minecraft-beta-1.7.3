@@ -1,4 +1,5 @@
 import { WorldEventType, type LavaIgnitionAttemptEvent } from './WorldEvent';
+import type { BlockDropEvent } from './BlockDropEvent';
 
 const CAPACITY = 256;
 
@@ -15,6 +16,7 @@ export class WorldEventQueue {
   private nextEventId = 1;
   private totalLavaIgnitionAttempts = 0;
   private discarded = 0;
+  private readonly blockDrops: BlockDropEvent[] = [];
 
   public enqueueLavaIgnitionAttempt(
     worldTick: number,
@@ -48,6 +50,22 @@ export class WorldEventQueue {
     this.randomValues[index] = randomValue;
     this.count += 1;
     this.totalLavaIgnitionAttempts += 1;
+  }
+
+  public enqueueBlockDrop(gameTick: number, sourceEntityId: number, blockId: number, metadata: number, x: number, y: number, z: number, reason: 'placement_failed' | 'lifetime_expired'): void {
+    if (this.count + this.blockDrops.length >= CAPACITY) {
+      this.discarded += 1;
+      return;
+    }
+    this.blockDrops.push({ eventId: this.nextEventId++, gameTick, sourceEntityId, blockId, metadata, x, y, z, reason });
+  }
+
+  public drainBlockDrops(): BlockDropEvent[] {
+    return this.blockDrops.splice(0, this.blockDrops.length);
+  }
+
+  public getBlockDropCount(): number {
+    return this.blockDrops.length;
   }
 
   public drainNoop(): number {

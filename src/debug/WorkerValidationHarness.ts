@@ -113,16 +113,20 @@ export class WorkerValidationHarness {
       ['skyLightLevel', expected.getAttribute('skyLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.skyLightLevels), 0],
       ['blockLightLevel', expected.getAttribute('blockLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.blockLightLevels), 0],
       ['aoFactorScalar', expected.getAttribute('aoFactorScalar')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.aoFactorScalars), 1e-5],
+      ['faceBrightness', expected.getAttribute('faceBrightness')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.faceBrightness), 1e-5],
       ['fluidTextureKind', expected.getAttribute('fluidTextureKind')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.fluidTextureKinds), 0],
       ['fluidFrameUv', expected.getAttribute('fluidFrameUv')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.fluidFrameUvs), 1e-6],
     ];
     for (const [name, a, b, epsilon] of checks) {
       if (a.length !== b.length) return `${label}.${name} length mismatch ${a.length} !== ${b.length}`;
       for (let i = 0; i < a.length; i++) {
+        if (!Number.isFinite(a[i]!) || !Number.isFinite(b[i]!)) return `${label}.${name}[${i}] is non-finite`;
         const diff = Math.abs(a[i]! - b[i]!);
         if (diff > epsilon) return `${label}.${name}[${i}] mismatch: sync=${a[i]} worker=${b[i]} diff=${diff}`;
       }
     }
+    const expectedVertexCount = expected.getAttribute('position')?.count ?? 0;
+    if (expectedVertexCount !== actual.vertexCount) return `${label}.vertexCount mismatch ${expectedVertexCount} !== ${actual.vertexCount}`;
     const expectedIndex = expected.getIndex()?.array as ArrayLike<number> | undefined;
     const expectedIndices = expectedIndex === undefined ? new Uint32Array() : new Uint32Array(expectedIndex);
     const actualIndices = new Uint32Array(actual.indices);

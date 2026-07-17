@@ -71,6 +71,11 @@ export class RandomTickScheduler {
     return this.metrics;
   }
 
+  /** Shared world RNG entry point for deterministic Beta block decisions. */
+  public nextInt(bound: number): number {
+    return this.random.nextInt(bound);
+  }
+
   public getMetrics(): RandomTickMetrics {
     return this.metrics;
   }

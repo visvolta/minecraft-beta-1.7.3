@@ -5,6 +5,8 @@ import type { WorldEventQueue } from './events/WorldEventQueue';
 export interface BlockBehaviourContext {
   readonly world: BlockUpdateWorld;
   readonly gameTick: number;
+  /** World-owned deterministic RNG, used for Beta random decisions. */
+  readonly nextInt?: (bound: number) => number;
   readonly events?: WorldEventQueue;
 }
 

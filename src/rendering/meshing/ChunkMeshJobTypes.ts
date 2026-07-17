@@ -36,6 +36,7 @@ export interface MeshAttributeBuffers {
   readonly skyLightLevels: ArrayBuffer;
   readonly blockLightLevels: ArrayBuffer;
   readonly aoFactorScalars: ArrayBuffer;
+  readonly faceBrightness: ArrayBuffer;
   readonly fluidTextureKinds: ArrayBuffer;
   readonly fluidFrameUvs: ArrayBuffer;
   readonly indices: ArrayBuffer;

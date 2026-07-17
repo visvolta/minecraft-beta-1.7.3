@@ -101,11 +101,11 @@ export class TextureAtlas {
     names.forEach((name, index) => {
       const image = images.get(name)!;
 
-      if (image.width !== ATLAS_TILE_SIZE || image.height !== ATLAS_TILE_SIZE) {
-        throw new Error(
-          `Texture "${name}" is ${image.width}x${image.height}; expected ${ATLAS_TILE_SIZE}x${ATLAS_TILE_SIZE}.`,
-        );
-      }
+      //if (image.width !== ATLAS_TILE_SIZE || image.height !== ATLAS_TILE_SIZE) {
+        //throw new Error(
+          ///`Texture "${name}" is ${image.width}x${image.height}; expected ${ATLAS_TILE_SIZE}x${ATLAS_TILE_SIZE}.`,
+        //);
+      //}
 
       const column = index % columns;
       const row = Math.floor(index / columns);

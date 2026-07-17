@@ -8,6 +8,7 @@ import type { TextureAtlas } from '../assets/TextureAtlas';
 import { ChunkMeshingQueue, type ChunkMeshQueueStats, type ChunkMeshGeometrySet } from './meshing/ChunkMeshingQueue';
 import { getLightBrightness, TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
 import type { FluidAnimationSystem } from './fluid/FluidAnimationSystem';
+import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 
 /** Max dirty chunk meshes rebuilt in a single frame. */
 export const MESH_REBUILD_BUDGET = 4;
@@ -76,6 +77,7 @@ function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
         attribute float skyLightLevel;
         attribute float blockLightLevel;
         attribute float aoFactorScalar;
+        attribute float faceBrightness;
         uniform float uSkylightSubtracted;
         uniform float uSunBrightnessFactor;
         uniform float uTextureMinBrightness;
@@ -94,7 +96,7 @@ function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
           float skyBrightness = betaLightBrightness(effectiveSky) * uSunBrightnessFactor;
           float blockBrightness = betaLightBrightness(blockLightLevel);
           float brightness = max(skyBrightness, blockBrightness);
-          float visibility = max(brightness, uTextureMinBrightness) * aoFactorScalar;
+          float visibility = max(brightness, uTextureMinBrightness) * aoFactorScalar * faceBrightness;
           vColor.xyz = tintColor * visibility;
         }`,
       );
@@ -117,6 +119,7 @@ function attachFluidAnimationShader(material: THREE.MeshBasicMaterial, fluidAnim
     uWaterFlowFrameCount: { value: fluidAnimationSystem.waterFlowDescriptor.frameCount },
     uLavaStillFrameCount: { value: fluidAnimationSystem.lavaStillDescriptor.frameCount },
     uLavaFlowFrameCount: { value: fluidAnimationSystem.lavaFlowDescriptor.frameCount },
+    uWaterFlowBrightness: { value: FLUID_RENDER_SETTINGS.waterFlowBrightness },
   };
   material.userData.fluidAnimationUniforms = uniforms;
   material.onBeforeCompile = (shader): void => {
@@ -147,15 +150,24 @@ function attachFluidAnimationShader(material: THREE.MeshBasicMaterial, fluidAnim
         uniform float uWaterFlowFrameCount;
         uniform float uLavaStillFrameCount;
         uniform float uLavaFlowFrameCount;
+        uniform float uWaterFlowBrightness;
         vec2 fluidFrameUv(vec2 uv, float frame, float frameCount) {
-          return vec2(uv.x, (uv.y + frame) / frameCount);
+          // Existing still/lava animation convention. Keep this path
+          // unchanged for those selectors.
+          float frameLocalY = mod(uv.y + frameCount - frame, frameCount);
+          return vec2(uv.x, frameLocalY / frameCount);
+        }
+        vec2 waterFlowFrameUv(vec2 uv, float frame, float frameCount) {
+          // Reverse only flowing water relative to the current direction.
+          return vec2(uv.x, mod(uv.y + frame, frameCount) / frameCount);
         }`)
       .replace('#include <map_fragment>', `#ifdef USE_MAP
           vec4 sampledDiffuseColor;
           if (vFluidTextureKind < 0.5) {
             sampledDiffuseColor = texture2D(uWaterStillTexture, fluidFrameUv(vFluidFrameUv, uWaterStillFrame, uWaterStillFrameCount));
           } else if (vFluidTextureKind < 1.5) {
-            sampledDiffuseColor = texture2D(uWaterFlowTexture, fluidFrameUv(vFluidFrameUv, uWaterFlowFrame, uWaterFlowFrameCount));
+            sampledDiffuseColor = texture2D(uWaterFlowTexture, waterFlowFrameUv(vFluidFrameUv, uWaterFlowFrame, uWaterFlowFrameCount));
+            sampledDiffuseColor.rgb *= uWaterFlowBrightness;
           } else if (vFluidTextureKind < 2.5) {
             sampledDiffuseColor = texture2D(uLavaStillTexture, fluidFrameUv(vFluidFrameUv, uLavaStillFrame, uLavaStillFrameCount));
           } else {

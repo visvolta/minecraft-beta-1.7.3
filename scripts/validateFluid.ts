@@ -12,6 +12,8 @@ import { readFileSync } from 'node:fs';
 import { RandomTickScheduler } from '../src/world/ticks/RandomTickScheduler.ts';
 import { WorldTickScheduler } from '../src/world/ticks/WorldTickScheduler.ts';
 import { ChunkMesher } from '../src/rendering/ChunkMesher.ts';
+import { getBetaFluidCornerHeight } from '../src/rendering/fluid/FluidSurfaceGeometry.ts';
+import { fluidMetadata } from '../src/world/fluid/FluidMetadata.ts';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -37,7 +39,7 @@ function pngSize(path: string): { width: number; height: number } {
   assert(lava.height / 32 === 16, 'lava_flow should resolve to 16 32x32 frames');
 }
 
-function setup(): { chunks: ChunkManager; world: BlockUpdateWorld; scheduler: WorldTickScheduler } {
+function setup(seed = 99n): { chunks: ChunkManager; world: BlockUpdateWorld; scheduler: WorldTickScheduler } {
   const registry = new BlockRegistry();
   registerDefaultBlocks(registry);
   const chunks = new ChunkManager();
@@ -46,7 +48,7 @@ function setup(): { chunks: ChunkManager; world: BlockUpdateWorld; scheduler: Wo
   const world = new BlockUpdateWorld(chunks, registry, light);
   const behaviours = new BlockBehaviourRegistry();
   registerFluidBehaviours(behaviours);
-  const scheduler = new WorldTickScheduler(chunks, world, behaviours, new RandomTickScheduler(99n));
+  const scheduler = new WorldTickScheduler(chunks, world, behaviours, new RandomTickScheduler(seed));
   world.setScheduleCallback((x, y, z, id, delay) => scheduler.schedule(x, y, z, id, delay));
   return { chunks, world, scheduler };
 }
@@ -154,5 +156,49 @@ function tick(scheduler: WorldTickScheduler, count: number): void {
   assert(topVertices === 4, `stacked falling fluids should emit only one exposed top face, got ${topVertices / 4}`);
   geometry.dispose();
 }
+
+{
+  // Directly exercise Beta's weighted corner sampler, including a source
+  // beside a partial flow and a non-solid replaceable neighbour.
+  const blocks = new Map<string, number>();
+  const metadata = new Map<string, number>();
+  const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
+  blocks.set(key(0, 10, 0), BlockIds.WaterFlowing);
+  metadata.set(key(0, 10, 0), fluidMetadata(0));
+  blocks.set(key(-1, 10, 0), BlockIds.WaterFlowing);
+  metadata.set(key(-1, 10, 0), fluidMetadata(3));
+  const corner = getBetaFluidCornerHeight({
+    getBlock: (x, y, z) => blocks.get(key(x, y, z)) ?? BlockIds.Air,
+    getMetadata: (x, y, z) => metadata.get(key(x, y, z)) ?? 0,
+    isSameFluid: (a, b) => (a === BlockIds.WaterFlowing || a === BlockIds.WaterStill) && (b === BlockIds.WaterFlowing || b === BlockIds.WaterStill),
+    isSolidForFluidHeight: (id) => id === BlockIds.Stone,
+  }, 0, 10, 0, BlockIds.WaterFlowing);
+  assert(corner > 1 - (3 + 1) / 9 && corner <= 1, `Beta weighted corner height out of range: ${corner}`);
+
+  blocks.set(key(0, 11, 0), BlockIds.WaterFlowing);
+  metadata.set(key(0, 11, 0), fluidMetadata(7, true));
+  const aboveCorner = getBetaFluidCornerHeight({
+    getBlock: (x, y, z) => blocks.get(key(x, y, z)) ?? BlockIds.Air,
+    getMetadata: (x, y, z) => metadata.get(key(x, y, z)) ?? 0,
+    isSameFluid: (a, b) => (a === BlockIds.WaterFlowing || a === BlockIds.WaterStill) && (b === BlockIds.WaterFlowing || b === BlockIds.WaterStill),
+    isSolidForFluidHeight: (id) => id === BlockIds.Stone,
+  }, 0, 10, 0, BlockIds.WaterFlowing);
+  assert(aboveCorner === 1, `compatible fluid above corner should be full height, got ${aboveCorner}`);
+}
+
+function waterState(seed: bigint): string {
+  const { world, scheduler } = setup(seed);
+  // A bounded floor forces horizontal water decisions, including the Beta
+  // random slowdown path. Repeating the same seed/tick sequence must match.
+  for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) world.setBlock(x, 9, z, BlockIds.Stone, { updateLighting: false, notifyNeighbours: false });
+  world.setBlock(0, 10, 0, BlockIds.WaterFlowing, { metadata: 0, updateLighting: false, notifyNeighbours: true });
+  world.scheduleBlockTick(0, 10, 0, BlockIds.WaterFlowing, 1);
+  tick(scheduler, 20);
+  const values: string[] = [];
+  for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) values.push(`${world.getBlock(x, 10, z)}:${world.getBlockMetadata(x, 10, z)}`);
+  return values.join('|');
+}
+
+assert(waterState(99n) === waterState(99n), 'water tick sequence is not deterministic for a repeated seed');
 
 console.log('Fluid validation passed.');

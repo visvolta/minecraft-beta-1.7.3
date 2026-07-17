@@ -139,8 +139,10 @@ export class FluidAnimationSystem {
   private configure(texture: THREE.Texture): void {
     texture.magFilter = THREE.NearestFilter;
     texture.minFilter = THREE.NearestFilter;
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
+    // Frame-local UVs must not wrap into a neighbouring animation frame
+    // when Beta's rotated top coordinates extend beyond 0..1.
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.generateMipmaps = false;
     texture.flipY = false;
     texture.colorSpace = THREE.SRGBColorSpace;

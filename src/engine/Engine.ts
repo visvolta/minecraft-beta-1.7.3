@@ -19,6 +19,11 @@ import { BlockBehaviourRegistry } from '../world/BlockBehaviour';
 import { RandomTickScheduler } from '../world/ticks/RandomTickScheduler';
 import { WorldTickScheduler } from '../world/ticks/WorldTickScheduler';
 import { registerFluidBehaviours } from '../world/fluid/FluidBehaviour';
+import { registerPlantBehaviours } from '../world/behaviours/PlantBehaviours';
+import { registerSupportBehaviours } from '../world/behaviours/SupportBehaviours';
+import { registerFireBehaviour } from '../world/behaviours/FireBehaviour';
+import { registerFallingBlockBehaviours } from '../world/behaviours/FallingBlockBehaviour';
+import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { WorldEventQueue } from '../world/events/WorldEventQueue';
 import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
@@ -89,6 +94,7 @@ export class Engine {
   private readonly lightEngine: LightEngine;
   private readonly blockUpdateWorld: BlockUpdateWorld;
   private readonly blockBehaviourRegistry: BlockBehaviourRegistry;
+  private readonly fallingBlockManager: FallingBlockManager;
   private readonly worldTickScheduler: WorldTickScheduler;
   private readonly worldTime: WorldTime;
   private readonly fogController: FogController;
@@ -144,7 +150,12 @@ export class Engine {
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
     this.blockBehaviourRegistry = new BlockBehaviourRegistry();
     this.worldEventQueue = new WorldEventQueue();
+    this.fallingBlockManager = new FallingBlockManager(this.blockUpdateWorld, blockRegistry, this.chunkManager, this.renderer.scene, atlas, this.worldEventQueue);
     registerFluidBehaviours(this.blockBehaviourRegistry);
+    registerPlantBehaviours(this.blockBehaviourRegistry, blockRegistry);
+    registerSupportBehaviours(this.blockBehaviourRegistry, blockRegistry);
+    registerFireBehaviour(this.blockBehaviourRegistry, blockRegistry);
+    registerFallingBlockBehaviours(this.blockBehaviourRegistry, blockRegistry, this.fallingBlockManager);
     this.worldTickScheduler = new WorldTickScheduler(
       this.chunkManager,
       this.blockUpdateWorld,
@@ -234,6 +245,15 @@ export class Engine {
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
       validateMeshWorkers: () => validationHarness.validateMeshWorker(),
       getTickMetrics: () => this.worldTickScheduler.getMetrics(),
+      getFallingBlockMetrics: () => ({
+        simulationTick: this.fallingBlockManager.getSimulationTick(),
+        interpolationAlpha: this.fallingBlockManager.getInterpolationAlpha(),
+        active: this.fallingBlockManager.getCount(),
+        persisted: this.fallingBlockManager.getPersistedCount(),
+        meshCount: this.fallingBlockManager.getMeshCount(),
+        entities: this.fallingBlockManager.getDebugEntities(),
+        pendingDrops: this.worldEventQueue.getBlockDropCount(),
+      }),
       getFluidMetrics: () => ({
         ...this.fluidAnimationSystem.getDebugInfo(),
         lavaIgnitionAttempts: this.worldEventQueue.getTotalLavaIgnitionAttempts(),
@@ -319,6 +339,7 @@ export class Engine {
     this.debugOverlay.dispose();
     this.blockHighlight.dispose();
     this.chunkStreamer.dispose();
+    this.fallingBlockManager.dispose();
     this.lightningRenderer.dispose();
     this.rainSplashRenderer.dispose();
     this.precipitationRenderer.dispose();
@@ -430,6 +451,7 @@ export class Engine {
     // 3. Advance world time and world block-tick infrastructure.
     this.worldTime.update(deltaSeconds);
     this.worldTickScheduler.update(deltaSeconds);
+    this.fallingBlockManager.update(deltaSeconds);
     this.worldEventQueue.drainNoop();
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
 

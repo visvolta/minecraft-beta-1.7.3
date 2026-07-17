@@ -56,6 +56,7 @@ function geometryFromBuffers(buffers: MeshAttributeBuffers): THREE.BufferGeometr
   geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(new Float32Array(buffers.skyLightLevels), 1));
   geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(new Float32Array(buffers.blockLightLevels), 1));
   geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(new Float32Array(buffers.aoFactorScalars), 1));
+  geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(new Float32Array(buffers.faceBrightness), 1));
   geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(buffers.fluidTextureKinds), 1));
   geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(buffers.fluidFrameUvs), 2));
   geometry.setAttribute('color', geometry.getAttribute('normalColor'));

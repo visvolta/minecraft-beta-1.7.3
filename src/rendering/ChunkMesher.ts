@@ -15,9 +15,11 @@ import {
   CHUNK_SIZE_Z,
 } from '../world/chunkConstants';
 import { clampedVisibility, getLightBrightness } from './voxelLighting';
-import { fluidSurfaceHeight, isFallingFluid } from '../world/fluid/FluidMetadata';
+import { isFallingFluid } from '../world/fluid/FluidMetadata';
 import { FluidTextureKind } from '../world/fluid/FluidTextureKind';
 import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
+import { getBetaFluidCornerHeight } from './fluid/FluidSurfaceGeometry';
+import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
@@ -186,6 +188,7 @@ class MeshBuffers {
   public readonly skyLightLevels: number[] = [];
   public readonly blockLightLevels: number[] = [];
   public readonly aoFactorScalars: number[] = [];
+  public readonly faceBrightness: number[] = [];
   public readonly fluidTextureKinds: number[] = [];
   public readonly fluidFrameUvs: number[] = [];
   public readonly indices: number[] = [];
@@ -235,6 +238,7 @@ class MeshBuffers {
       this.skyLightLevels.push(sky);
       this.blockLightLevels.push(block);
       this.aoFactorScalars.push(ao);
+      this.faceBrightness.push(1);
       this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
       this.fluidFrameUvs.push(0, 0);
     }
@@ -295,6 +299,7 @@ class MeshBuffers {
       this.skyLightLevels.push(light.sky);
       this.blockLightLevels.push(light.block);
       this.aoFactorScalars.push(1);
+      this.faceBrightness.push(1);
       this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
       this.fluidFrameUvs.push(0, 0);
     }
@@ -320,6 +325,7 @@ class MeshBuffers {
       this.skyLightLevels.push(light.sky);
       this.blockLightLevels.push(light.block);
       this.aoFactorScalars.push(1);
+      this.faceBrightness.push(1);
       this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
       this.fluidFrameUvs.push(0, 0);
     }
@@ -422,6 +428,7 @@ class MeshBuffers {
       this.skyLightLevels.push(sky);
       this.blockLightLevels.push(block);
       this.aoFactorScalars.push(ao);
+      this.faceBrightness.push(1);
       this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
       this.fluidFrameUvs.push(0, 0);
     }
@@ -457,11 +464,12 @@ class MeshBuffers {
     fluidTextureKind: FluidTextureKind = FluidTextureKind.WaterStill,
     customUvs?: readonly [number, number, number, number, number, number, number, number],
     customFrameUvs?: readonly [number, number, number, number, number, number, number, number],
+    faceBrightness = 1,
   ): void {
     const [tintR, tintG, tintB] = getLinearTint(tint);
     const vertexOffset = this.positions.length / 3;
     const rawBrightness = getLightBrightness(Math.max(light.sky, light.block));
-    const visibility = clampedVisibility(rawBrightness, ao);
+    const visibility = clampedVisibility(rawBrightness, ao) * faceBrightness;
     const u0 = uvRect?.u0 ?? 0;
     const v0 = uvRect?.v0 ?? 0;
     const u1 = uvRect?.u1 ?? 1;
@@ -479,6 +487,7 @@ class MeshBuffers {
       this.skyLightLevels.push(light.sky);
       this.blockLightLevels.push(light.block);
       this.aoFactorScalars.push(ao);
+      this.faceBrightness.push(faceBrightness);
       this.fluidTextureKinds.push(fluidTextureKind);
       const frameUv = customFrameUvs ?? ([0, 1, 1, 1, 1, 0, 0, 0] as const);
       this.fluidFrameUvs.push(frameUv[i * 2]!, frameUv[i * 2 + 1]!);
@@ -498,6 +507,7 @@ class MeshBuffers {
     geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(this.skyLightLevels, 1));
     geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(this.blockLightLevels, 1));
     geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(this.aoFactorScalars, 1));
+    geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(this.faceBrightness, 1));
     geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(this.fluidTextureKinds, 1));
     geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(this.fluidFrameUvs, 2));
     geometry.setAttribute('color', geometry.getAttribute('normalColor'));
@@ -872,18 +882,36 @@ export class ChunkMesher {
           const textureName = resolveBlockTexture(definition, 'side');
           const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
           const tint = resolveBlockTint(definition, 'side');
-          const light = this.getLightComponentsAt(chunk, x, y, z);
+          // Each visible fluid face samples the cell on the other side of
+          // that face. In particular, open-sky water must use the light above
+          // the surface rather than the attenuated light stored in the fluid.
+          // Directional Beta multipliers are applied separately below.
+          const topLight = this.getLightComponentsAt(chunk, x, y + 1, z);
+          const plusXLight = this.getLightComponentsAt(chunk, x + 1, y, z);
+          const minusXLight = this.getLightComponentsAt(chunk, x - 1, y, z);
+          const plusZLight = this.getLightComponentsAt(chunk, x, y, z + 1);
+          const minusZLight = this.getLightComponentsAt(chunk, x, y, z - 1);
+          const bottomLight = this.getLightComponentsAt(chunk, x, y - 1, z);
           const metadata = chunk.getBlockMetadata(x, y, z);
           const sideTextureKind = this.getFluidTextureKind(blockId, metadata, 'side');
           const flow = this.computeFluidFlow(chunk, x, y, z, blockId);
           const topTextureKind = this.getFluidTextureKind(blockId, metadata, 'top', flow.x, flow.z);
           const topUvs = this.buildFluidTopUvs(flow.x, flow.z, topTextureKind);
           const sameAbove = this.sameFluidMaterial(blockId, this.getBlockAt(chunk, x, y + 1, z));
-          const h00 = sameAbove ? 1 : this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 0);
-          const h10 = sameAbove ? 1 : this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 0);
-          const h11 = sameAbove ? 1 : this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 1);
-          const h01 = sameAbove ? 1 : this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 1);
-          const sideFrameUvs: readonly [number, number, number, number, number, number, number, number] = [0, 0, 1, 0, 1, 1, 0, 1];
+          const h00 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 0);
+          const h10 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 0);
+          const h11 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 1, 1);
+          const h01 = this.getFluidCornerHeight(chunk, x, y, z, blockId, 0, 1);
+          // Beta maps each side's upper V coordinate from its corner height;
+          // a full-height surface starts at V=0 and a partial surface starts
+          // lower in the same logical frame. Vertex order is bottom-left,
+          // top-left, top-right, bottom-right for every side below.
+          const sideFrameUvs = {
+            plusX: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h10, 1, 1 - h11, 1, 1]),
+            minusX: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h01, 1, 1 - h00, 1, 1]),
+            plusZ: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h11, 1, 1 - h01, 1, 1]),
+            minusZ: this.scaleFluidFrameUvs(sideTextureKind, [0, 1, 0, 1 - h00, 1, 1 - h10, 1, 1]),
+          };
 
           if (!sameAbove) {
             buffers.pushQuad([
@@ -891,27 +919,27 @@ export class ChunkMesher {
               [x + 1, y + h11, z + 1],
               [x + 1, y + h10, z],
               [x, y + h00, z],
-            ], [0, 1, 0], uvRect, tint, light, 1, topTextureKind, undefined, topUvs);
+            ], [0, 1, 0], uvRect, tint, topLight, 1, topTextureKind, undefined, topUvs, 1);
           }
 
           // +X
           if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x + 1, y, z))) {
-            buffers.pushQuad([[x + 1, y, z], [x + 1, y + h10, z], [x + 1, y + h11, z + 1], [x + 1, y, z + 1]], [1, 0, 0], uvRect, tint, light, 1, sideTextureKind, undefined, sideFrameUvs);
+            buffers.pushQuad([[x + 1, y, z], [x + 1, y + h10, z], [x + 1, y + h11, z + 1], [x + 1, y, z + 1]], [1, 0, 0], uvRect, tint, plusXLight, 1, sideTextureKind, undefined, sideFrameUvs.plusX, 0.6);
           }
           // -X
           if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x - 1, y, z))) {
-            buffers.pushQuad([[x, y, z + 1], [x, y + h01, z + 1], [x, y + h00, z], [x, y, z]], [-1, 0, 0], uvRect, tint, light, 1, sideTextureKind, undefined, sideFrameUvs);
+            buffers.pushQuad([[x, y, z + 1], [x, y + h01, z + 1], [x, y + h00, z], [x, y, z]], [-1, 0, 0], uvRect, tint, minusXLight, 1, sideTextureKind, undefined, sideFrameUvs.minusX, 0.6);
           }
           // +Z
           if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y, z + 1))) {
-            buffers.pushQuad([[x + 1, y, z + 1], [x + 1, y + h11, z + 1], [x, y + h01, z + 1], [x, y, z + 1]], [0, 0, 1], uvRect, tint, light, 1, sideTextureKind, undefined, sideFrameUvs);
+            buffers.pushQuad([[x + 1, y, z + 1], [x + 1, y + h11, z + 1], [x, y + h01, z + 1], [x, y, z + 1]], [0, 0, 1], uvRect, tint, plusZLight, 1, sideTextureKind, undefined, sideFrameUvs.plusZ, 0.8);
           }
           // -Z
           if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y, z - 1))) {
-            buffers.pushQuad([[x, y, z], [x, y + h00, z], [x + 1, y + h10, z], [x + 1, y, z]], [0, 0, -1], uvRect, tint, light, 1, sideTextureKind, undefined, sideFrameUvs);
+            buffers.pushQuad([[x, y, z], [x, y + h00, z], [x + 1, y + h10, z], [x + 1, y, z]], [0, 0, -1], uvRect, tint, minusZLight, 1, sideTextureKind, undefined, sideFrameUvs.minusZ, 0.8);
           }
           if (!this.hidesFluidFace(blockId, this.getBlockAt(chunk, x, y - 1, z))) {
-            buffers.pushQuad([[x, y, z], [x + 1, y, z], [x + 1, y, z + 1], [x, y, z + 1]], [0, -1, 0], uvRect, tint, light, 1, sideTextureKind);
+            buffers.pushQuad([[x, y, z], [x + 1, y, z], [x + 1, y, z + 1], [x, y, z + 1]], [0, -1, 0], uvRect, tint, bottomLight, 1, sideTextureKind, undefined, undefined, 0.5);
           }
         }
       }
@@ -960,10 +988,16 @@ export class ChunkMesher {
   ): FluidTextureKind {
     const falling = isFallingFluid(metadata);
     const movingTop = face === 'top' && Math.hypot(flowX, flowZ) > 1e-6;
-    if (blockId === BlockIds.WaterFlowing && (face === 'side' || falling || movingTop)) return FluidTextureKind.WaterFlow;
-    if (blockId === BlockIds.LavaFlowing && (face === 'side' || falling || movingTop)) return FluidTextureKind.LavaFlow;
-    if (falling && (blockId === BlockIds.WaterStill || blockId === BlockIds.WaterFlowing)) return FluidTextureKind.WaterFlow;
-    if (falling && (blockId === BlockIds.LavaStill || blockId === BlockIds.LavaFlowing)) return FluidTextureKind.LavaFlow;
+
+    // Beta BlockFluid.func_218_a selects the flowing tile for every side
+    // face, including stationary water/lava blocks. Still/flowing selection
+    // is a top-face decision; the block ID alone must not make stationary
+    // side faces use the still tile.
+    if (face === 'side' || falling || movingTop) {
+      return blockId === BlockIds.LavaStill || blockId === BlockIds.LavaFlowing
+        ? FluidTextureKind.LavaFlow
+        : FluidTextureKind.WaterFlow;
+    }
     if (blockId === BlockIds.LavaStill || blockId === BlockIds.LavaFlowing) return FluidTextureKind.LavaStill;
     return FluidTextureKind.WaterStill;
   }
@@ -975,7 +1009,10 @@ export class ChunkMesher {
   ): readonly [number, number, number, number, number, number, number, number] | undefined {
     const flowing = kind === FluidTextureKind.WaterFlow || kind === FluidTextureKind.LavaFlow;
     if (!flowing || Math.hypot(flowX, flowZ) < 1e-6) return undefined;
-    const angle = Math.atan2(flowZ, flowX) - Math.PI / 2;
+    // The project top-face UV basis is opposite to the world-flow basis;
+    // reverse only this final conversion so the sampled pattern travels with
+    // the computed flow vector. Simulation and vector calculation are intact.
+    const angle = -(Math.atan2(flowZ, flowX) - Math.PI / 2);
     const base: ReadonlyArray<readonly [number, number]> = [[0, 1], [1, 1], [1, 0], [0, 0]];
     const out: number[] = [];
     const c = Math.cos(angle);
@@ -985,7 +1022,22 @@ export class ChunkMesher {
       const y = v - 0.5;
       out.push(x * c - y * s + 0.5, x * s + y * c + 0.5);
     }
-    return out as [number, number, number, number, number, number, number, number];
+    return this.scaleFluidFrameUvs(kind, out as [number, number, number, number, number, number, number, number]);
+  }
+
+  private scaleFluidFrameUvs(
+    kind: FluidTextureKind,
+    uvs: readonly [number, number, number, number, number, number, number, number],
+  ): readonly [number, number, number, number, number, number, number, number] {
+    const scale = kind === FluidTextureKind.LavaFlow
+      ? FLUID_RENDER_SETTINGS.lavaFlowScale
+      : kind === FluidTextureKind.WaterFlow
+        ? FLUID_RENDER_SETTINGS.waterFlowScale
+        : 1;
+    if (scale === 1) return uvs;
+    const result = [...uvs] as [number, number, number, number, number, number, number, number];
+    for (let i = 0; i < result.length; i++) result[i] = (result[i]! - 0.5) * scale + 0.5;
+    return result;
   }
 
   private computeFluidFlow(chunk: Chunk, x: number, y: number, z: number, blockId: BlockId): { x: number; z: number; falling: boolean } {
@@ -1009,23 +1061,23 @@ export class ChunkMesher {
   }
 
   private getFluidCornerHeight(chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, dx: number, dz: number): number {
-    if (this.sameFluidMaterial(blockId, this.getBlockAt(chunk, x, y + 1, z))) return 1;
-    let total = 0;
-    let count = 0;
-    for (const [ox, oz] of [[0, 0], [dx === 0 ? -1 : 1, 0], [0, dz === 0 ? -1 : 1], [dx === 0 ? -1 : 1, dz === 0 ? -1 : 1]] as const) {
-      const sx = x + ox;
-      const sz = z + oz;
-      const sampleId = this.getBlockAt(chunk, sx, y, sz);
-      if (this.sameFluidMaterial(blockId, sampleId)) {
-        const meta = this.getMetadataAt(chunk, sx, y, sz);
-        total += isFallingFluid(meta) ? 1 : fluidSurfaceHeight(meta);
-        count += 1;
-      } else if (!this.isSolidForFluidHeight(sampleId)) {
-        total += 1;
-        count += 1;
-      }
-    }
-    return count === 0 ? 1 : total / count;
+    // Beta's corner sampler is anchored at the lower-left sample for each
+    // corner. The dx/dz signs select the adjacent cells touching that corner;
+    // keep this mapping explicit so X/Z and negative chunk borders stay clear.
+    const cornerX = dx === 0 ? x : x + 1;
+    const cornerZ = dz === 0 ? z : z + 1;
+    return getBetaFluidCornerHeight(
+      {
+        getBlock: (sampleX, sampleY, sampleZ) => this.getBlockAt(chunk, sampleX, sampleY, sampleZ),
+        getMetadata: (sampleX, sampleY, sampleZ) => this.getMetadataAt(chunk, sampleX, sampleY, sampleZ),
+        isSameFluid: (a, b) => this.sameFluidMaterial(a as BlockId, b as BlockId),
+        isSolidForFluidHeight: (sampleId) => this.isSolidForFluidHeight(sampleId as BlockId),
+      },
+      cornerX,
+      y,
+      cornerZ,
+      blockId,
+    );
   }
 
   private getMetadataAt(chunk: Chunk, lx: number, ly: number, lz: number): number {

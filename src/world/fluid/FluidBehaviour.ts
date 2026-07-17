@@ -2,7 +2,7 @@ import { BlockIds } from '../../blocks/BlockId';
 import type { BlockId } from '../../blocks/BlockId';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
 import { CHUNK_SIZE_Y } from '../chunkConstants';
-import { getFluidLevel as getMetadataFluidLevel, isFallingFluid } from './FluidMetadata';
+import { effectiveFluidLevel } from './FluidMetadata';
 
 interface FluidConfig {
   readonly flowingId: BlockId;
@@ -81,7 +81,7 @@ function getFluidLevel(ctx: BlockBehaviourContext, x: number, y: number, z: numb
 }
 
 function normalizedLevel(metadata: number): number {
-  return isFallingFluid(metadata) ? 0 : getMetadataFluidLevel(metadata);
+  return effectiveFluidLevel(metadata);
 }
 
 class FluidBehaviour implements BlockBehaviour {
@@ -170,6 +170,14 @@ class FluidBehaviour implements BlockBehaviour {
         if (isSolidForFlow(below) || (isSameFluid(below, this.config) && belowMeta === 0)) {
           newLevel = 0;
         }
+      }
+
+      // Beta water deliberately retains its current level on most upward
+      // decay changes. Consume the world-owned deterministic RNG exactly at
+      // this decision point; do not use Math.random or a render-side source.
+      if (this.config === WATER && level < 8 && newLevel < 8 && newLevel > level && (ctx.nextInt?.(4) ?? 0) !== 0) {
+        newLevel = level;
+        shouldBecomeStill = false;
       }
 
       if (newLevel !== level) {
