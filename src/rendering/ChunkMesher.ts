@@ -879,16 +879,15 @@ export class ChunkMesher {
    * Uses `fluidTextureKind` attribute to encode the fire texture tile index
    * for the fire sprite sheet animation system.
    */
+
   public buildFires(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
-    // Frame row indices for the shader.
-    // The shader computes: fireFrameY = (row + uFireFrame) / frameCount
-    // So row must be the raw index (0 or 1), NOT divided by frame count.
-    const ROW0_V0 = 0;
-    const ROW0_V1 = 1;    // raw row index, shader divides by 32
-    const ROW1_V0 = 1;    // raw row index
-    const ROW1_V1 = 2;    // raw row index
+    // All fire planes use the SAME texture row (row 0).
+    // The shader advances the animation frame uniformly for the entire block.
+    // Every plane belonging to the same fire block is synchronized.
+    const V0 = 0;  // raw row index, shader divides by 32
+    const V1 = 1;  // raw row index
 
     for (let y = 0; y < CHUNK_SIZE_Y; y++) {
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
@@ -902,34 +901,19 @@ export class ChunkMesher {
           const below = this.getBlockAt(chunk, x, y - 1, z);
           const isGroundFire = this.isBlockNormalCube(below) || this.canBlockCatchFire(below);
 
-          // Beta: UV alternation based on (x/2 + y/2 + z/2) & 1
+          // Beta: UV flip based on (x/2 + y/2 + z/2) & 1
           const flipUvs = ((Math.floor(x / 2) + Math.floor(y / 2) + Math.floor(z / 2)) & 1) === 1;
+          const uL = flipUvs ? 1 : 0;
+          const uR = flipUvs ? 0 : 1;
 
-          const H = 1.4;  // fire plane height (Beta var18)
-          const Y_OFF = 0.0625; // Y offset (Beta var20)
-
-          // Ground fire UV rows: narrow=row0, medium=row1, full=row0
-          const useAltGroundRow = ((x + y + z) & 1) === 1;
-          const v0P1 = useAltGroundRow ? ROW1_V0 : ROW0_V0;
-          const v1P1 = useAltGroundRow ? ROW1_V1 : ROW0_V1;
-          const v0P2 = useAltGroundRow ? ROW0_V0 : ROW1_V0;
-          const v1P2 = useAltGroundRow ? ROW0_V1 : ROW1_V1;
-          const v0P3 = v0P1;
-          const v1P3 = v1P1;
+          const H = 1.4;       // Beta var18
+          const Y_OFF = 0.0625; // Beta var20
 
           if (!isGroundFire) {
             // ── Wall fire ─────────────────────────────────────────
-            // Beta: quads attached to flammable neighbours.
+            // Beta: tilted quads attached to flammable horizontal neighbours.
             // Inset 0.2 (var37), height 1.4, yOff 0.0625.
-            // UV row alternates based on (x+y+z) & 1.
-            const useAltRow = ((x + y + z) & 1) === 1;
-            const v0 = useAltRow ? ROW1_V0 : ROW0_V0;
-            const v1 = useAltRow ? ROW1_V1 : ROW0_V1;
-            // Beta reverses U on each successive face pair:
-            // (-X, +X) share one flip state; (-Z, +Z) share another.
-            // Front/back are handled by DoubleSide material.
-            const uL = flipUvs ? 1 : 0;
-            const uR = flipUvs ? 0 : 1;
+            // All planes use the same texture row.
 
             // -X face
             if (this.canBlockCatchFire(this.getBlockAt(chunk, x - 1, y, z))) {
@@ -939,9 +923,8 @@ export class ChunkMesher {
                 [x, y + Y_OFF, z],
                 [x + 0.2, y + H + Y_OFF, z],
               ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
-              FluidTextureKind.WaterStill,
-              undefined,
-              [uR, v0, uR, v1, uL, v1, uL, v0]);
+              FluidTextureKind.WaterStill, undefined,
+              [uR, V0, uR, V1, uL, V1, uL, V0]);
             }
 
             // +X face
@@ -952,9 +935,8 @@ export class ChunkMesher {
                 [x + 1, y + Y_OFF, z + 1],
                 [x + 0.8, y + H + Y_OFF, z + 1],
               ], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
-              FluidTextureKind.WaterStill,
-              undefined,
-              [uL, v0, uL, v1, uR, v1, uR, v0]);
+              FluidTextureKind.WaterStill, undefined,
+              [uL, V0, uL, V1, uR, V1, uR, V0]);
             }
 
             // -Z face
@@ -965,9 +947,8 @@ export class ChunkMesher {
                 [x + 1, y + Y_OFF, z],
                 [x + 1, y + H + Y_OFF, z + 0.2],
               ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
-              FluidTextureKind.WaterStill,
-              undefined,
-              [uR, v0, uR, v1, uL, v1, uL, v0]);
+              FluidTextureKind.WaterStill, undefined,
+              [uR, V0, uR, V1, uL, V1, uL, V0]);
             }
 
             // +Z face
@@ -978,9 +959,8 @@ export class ChunkMesher {
                 [x, y + Y_OFF, z + 1],
                 [x, y + H + Y_OFF, z + 0.8],
               ], [0, 0, -1], undefined, [1, 1, 1], lightSample, 1,
-              FluidTextureKind.WaterStill,
-              undefined,
-              [uL, v0, uL, v1, uR, v1, uR, v0]);
+              FluidTextureKind.WaterStill, undefined,
+              [uL, V0, uL, V1, uR, V1, uR, V0]);
             }
 
             // +Y face (fire hanging from flammable block above)
@@ -988,78 +968,58 @@ export class ChunkMesher {
               const topY = y + 1;
               const hang = -0.2;
               if (((x + y + z) & 1) === 0) {
-                // Diagonal A (Beta: var29→var21 along X, z=0→z=1)
                 buffers.pushQuad([
-                  [x + 0.5 - 0.5, topY + hang, z],
-                  [x + 0.5 + 0.5, topY, z],
-                  [x + 0.5 + 0.5, topY, z + 1],
-                  [x + 0.5 - 0.5, topY + hang, z + 1],
+                  [x, topY + hang, z],
+                  [x + 1, topY, z],
+                  [x + 1, topY, z + 1],
+                  [x, topY + hang, z + 1],
                 ], [0, -1, 0], undefined, [1, 1, 1], lightSample, 1,
-                FluidTextureKind.WaterStill,
-                undefined,
-                [1, ROW1_V0, 1, ROW1_V1, 0, ROW1_V1, 0, ROW1_V0]);
-                // Diagonal B
+                FluidTextureKind.WaterStill, undefined,
+                [1, V0, 1, V1, 0, V1, 0, V0]);
                 buffers.pushQuad([
-                  [x + 0.5 + 0.5, topY + hang, z + 1],
-                  [x + 0.5 - 0.5, topY, z + 1],
-                  [x + 0.5 - 0.5, topY, z],
-                  [x + 0.5 + 0.5, topY + hang, z],
+                  [x + 1, topY + hang, z + 1],
+                  [x, topY, z + 1],
+                  [x, topY, z],
+                  [x + 1, topY + hang, z],
                 ], [0, 1, 0], undefined, [1, 1, 1], lightSample, 1,
-                FluidTextureKind.WaterStill,
-                undefined,
-                [1, ROW0_V0, 1, ROW0_V1, 0, ROW0_V1, 0, ROW0_V0]);
+                FluidTextureKind.WaterStill, undefined,
+                [1, V0, 1, V1, 0, V1, 0, V0]);
               } else {
-                // Diagonal A (Beta: z+0.5+0.5→z+0.5-0.5 along Z, x=0→x=1)
                 buffers.pushQuad([
-                  [x, topY + hang, z + 0.5 + 0.5],
-                  [x, topY, z + 0.5 - 0.5],
-                  [x + 1, topY, z + 0.5 - 0.5],
-                  [x + 1, topY + hang, z + 0.5 + 0.5],
+                  [x, topY + hang, z + 1],
+                  [x, topY, z],
+                  [x + 1, topY, z],
+                  [x + 1, topY + hang, z + 1],
                 ], [0, -1, 0], undefined, [1, 1, 1], lightSample, 1,
-                FluidTextureKind.WaterStill,
-                undefined,
-                [1, ROW1_V0, 1, ROW1_V1, 0, ROW1_V1, 0, ROW1_V0]);
-                // Diagonal B
+                FluidTextureKind.WaterStill, undefined,
+                [1, V0, 1, V1, 0, V1, 0, V0]);
                 buffers.pushQuad([
-                  [x + 1, topY + hang, z + 0.5 - 0.5],
-                  [x + 1, topY, z + 0.5 + 0.5],
-                  [x, topY, z + 0.5 + 0.5],
-                  [x, topY + hang, z + 0.5 - 0.5],
+                  [x + 1, topY + hang, z],
+                  [x + 1, topY, z + 1],
+                  [x, topY, z + 1],
+                  [x, topY + hang, z],
                 ], [0, 1, 0], undefined, [1, 1, 1], lightSample, 1,
-                FluidTextureKind.WaterStill,
-                undefined,
-                [1, ROW0_V0, 1, ROW0_V1, 0, ROW0_V1, 0, ROW0_V0]);
+                FluidTextureKind.WaterStill, undefined,
+                [1, V0, 1, V1, 0, V1, 0, V0]);
               }
             }
 
           } else {
             // ── Ground fire ───────────────────────────────────────
-            // Beta renderBlockFire ground-fire branch (else block):
-            // Three pairs of PARALLEL vertical planes running along Z axis.
-            // Each pair at a different X width, centred on the block.
-            // NOT diagonal crosses — all planes run z=0 → z=1.
+            // Beta renderBlockFire ground-fire (else branch):
             //
-            // Beta variables (x=0, z=0 for clarity):
-            //   var19 = x+0.7, var21 = x+0.3  (narrow: 0.4 wide)
-            //   var27 = x+0.2, var29 = x+0.8  (medium: 0.6 wide)
-            //   var19b= x+0.0, var21b= x+1.0  (full: 1.0 wide)
-            //   var27b= x+0.1, var29b= x+0.9  (full: 0.8 wide)
+            // TWO perpendicular planes, 90° apart, forming a cross:
+            //   Plane A (Z-axis): x=0.3→0.7, z=0→1, front+back
+            //   Plane B (X-axis): z=0.3→0.7, x=0→1, front+back
             //
-            // UV rows: narrow=row0, medium=row1, full=row0
-            // Each plane rendered as front+back quads.
+            // Total: exactly 4 quads. No overlapping coplanar planes.
+            // All use the same texture row (row 0).
+            //
+            // Beta variable mapping (with x=0, z=0):
+            //   var19 = x+0.7, var21 = x+0.3  (Z-plane width 0.4)
+            //   var23 = z+0.7, var25 = z+0.3  (X-plane width 0.4)
 
-            const uL = flipUvs ? 1 : 0;
-            const uR = flipUvs ? 0 : 1;
-
-            // Row UVs for each pair
-            const v0Narrow = v0P1; // row 0
-            const v1Narrow = v1P1;
-            const v0Medium = v0P2; // row 1
-            const v1Medium = v1P2;
-            const v0Full = v0P3;   // row 0
-            const v1Full = v1P3;
-
-            // ── Pair 1: narrow planes (width 0.4, x = 0.3 → 0.7) ──
+            // ── Plane A: Z-axis (x = 0.3 → 0.7, z = 0 → 1) ──
             // Front face
             buffers.pushQuad([
               [x + 0.3, y + H + Y_OFF, z + 1],
@@ -1067,9 +1027,8 @@ export class ChunkMesher {
               [x + 0.7, y + Y_OFF, z],
               [x + 0.3, y + H + Y_OFF, z],
             ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
-            FluidTextureKind.WaterStill,
-            undefined,
-            [uR, v0Narrow, uR, v1Narrow, uL, v1Narrow, uL, v0Narrow]);
+            FluidTextureKind.WaterStill, undefined,
+            [uR, V0, uR, V1, uL, V1, uL, V0]);
             // Back face
             buffers.pushQuad([
               [x + 0.7, y + H + Y_OFF, z + 1],
@@ -1077,49 +1036,28 @@ export class ChunkMesher {
               [x + 0.3, y + Y_OFF, z],
               [x + 0.7, y + H + Y_OFF, z],
             ], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
-            FluidTextureKind.WaterStill,
-            undefined,
-            [uL, v0Narrow, uL, v1Narrow, uR, v1Narrow, uR, v0Narrow]);
+            FluidTextureKind.WaterStill, undefined,
+            [uL, V0, uL, V1, uR, V1, uR, V0]);
 
-            // ── Pair 2: medium planes (width 0.6, x = 0.2 → 0.8) ──
+            // ── Plane B: X-axis (z = 0.3 → 0.7, x = 0 → 1) ──
+            // Front face
             buffers.pushQuad([
-              [x + 0.8, y + H + Y_OFF, z + 1],
-              [x + 0.2, y + Y_OFF, z + 1],
-              [x + 0.2, y + Y_OFF, z],
-              [x + 0.8, y + H + Y_OFF, z],
-            ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
-            FluidTextureKind.WaterStill,
-            undefined,
-            [uR, v0Medium, uR, v1Medium, uL, v1Medium, uL, v0Medium]);
+              [x, y + H + Y_OFF, z + 0.7],
+              [x, y + Y_OFF, z + 0.3],
+              [x + 1, y + Y_OFF, z + 0.3],
+              [x + 1, y + H + Y_OFF, z + 0.7],
+            ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
+            FluidTextureKind.WaterStill, undefined,
+            [uR, V0, uR, V1, uL, V1, uL, V0]);
+            // Back face
             buffers.pushQuad([
-              [x + 0.2, y + H + Y_OFF, z + 1],
-              [x + 0.8, y + Y_OFF, z + 1],
-              [x + 0.8, y + Y_OFF, z],
-              [x + 0.2, y + H + Y_OFF, z],
-            ], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
-            FluidTextureKind.WaterStill,
-            undefined,
-            [uL, v0Medium, uL, v1Medium, uR, v1Medium, uR, v0Medium]);
-
-            // ── Pair 3: full-width planes (width 0.8, x = 0.1 → 0.9) ──
-            buffers.pushQuad([
-              [x + 0.1, y + H + Y_OFF, z + 1],
-              [x + 0.9, y + Y_OFF, z + 1],
-              [x + 0.9, y + Y_OFF, z],
-              [x + 0.1, y + H + Y_OFF, z],
-            ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
-            FluidTextureKind.WaterStill,
-            undefined,
-            [uR, v0Full, uR, v1Full, uL, v1Full, uL, v0Full]);
-            buffers.pushQuad([
-              [x + 0.9, y + H + Y_OFF, z + 1],
-              [x + 0.1, y + Y_OFF, z + 1],
-              [x + 0.1, y + Y_OFF, z],
-              [x + 0.9, y + H + Y_OFF, z],
-            ], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
-            FluidTextureKind.WaterStill,
-            undefined,
-            [uL, v0Full, uL, v1Full, uR, v1Full, uR, v0Full]);
+              [x + 1, y + H + Y_OFF, z + 0.3],
+              [x + 1, y + Y_OFF, z + 0.7],
+              [x, y + Y_OFF, z + 0.7],
+              [x, y + H + Y_OFF, z + 0.3],
+            ], [0, 0, -1], undefined, [1, 1, 1], lightSample, 1,
+            FluidTextureKind.WaterStill, undefined,
+            [uL, V0, uL, V1, uR, V1, uR, V0]);
           }
         }
       }
@@ -1127,11 +1065,6 @@ export class ChunkMesher {
 
     return buffers.toGeometry();
   }
-
-  /**
-   * Beta BlockFire.canBlockCatchFire().
-   * Returns true if the block has encouragement > 0 in the flammability table.
-   */
   private canBlockCatchFire(blockId: BlockId): boolean {
     // Match the flammability table from FireBehaviour
     switch (blockId) {

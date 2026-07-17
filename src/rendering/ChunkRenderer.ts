@@ -195,7 +195,7 @@ function attachFireAnimationShader(material: THREE.MeshBasicMaterial, fireAnimat
       .replace('#include <uv_vertex>', `#include <uv_vertex>\n        vFluidTextureKind = fluidTextureKind;\n        vFluidFrameUv = fluidFrameUv;`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n        varying float vFluidTextureKind;\n        varying vec2 vFluidFrameUv;\n        uniform float uFireFrame;\n        uniform float uFireFrameCount;`)
-      .replace('#include <map_fragment>', `#ifdef USE_MAP\n          // Fire sprite sheet: vertical strip of 16x16 frames\n          // vFluidFrameUv.x = 0-1 within tile, vFluidFrameUv.y = row index (0 or 1)\n          float fireFrameY = (vFluidFrameUv.y + uFireFrame) / uFireFrameCount;\n          vec2 fireUv = vec2(vFluidFrameUv.x, fireFrameY);\n          vec4 sampledDiffuseColor = texture2D(map, fireUv);\n          if (sampledDiffuseColor.a < 0.1) discard;\n          diffuseColor *= sampledDiffuseColor;\n        #endif`);
+      .replace('#include <map_fragment>', `#ifdef USE_MAP\n          // Fire sprite sheet: vertical strip of 16x16 frames\n          // vFluidFrameUv.x = 0-1 within tile, vFluidFrameUv.y = row index (0 or 1)\n          // mod() wraps cleanly so the final frame transitions to the first without a hitch.\n          float fireFrameY = mod(vFluidFrameUv.y + uFireFrame, uFireFrameCount) / uFireFrameCount;\n          vec2 fireUv = vec2(vFluidFrameUv.x, fireFrameY);\n          vec4 sampledDiffuseColor = texture2D(map, fireUv);\n          if (sampledDiffuseColor.a < 0.1) discard;\n          diffuseColor *= sampledDiffuseColor;\n        #endif`);
   };
   material.needsUpdate = true;
 }
