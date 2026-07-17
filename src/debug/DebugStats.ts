@@ -115,6 +115,14 @@ export interface DebugStats {
   readonly oldestScheduledTickAge: number;
   readonly detachedTickQueues: number;
 
+  /** Falling block entity snapshot. */
+  readonly fallingEntityCount: number;
+  readonly fallingPersistedCount: number;
+  readonly fallingMeshCount: number;
+  readonly fallingSimulationTick: number;
+  readonly fallingInterpolationAlpha: number;
+  readonly fallingPendingDrops: number;
+
   readonly noClip: boolean;
 }
 

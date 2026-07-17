@@ -14,11 +14,11 @@ class FallingBlockBehaviour implements BlockBehaviour {
   ) {}
 
   public onPlaced(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
-    ctx.world.scheduleBlockTick(x, y, z, this.blockId, 1);
+    ctx.world.scheduleBlockTick(x, y, z, this.blockId, 3);
   }
 
   public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
-    ctx.world.scheduleBlockTick(x, y, z, this.blockId, 1);
+    ctx.world.scheduleBlockTick(x, y, z, this.blockId, 3);
   }
 
   public scheduledTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {

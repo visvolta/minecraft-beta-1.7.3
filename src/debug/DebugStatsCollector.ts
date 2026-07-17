@@ -17,6 +17,8 @@ import type { RainSplashRenderer } from '../rendering/weather/RainSplashRenderer
 import type { LightningRenderer } from '../rendering/weather/LightningRenderer';
 import type { PerformanceProfiler } from './PerformanceProfiler';
 import type { WorldTickScheduler } from '../world/ticks/WorldTickScheduler';
+import type { FallingBlockManager } from '../world/entities/FallingBlockManager';
+import type { WorldEventQueue } from '../world/events/WorldEventQueue';
 
 function formatHexColor(hex: number): string {
   return `#${hex.toString(16).padStart(6, '0').toUpperCase()}`;
@@ -39,6 +41,8 @@ export class DebugStatsCollector {
   private readonly worldTime: WorldTime;
   private readonly performanceProfiler: PerformanceProfiler;
   private readonly worldTickScheduler: WorldTickScheduler;
+  private readonly fallingBlockManager: FallingBlockManager;
+  private readonly events: WorldEventQueue | undefined;
   private readonly frameTimeTracker = new FrameTimeTracker();
 
   public constructor(
@@ -57,6 +61,8 @@ export class DebugStatsCollector {
     worldTime: WorldTime,
     performanceProfiler: PerformanceProfiler,
     worldTickScheduler: WorldTickScheduler,
+    fallingBlockManager: FallingBlockManager,
+    events: WorldEventQueue | undefined,
   ) {
     this.player = player;
     this.chunkManager = chunkManager;
@@ -73,6 +79,8 @@ export class DebugStatsCollector {
     this.worldTime = worldTime;
     this.performanceProfiler = performanceProfiler;
     this.worldTickScheduler = worldTickScheduler;
+    this.fallingBlockManager = fallingBlockManager;
+    this.events = events;
     this.climateSampler = new ClimateSampler(worldSeed);
   }
 
@@ -228,6 +236,13 @@ export class DebugStatsCollector {
       tickDispatcherTimeMs: tickMetrics.dispatcherTimeMs,
       oldestScheduledTickAge: tickMetrics.oldestPendingScheduledTickAge,
       detachedTickQueues: tickMetrics.detachedChunkTickQueues,
+
+      fallingEntityCount: this.fallingBlockManager.getCount(),
+      fallingPersistedCount: this.fallingBlockManager.getPersistedCount(),
+      fallingMeshCount: this.fallingBlockManager.getMeshCount(),
+      fallingSimulationTick: this.fallingBlockManager.getSimulationTick(),
+      fallingInterpolationAlpha: this.fallingBlockManager.getInterpolationAlpha(),
+      fallingPendingDrops: this.events?.getBlockDropCount() ?? 0,
 
       noClip,
     };

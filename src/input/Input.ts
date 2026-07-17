@@ -57,9 +57,10 @@ const DIGIT_KEY_CODES: Record<DigitKey, string> = {
  *   F9  = force rain
  *   F10 = force thunder
  */
-export type DebugKey = 'F3' | 'F4' | 'F5' | 'F6' | 'F7' | 'F8' | 'F9' | 'F10';
+export type DebugKey = 'F2' | 'F3' | 'F4' | 'F5' | 'F6' | 'F7' | 'F8' | 'F9' | 'F10';
 
 const DEBUG_KEY_CODES: Record<DebugKey, string> = {
+  F2: 'F2',
   F3: 'F3',
   F4: 'F4',
   F5: 'F5',

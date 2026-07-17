@@ -554,4 +554,24 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.RedstoneBlock, 'redstone_block', 'Redstone Block', { all: 'redstone_block' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.RedstoneLampOff, 'redstone_lamp_off', 'Redstone Lamp', { all: 'redstone_lamp_off' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.RedstoneLampOn, 'redstone_lamp_on', 'Lit Redstone Lamp', { all: 'redstone_lamp_on' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: 15 });
+
+  // Fire-related blocks for Stage 2/3 fire system.
+  // Full opaque cubes that participate in flammability:
+  registerSimple(BlockIds.Planks, 'planks', 'Oak Wood Planks', { all: 'planks_oak' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.Bookshelf, 'bookshelf', 'Bookshelf', { top: 'planks_oak', bottom: 'planks_oak', side: 'bookshelf' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.Wool, 'wool', 'White Wool', { all: 'wool_colored_white' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.TNT, 'tnt', 'TNT', { top: 'tnt_top', bottom: 'tnt_bottom', side: 'tnt_side' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.Netherrack, 'netherrack', 'Netherrack', { all: 'netherrack' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+
+  // Non-full blocks: NOT solid normal cubes, do NOT block weather.
+  // Fence: has custom collision in Beta (1.5 blocks tall) but is NOT a
+  // full normal cube. Rendered as cutout for now (proper fence geometry
+  // deferred). blocksWeather: false per Beta's Material.wood behaviour.
+  registerSimple(BlockIds.Fence, 'fence', 'Oak Fence', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
+
+  // Wooden stairs: non-full block, NOT a normal cube. blocksWeather: false.
+  registerSimple(BlockIds.WoodStairs, 'wood_stairs', 'Oak Wood Stairs', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
+
+  // Wooden slab: non-full block (half height). blocksWeather: false.
+  registerSimple(BlockIds.WoodSlab, 'wood_slab', 'Oak Wood Slab', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
 }

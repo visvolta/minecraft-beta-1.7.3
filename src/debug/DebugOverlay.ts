@@ -129,6 +129,12 @@ export class DebugOverlay {
       `Tick dispatcher: ${stats.tickDispatcherTimeMs.toFixed(2)} ms`,
       `Oldest scheduled age: ${stats.oldestScheduledTickAge}`,
       `Detached tick queues: ${stats.detachedTickQueues}`,
+      '',
+      '-- Falling Blocks --',
+      `Entities: ${stats.fallingEntityCount}  Persisted: ${stats.fallingPersistedCount}`,
+      `Meshes: ${stats.fallingMeshCount}  Sim tick: ${stats.fallingSimulationTick}`,
+      `Interpolation: ${stats.fallingInterpolationAlpha.toFixed(3)}`,
+      `Pending drops: ${stats.fallingPendingDrops}`,
     ];
   }
 

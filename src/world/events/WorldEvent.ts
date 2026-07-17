@@ -1,5 +1,6 @@
 export enum WorldEventType {
   LavaIgnitionAttempt = 1,
+  TntIgniteAttempt = 2,
 }
 
 export interface LavaIgnitionAttemptEvent {
@@ -15,4 +16,13 @@ export interface LavaIgnitionAttemptEvent {
   readonly lavaBlockId: number;
   readonly lavaMetadata: number;
   readonly randomValue: number;
+}
+
+export interface TntIgniteAttemptEvent {
+  readonly type: WorldEventType.TntIgniteAttempt;
+  readonly eventId: number;
+  readonly worldTick: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
 }

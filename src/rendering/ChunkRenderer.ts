@@ -9,6 +9,7 @@ import { ChunkMeshingQueue, type ChunkMeshQueueStats, type ChunkMeshGeometrySet 
 import { getLightBrightness, TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
 import type { FluidAnimationSystem } from './fluid/FluidAnimationSystem';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
+import type { FireAnimationSystem } from './fire/FireAnimationSystem';
 
 /** Max dirty chunk meshes rebuilt in a single frame. */
 export const MESH_REBUILD_BUDGET = 4;
@@ -179,6 +180,26 @@ function attachFluidAnimationShader(material: THREE.MeshBasicMaterial, fluidAnim
   material.needsUpdate = true;
 }
 
+function attachFireAnimationShader(material: THREE.MeshBasicMaterial, fireAnimationSystem: FireAnimationSystem): void {
+  const previous = material.onBeforeCompile;
+  const uniforms = {
+    uFireFrame: { value: 0 },
+    uFireFrameCount: { value: fireAnimationSystem.getFrameCount() },
+  };
+  material.userData.fireAnimationUniforms = uniforms;
+  material.onBeforeCompile = (shader): void => {
+    previous.call(material, shader, null as never);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n        attribute float fluidTextureKind;\n        attribute vec2 fluidFrameUv;\n        varying float vFluidTextureKind;\n        varying vec2 vFluidFrameUv;`)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>\n        vFluidTextureKind = fluidTextureKind;\n        vFluidFrameUv = fluidFrameUv;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>\n        varying float vFluidTextureKind;\n        varying vec2 vFluidFrameUv;\n        uniform float uFireFrame;\n        uniform float uFireFrameCount;`)
+      .replace('#include <map_fragment>', `#ifdef USE_MAP\n          // Fire sprite sheet: vertical strip of 16x16 frames\n          // vFluidFrameUv.x = 0-1 within tile, vFluidFrameUv.y = row index (0 or 1)\n          float fireFrameY = (vFluidFrameUv.y + uFireFrame) / uFireFrameCount;\n          vec2 fireUv = vec2(vFluidFrameUv.x, fireFrameY);\n          vec4 sampledDiffuseColor = texture2D(map, fireUv);\n          if (sampledDiffuseColor.a < 0.1) discard;\n          diffuseColor *= sampledDiffuseColor;\n        #endif`);
+  };
+  material.needsUpdate = true;
+}
+
 /** Owns Three.js chunk meshes and their shared materials. */
 export class ChunkRenderer {
   private readonly chunkManager: ChunkManager;
@@ -187,14 +208,18 @@ export class ChunkRenderer {
   private readonly terrainGroup: THREE.Group;
   private readonly fluidGroup: THREE.Group;
   private readonly cutoutGroup: THREE.Group;
+  private readonly fireGroup: THREE.Group;
   private readonly terrainMaterial: THREE.MeshBasicMaterial;
   private readonly fluidMaterial: THREE.MeshBasicMaterial;
   private readonly cutoutMaterial: THREE.MeshBasicMaterial;
+  private readonly fireMaterial: THREE.MeshBasicMaterial;
   private readonly terrainMeshes = new Map<string, THREE.Mesh>();
   private readonly fluidMeshes = new Map<string, THREE.Mesh>();
   private readonly cutoutMeshes = new Map<string, THREE.Mesh>();
+  private readonly fireMeshes = new Map<string, THREE.Mesh>();
   private readonly atlas: TextureAtlas;
   private readonly fluidAnimationSystem: FluidAnimationSystem;
+  private readonly fireAnimationSystem: FireAnimationSystem;
 
   private rawLightDebugMode = false;
   private ambientOcclusionDebugMode = false;
@@ -208,12 +233,14 @@ export class ChunkRenderer {
     blockRegistry: BlockRegistry,
     atlas: TextureAtlas,
     fluidAnimationSystem: FluidAnimationSystem,
+    fireAnimationSystem: FireAnimationSystem,
   ) {
     this.chunkManager = chunkManager;
     this.mesher = new ChunkMesher(chunkManager, blockRegistry, atlas);
     this.meshQueue = new ChunkMeshingQueue(chunkManager, atlas);
     this.atlas = atlas;
     this.fluidAnimationSystem = fluidAnimationSystem;
+    this.fireAnimationSystem = fireAnimationSystem;
 
     this.terrainMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
@@ -261,11 +288,28 @@ export class ChunkRenderer {
     this.cutoutGroup.name = 'chunks-cutouts';
     this.cutoutGroup.renderOrder = 20;
     scene.add(this.cutoutGroup);
+
+    // Fire material: separate sprite sheet with alpha test, double-sided.
+    // Uses the same attribute layout as terrain so lighting/fog works.
+    this.fireMaterial = new THREE.MeshBasicMaterial({
+      map: fireAnimationSystem.fireTexture,
+      vertexColors: true,
+      alphaTest: 0.5,
+      side: THREE.DoubleSide,
+    });
+    attachHeightAwareFog(this.fireMaterial);
+    attachFireAnimationShader(this.fireMaterial, fireAnimationSystem);
+
+    this.fireGroup = new THREE.Group();
+    this.fireGroup.name = 'chunks-fire';
+    this.fireGroup.renderOrder = 25;
+    scene.add(this.fireGroup);
   }
 
   public update(recentFrameTimeMs = 0, cameraWorldX = 0, cameraWorldZ = 0): void {
     this.meshUploadsThisFrame = 0;
     this.updateFluidAnimationUniforms();
+    this.updateFireAnimationUniforms();
 
     if (this.meshQueue.isWorkerEnabled()) {
       for (const chunk of this.chunkManager) {
@@ -378,6 +422,13 @@ export class ChunkRenderer {
       cutoutMesh.geometry.dispose();
       this.cutoutMeshes.delete(key);
     }
+
+    const fireMesh = this.fireMeshes.get(key);
+    if (fireMesh !== undefined) {
+      this.fireGroup.remove(fireMesh);
+      fireMesh.geometry.dispose();
+      this.fireMeshes.delete(key);
+    }
   }
 
   public dispose(): void {
@@ -400,16 +451,24 @@ export class ChunkRenderer {
     }
     this.cutoutMeshes.clear();
 
+    for (const mesh of this.fireMeshes.values()) {
+      this.fireGroup.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this.fireMeshes.clear();
+
     this.terrainMaterial.dispose();
     this.fluidMaterial.dispose();
     this.cutoutMaterial.dispose();
+    this.fireMaterial.dispose();
     this.terrainGroup.removeFromParent();
     this.fluidGroup.removeFromParent();
     this.cutoutGroup.removeFromParent();
+    this.fireGroup.removeFromParent();
   }
 
   public getVisibleMeshCount(): number {
-    return this.terrainMeshes.size + this.fluidMeshes.size + this.cutoutMeshes.size;
+    return this.terrainMeshes.size + this.fluidMeshes.size + this.cutoutMeshes.size + this.fireMeshes.size;
   }
 
   public getMeshUploadsThisFrame(): number {
@@ -537,6 +596,10 @@ export class ChunkRenderer {
     this.applyColorModeToGeometry(cutoutGeometry);
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, cutoutGeometry);
 
+    const fireGeometry = this.mesher.buildFires(chunk);
+    this.applyColorModeToGeometry(fireGeometry);
+    this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, fireGeometry);
+
     chunk.markClean();
   }
 
@@ -560,8 +623,19 @@ export class ChunkRenderer {
     }
   }
 
+  private updateFireAnimationUniforms(): void {
+    const uniforms = this.fireMaterial.userData.fireAnimationUniforms as {
+      uFireFrame: { value: number };
+      uFireFrameCount: { value: number };
+    } | undefined;
+    if (uniforms !== undefined) {
+      uniforms.uFireFrame.value = this.fireAnimationSystem.getFrame();
+      uniforms.uFireFrameCount.value = this.fireAnimationSystem.getFrameCount();
+    }
+  }
+
   private updateDynamicLightingUniforms(): void {
-    for (const material of [this.terrainMaterial, this.fluidMaterial, this.cutoutMaterial]) {
+    for (const material of [this.terrainMaterial, this.fluidMaterial, this.cutoutMaterial, this.fireMaterial]) {
       const uniforms = material.userData.dynamicLightingUniforms as {
         uSkylightSubtracted: { value: number };
         uSunBrightnessFactor: { value: number };
@@ -588,6 +662,9 @@ export class ChunkRenderer {
     for (const mesh of this.cutoutMeshes.values()) {
       this.applyColorModeToGeometry(mesh.geometry);
     }
+    for (const mesh of this.fireMeshes.values()) {
+      this.applyColorModeToGeometry(mesh.geometry);
+    }
   }
 
   private updateDynamicColorsOnAllMeshes(): void {
@@ -598,6 +675,9 @@ export class ChunkRenderer {
       this.updateDynamicColorAttributes(mesh.geometry);
     }
     for (const mesh of this.cutoutMeshes.values()) {
+      this.updateDynamicColorAttributes(mesh.geometry);
+    }
+    for (const mesh of this.fireMeshes.values()) {
       this.updateDynamicColorAttributes(mesh.geometry);
     }
   }
@@ -698,6 +778,7 @@ export class ChunkRenderer {
     this.terrainMaterial.needsUpdate = true;
     this.fluidMaterial.needsUpdate = true;
     this.cutoutMaterial.needsUpdate = true;
+    this.fireMaterial.needsUpdate = true;
   }
 
   private upsertMesh(

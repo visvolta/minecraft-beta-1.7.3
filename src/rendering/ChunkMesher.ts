@@ -869,6 +869,296 @@ export class ChunkMesher {
     return buffers.toGeometry();
   }
 
+  /**
+   * Builds Beta 1.7.3 fire geometry for a chunk.
+   *
+   * Ported from RenderBlocks.renderBlockFire(). Two modes:
+   * - Ground fire: block below is normal cube or flammable → cross planes
+   * - Wall fire: block below is air/non-flammable → quads attached to flammable neighbours
+   *
+   * Uses `fluidTextureKind` attribute to encode the fire texture tile index
+   * for the fire sprite sheet animation system.
+   */
+  public buildFires(chunk: Chunk): THREE.BufferGeometry {
+    const buffers = new MeshBuffers();
+
+    // Frame row UVs (normalized V in sprite sheet).
+    // Row 0 = "primary" fire frame, Row 1 = "secondary" fire frame.
+    // Beta alternates which row each plane uses to create visual depth.
+    const ROW0_V0 = 0;
+    const ROW0_V1 = 1 / 32;
+    const ROW1_V0 = 1 / 32;
+    const ROW1_V1 = 2 / 32;
+
+    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
+      for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+        for (let x = 0; x < CHUNK_SIZE_X; x++) {
+          const blockId = chunk.getBlock(x, y, z);
+          if (blockId !== BlockIds.Fire) continue;
+
+          const light = this.getLightComponentsAt(chunk, x, y, z);
+          const lightSample: LightSample = { sky: light.sky, block: light.block };
+
+          const below = this.getBlockAt(chunk, x, y - 1, z);
+          const isGroundFire = this.isBlockNormalCube(below) || this.canBlockCatchFire(below);
+
+          // Beta: UV alternation based on (x/2 + y/2 + z/2) & 1
+          const flipUvs = ((Math.floor(x / 2) + Math.floor(y / 2) + Math.floor(z / 2)) & 1) === 1;
+
+          const H = 1.4;  // fire plane height (Beta var18)
+          const Y_OFF = 0.0625; // Y offset (Beta var20)
+          const cx = x + 0.5;
+          const cz = z + 0.5;
+
+          if (!isGroundFire) {
+            // ── Wall fire ─────────────────────────────────────────
+            // Beta: quads attached to flammable neighbours.
+            // Inset 0.2 (var37), height 1.4, yOff 0.0625.
+            // UV row alternates based on (x+y+z) & 1.
+            const useAltRow = ((x + y + z) & 1) === 1;
+            const v0 = useAltRow ? ROW1_V0 : ROW0_V0;
+            const v1 = useAltRow ? ROW1_V1 : ROW0_V1;
+            // Beta reverses U on each successive face pair:
+            // (-X, +X) share one flip state; (-Z, +Z) share another.
+            // Front/back are handled by DoubleSide material.
+            const uL = flipUvs ? 1 : 0;
+            const uR = flipUvs ? 0 : 1;
+
+            // -X face
+            if (this.canBlockCatchFire(this.getBlockAt(chunk, x - 1, y, z))) {
+              buffers.pushQuad([
+                [x + 0.2, y + H + Y_OFF, z + 1],
+                [x, y + Y_OFF, z + 1],
+                [x, y + Y_OFF, z],
+                [x + 0.2, y + H + Y_OFF, z],
+              ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
+              FluidTextureKind.WaterStill,
+              undefined,
+              [uR, v0, uR, v1, uL, v1, uL, v0]);
+            }
+
+            // +X face
+            if (this.canBlockCatchFire(this.getBlockAt(chunk, x + 1, y, z))) {
+              buffers.pushQuad([
+                [x + 0.8, y + H + Y_OFF, z],
+                [x + 1, y + Y_OFF, z],
+                [x + 1, y + Y_OFF, z + 1],
+                [x + 0.8, y + H + Y_OFF, z + 1],
+              ], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
+              FluidTextureKind.WaterStill,
+              undefined,
+              [uL, v0, uL, v1, uR, v1, uR, v0]);
+            }
+
+            // -Z face
+            if (this.canBlockCatchFire(this.getBlockAt(chunk, x, y, z - 1))) {
+              buffers.pushQuad([
+                [x, y + H + Y_OFF, z + 0.2],
+                [x, y + Y_OFF, z],
+                [x + 1, y + Y_OFF, z],
+                [x + 1, y + H + Y_OFF, z + 0.2],
+              ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
+              FluidTextureKind.WaterStill,
+              undefined,
+              [uR, v0, uR, v1, uL, v1, uL, v0]);
+            }
+
+            // +Z face
+            if (this.canBlockCatchFire(this.getBlockAt(chunk, x, y, z + 1))) {
+              buffers.pushQuad([
+                [x + 1, y + H + Y_OFF, z + 0.8],
+                [x + 1, y + Y_OFF, z + 1],
+                [x, y + Y_OFF, z + 1],
+                [x, y + H + Y_OFF, z + 0.8],
+              ], [0, 0, -1], undefined, [1, 1, 1], lightSample, 1,
+              FluidTextureKind.WaterStill,
+              undefined,
+              [uL, v0, uL, v1, uR, v1, uR, v0]);
+            }
+
+            // +Y face (fire hanging from flammable block above)
+            if (this.canBlockCatchFire(this.getBlockAt(chunk, x, y + 1, z))) {
+              const topY = y + 1;
+              const hang = -0.2;
+              if (((x + y + z) & 1) === 0) {
+                // Diagonal A (Beta: var29→var21 along X, z=0→z=1)
+                buffers.pushQuad([
+                  [x + 0.5 - 0.5, topY + hang, z],
+                  [x + 0.5 + 0.5, topY, z],
+                  [x + 0.5 + 0.5, topY, z + 1],
+                  [x + 0.5 - 0.5, topY + hang, z + 1],
+                ], [0, -1, 0], undefined, [1, 1, 1], lightSample, 1,
+                FluidTextureKind.WaterStill,
+                undefined,
+                [1, ROW1_V0, 1, ROW1_V1, 0, ROW1_V1, 0, ROW1_V0]);
+                // Diagonal B
+                buffers.pushQuad([
+                  [x + 0.5 + 0.5, topY + hang, z + 1],
+                  [x + 0.5 - 0.5, topY, z + 1],
+                  [x + 0.5 - 0.5, topY, z],
+                  [x + 0.5 + 0.5, topY + hang, z],
+                ], [0, 1, 0], undefined, [1, 1, 1], lightSample, 1,
+                FluidTextureKind.WaterStill,
+                undefined,
+                [1, ROW0_V0, 1, ROW0_V1, 0, ROW0_V1, 0, ROW0_V0]);
+              } else {
+                // Diagonal A (Beta: z+0.5+0.5→z+0.5-0.5 along Z, x=0→x=1)
+                buffers.pushQuad([
+                  [x, topY + hang, z + 0.5 + 0.5],
+                  [x, topY, z + 0.5 - 0.5],
+                  [x + 1, topY, z + 0.5 - 0.5],
+                  [x + 1, topY + hang, z + 0.5 + 0.5],
+                ], [0, -1, 0], undefined, [1, 1, 1], lightSample, 1,
+                FluidTextureKind.WaterStill,
+                undefined,
+                [1, ROW1_V0, 1, ROW1_V1, 0, ROW1_V1, 0, ROW1_V0]);
+                // Diagonal B
+                buffers.pushQuad([
+                  [x + 1, topY + hang, z + 0.5 - 0.5],
+                  [x + 1, topY, z + 0.5 + 0.5],
+                  [x, topY, z + 0.5 + 0.5],
+                  [x, topY + hang, z + 0.5 - 0.5],
+                ], [0, 1, 0], undefined, [1, 1, 1], lightSample, 1,
+                FluidTextureKind.WaterStill,
+                undefined,
+                [1, ROW0_V0, 1, ROW0_V1, 0, ROW0_V1, 0, ROW0_V0]);
+              }
+            }
+
+          } else {
+            // ── Ground fire ───────────────────────────────────────
+            // Beta renderBlockFire ground-fire branch (else block):
+            // Three pairs of diagonal planes at increasing widths.
+            // Each pair: 2 quads (one per diagonal), each double-sided
+            // via DoubleSide material.
+            //
+            // Pair 1: narrow (±0.2),   UV row depends on (x+y+z)&1
+            // Pair 2: medium (±0.3),   opposite UV row
+            // Pair 3: full   (±0.5),   same UV row as pair 1
+
+            const narrowI = 0.2;
+            const mediumI = 0.3;
+            const fullI = 0.5;
+
+            // Beta UV row alternation for ground fire:
+            // (x+y+z) & 1 selects which row pair 1 uses.
+            const useAltRow = ((x + y + z) & 1) === 1;
+            const v0P1 = useAltRow ? ROW1_V0 : ROW0_V0;
+            const v1P1 = useAltRow ? ROW1_V1 : ROW0_V1;
+            const v0P2 = useAltRow ? ROW0_V0 : ROW1_V0;
+            const v1P2 = useAltRow ? ROW0_V1 : ROW1_V1;
+            // Pair 3 uses same row as pair 1
+            const v0P3 = v0P1;
+            const v1P3 = v1P1;
+
+            const uL = flipUvs ? 1 : 0;
+            const uR = flipUvs ? 0 : 1;
+
+            // ── Pair 1: narrow cross (±0.2) ──
+            // Plane A: runs along X axis (z=0 → z=1)
+            buffers.pushQuad([
+              [cx - narrowI, y + H + Y_OFF, z + 1],
+              [cx + narrowI, y + Y_OFF, z + 1],
+              [cx + narrowI, y + Y_OFF, z],
+              [cx - narrowI, y + H + Y_OFF, z],
+            ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
+            FluidTextureKind.WaterStill,
+            undefined,
+            [uR, v0P1, uR, v1P1, uL, v1P1, uL, v0P1]);
+
+            // Plane B: runs along Z axis (x=0 → x=1)
+            buffers.pushQuad([
+              [x + 1, y + H + Y_OFF, cz + narrowI],
+              [x + 1, y + Y_OFF, cz - narrowI],
+              [x, y + Y_OFF, cz - narrowI],
+              [x, y + H + Y_OFF, cz + narrowI],
+            ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
+            FluidTextureKind.WaterStill,
+            undefined,
+            [uL, v0P1, uL, v1P1, uR, v1P1, uR, v0P1]);
+
+            // ── Pair 2: medium cross (±0.3) ──
+            buffers.pushQuad([
+              [cx - mediumI, y + H + Y_OFF, z + 1],
+              [cx + mediumI, y + Y_OFF, z + 1],
+              [cx + mediumI, y + Y_OFF, z],
+              [cx - mediumI, y + H + Y_OFF, z],
+            ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
+            FluidTextureKind.WaterStill,
+            undefined,
+            [uR, v0P2, uR, v1P2, uL, v1P2, uL, v0P2]);
+
+            buffers.pushQuad([
+              [x + 1, y + H + Y_OFF, cz + mediumI],
+              [x + 1, y + Y_OFF, cz - mediumI],
+              [x, y + Y_OFF, cz - mediumI],
+              [x, y + H + Y_OFF, cz + mediumI],
+            ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
+            FluidTextureKind.WaterStill,
+            undefined,
+            [uL, v0P2, uL, v1P2, uR, v1P2, uR, v0P2]);
+
+            // ── Pair 3: full-width cross (±0.5) ──
+            buffers.pushQuad([
+              [cx - fullI, y + H + Y_OFF, z + 1],
+              [cx + fullI, y + Y_OFF, z + 1],
+              [cx + fullI, y + Y_OFF, z],
+              [cx - fullI, y + H + Y_OFF, z],
+            ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
+            FluidTextureKind.WaterStill,
+            undefined,
+            [uR, v0P3, uR, v1P3, uL, v1P3, uL, v0P3]);
+
+            buffers.pushQuad([
+              [x + 1, y + H + Y_OFF, cz + fullI],
+              [x + 1, y + Y_OFF, cz - fullI],
+              [x, y + Y_OFF, cz - fullI],
+              [x, y + H + Y_OFF, cz + fullI],
+            ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
+            FluidTextureKind.WaterStill,
+            undefined,
+            [uL, v0P3, uL, v1P3, uR, v1P3, uR, v0P3]);
+          }
+        }
+      }
+    }
+
+    return buffers.toGeometry();
+  }
+
+  /**
+   * Beta BlockFire.canBlockCatchFire().
+   * Returns true if the block has encouragement > 0 in the flammability table.
+   */
+  private canBlockCatchFire(blockId: BlockId): boolean {
+    // Match the flammability table from FireBehaviour
+    switch (blockId) {
+      case BlockIds.Planks:
+      case BlockIds.Fence:
+      case BlockIds.WoodStairs:
+      case BlockIds.Log:
+      case BlockIds.SpruceLog:
+      case BlockIds.Leaves:
+      case BlockIds.SpruceLeaves:
+      case BlockIds.Bookshelf:
+      case BlockIds.TNT:
+      case BlockIds.TallGrass:
+      case BlockIds.Wool:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Beta World.isBlockNormalCube().
+   * True if the block is solid, opaque, and a full cube.
+   */
+  private isBlockNormalCube(blockId: BlockId): boolean {
+    const def = this.blockRegistry.getById(blockId);
+    return def !== undefined && def.solid && !def.transparent;
+  }
+
   public buildFluids(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 

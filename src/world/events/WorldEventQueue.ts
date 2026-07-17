@@ -1,4 +1,4 @@
-import { WorldEventType, type LavaIgnitionAttemptEvent } from './WorldEvent';
+import { WorldEventType, type LavaIgnitionAttemptEvent, type TntIgniteAttemptEvent } from './WorldEvent';
 import type { BlockDropEvent } from './BlockDropEvent';
 
 const CAPACITY = 256;
@@ -15,8 +15,10 @@ export class WorldEventQueue {
   private count = 0;
   private nextEventId = 1;
   private totalLavaIgnitionAttempts = 0;
+  private totalTntIgniteAttempts = 0;
   private discarded = 0;
   private readonly blockDrops: BlockDropEvent[] = [];
+  private readonly tntIgniteAttempts: TntIgniteAttemptEvent[] = [];
 
   public enqueueLavaIgnitionAttempt(
     worldTick: number,
@@ -50,6 +52,36 @@ export class WorldEventQueue {
     this.randomValues[index] = randomValue;
     this.count += 1;
     this.totalLavaIgnitionAttempts += 1;
+  }
+
+  /**
+   * Enqueue a TNT ignition event. Exactly one per fire-caused TNT removal.
+   * Emits through the mutation gateway (TNT block already removed by caller).
+   */
+  public enqueueTntIgniteAttempt(gameTick: number, x: number, y: number, z: number): void {
+    if (this.count + this.blockDrops.length + this.tntIgniteAttempts.length >= CAPACITY) {
+      this.discarded += 1;
+      return;
+    }
+    this.tntIgniteAttempts.push({
+      type: WorldEventType.TntIgniteAttempt,
+      eventId: this.nextEventId++,
+      worldTick: gameTick,
+      x, y, z,
+    });
+    this.totalTntIgniteAttempts += 1;
+  }
+
+  public getTntIgniteAttemptCount(): number {
+    return this.tntIgniteAttempts.length;
+  }
+
+  public getTotalTntIgniteAttempts(): number {
+    return this.totalTntIgniteAttempts;
+  }
+
+  public drainTntIgniteAttempts(): TntIgniteAttemptEvent[] {
+    return this.tntIgniteAttempts.splice(0, this.tntIgniteAttempts.length);
   }
 
   public enqueueBlockDrop(gameTick: number, sourceEntityId: number, blockId: number, metadata: number, x: number, y: number, z: number, reason: 'placement_failed' | 'lifetime_expired'): void {

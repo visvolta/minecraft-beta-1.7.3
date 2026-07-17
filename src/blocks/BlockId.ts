@@ -90,6 +90,22 @@ export const BlockIds = {
   RedstoneBlock: 152,
   RedstoneLampOff: 123,
   RedstoneLampOn: 124,
+  /** Beta 1.7.3 wooden planks. */
+  Planks: 5,
+  /** Beta 1.7.3 wooden fence. Non-full block. */
+  Fence: 85,
+  /** Beta 1.7.3 wooden stairs. Non-full block. */
+  WoodStairs: 53,
+  /** Beta 1.7.3 bookshelf. */
+  Bookshelf: 47,
+  /** Beta 1.7.3 wool/cloth. */
+  Wool: 35,
+  /** Beta 1.7.3 TNT. */
+  TNT: 46,
+  /** Beta 1.7.3 wooden slab (single). Non-full block. */
+  WoodSlab: 44,
+  /** Beta 1.7.3 netherrack. Supports infinite fire. */
+  Netherrack: 87,
 } as const;
 
 /** Numeric block ID (Beta 1.7.3 compatible). */

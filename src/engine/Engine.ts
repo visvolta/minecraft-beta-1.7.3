@@ -25,6 +25,7 @@ import { registerFireBehaviour } from '../world/behaviours/FireBehaviour';
 import { registerFallingBlockBehaviours } from '../world/behaviours/FallingBlockBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
+import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
 import { WorldEventQueue } from '../world/events/WorldEventQueue';
 import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 import { fluidSurfaceHeight, getFluidLevel, isFallingFluid } from '../world/fluid/FluidMetadata';
@@ -43,6 +44,7 @@ import { DebugOverlay } from '../debug/DebugOverlay';
 import { DebugStatsCollector } from '../debug/DebugStatsCollector';
 import { PerformanceProfiler } from '../debug/PerformanceProfiler';
 import { WorkerValidationHarness } from '../debug/WorkerValidationHarness';
+import { BlockTestGrid } from '../debug/BlockTestGrid';
 import type { IUpdatable } from './IUpdatable';
 
 /** Maximum delta (seconds) applied in one frame after tab focus / hitch. */
@@ -89,6 +91,7 @@ export class Engine {
   private readonly worldGenerator: BetaWorldGenerator;
   private readonly chunkRenderer: ChunkRenderer;
   private readonly fluidAnimationSystem: FluidAnimationSystem;
+  private readonly fireAnimationSystem: FireAnimationSystem;
   private readonly worldEventQueue: WorldEventQueue;
   private readonly chunkStreamer: ChunkStreamer;
   private readonly lightEngine: LightEngine;
@@ -115,6 +118,7 @@ export class Engine {
   private readonly debugOverlay: DebugOverlay;
   private readonly debugController: DebugController;
   private readonly debugStatsCollector: DebugStatsCollector;
+  private readonly blockTestGrid: BlockTestGrid;
   private readonly performanceProfiler = new PerformanceProfiler();
   private noClipEnabled = false;
   private rawLightDebugMode = false;
@@ -154,7 +158,12 @@ export class Engine {
     registerFluidBehaviours(this.blockBehaviourRegistry);
     registerPlantBehaviours(this.blockBehaviourRegistry, blockRegistry);
     registerSupportBehaviours(this.blockBehaviourRegistry, blockRegistry);
-    registerFireBehaviour(this.blockBehaviourRegistry, blockRegistry);
+    // Fire needs WeatherController + ChunkManager for rain/sky-exposure checks.
+    // WeatherController is session-seeded (not tied to WORLD_SEED) so weather
+    // timing is fresh each session, matching Beta behaviour.
+    const sessionSeed = BigInt(Date.now()) & 0xffffffffffffffffn;
+    this.weatherController = new WeatherController(sessionSeed);
+    registerFireBehaviour(this.blockBehaviourRegistry, blockRegistry, this.weatherController, this.chunkManager);
     registerFallingBlockBehaviours(this.blockBehaviourRegistry, blockRegistry, this.fallingBlockManager);
     this.worldTickScheduler = new WorldTickScheduler(
       this.chunkManager,
@@ -170,10 +179,7 @@ export class Engine {
     this.skyRenderer = new SkyRenderer(this.renderer.scene);
     this.cloudRenderer = new CloudRenderer(this.renderer.scene);
 
-    // Stage 18: weather. Session-seeded RNG (not tied to WORLD_SEED)
-    // so weather timing is fresh each session, matching Beta behaviour.
-    const sessionSeed = BigInt(Date.now()) & 0xffffffffffffffffn;
-    this.weatherController = new WeatherController(sessionSeed);
+    // Stage 18: weather. WeatherController already created above for fire.
     this.climateSampler = new ClimateSampler(WORLD_SEED);
     this.precipitationRenderer = new PrecipitationRenderer(
       this.renderer.scene,
@@ -200,6 +206,7 @@ export class Engine {
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
     this.fluidAnimationSystem = new FluidAnimationSystem();
+    this.fireAnimationSystem = new FireAnimationSystem();
 
     this.chunkRenderer = new ChunkRenderer(
       this.renderer.scene,
@@ -207,6 +214,7 @@ export class Engine {
       blockRegistry,
       this.atlas,
       this.fluidAnimationSystem,
+      this.fireAnimationSystem,
     );
     this.chunkStreamer = new ChunkStreamer(
       this.chunkManager,
@@ -215,6 +223,8 @@ export class Engine {
       this.lightEngine,
       WORLD_SEED,
     );
+
+    this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
 
     this.debugOverlay = new DebugOverlay();
     this.debugController = new DebugController(
@@ -238,6 +248,8 @@ export class Engine {
       this.worldTime,
       this.performanceProfiler,
       this.worldTickScheduler,
+      this.fallingBlockManager,
+      this.worldEventQueue,
     );
 
     const validationHarness = new WorkerValidationHarness(WORLD_SEED, this.atlas);
@@ -258,6 +270,21 @@ export class Engine {
         ...this.fluidAnimationSystem.getDebugInfo(),
         lavaIgnitionAttempts: this.worldEventQueue.getTotalLavaIgnitionAttempts(),
         worldEventQueueDepth: this.worldEventQueue.getQueueDepth(),
+      }),
+      getFireMetrics: () => ({
+        ...this.fireAnimationSystem.getDebugInfo(),
+        tntIgniteAttempts: this.worldEventQueue.getTotalTntIgniteAttempts(),
+        pendingTntIgnitions: this.worldEventQueue.getTntIgniteAttemptCount(),
+      }),
+      getBlockTestGrid: () => ({
+        grid: this.blockTestGrid.getGridState(),
+        blocks: this.blockTestGrid.getInfo(),
+        totalBlocks: this.blockTestGrid.getInfo().length,
+        origin: this.blockTestGrid.getGridState() ? {
+          x: this.blockTestGrid.getGridState()!.originX,
+          y: this.blockTestGrid.getGridState()!.originY,
+          z: this.blockTestGrid.getGridState()!.originZ,
+        } : null,
       }),
       inspectFluid: (x: number, y: number, z: number) => {
         const blockId = this.blockUpdateWorld.getBlock(x, y, z);
@@ -347,6 +374,7 @@ export class Engine {
     this.skyRenderer.dispose();
     this.chunkRenderer.dispose();
     this.fluidAnimationSystem.dispose();
+    this.fireAnimationSystem.dispose();
     this.atlas.dispose();
     this.chunkManager.clear();
     this.renderer.domElement.remove();
@@ -390,6 +418,10 @@ export class Engine {
     this.input.beginFrame();
 
     // 2. Toggle debug systems
+    if (this.input.isDebugKeyJustPressed('F2')) {
+      this.blockTestGrid.generate(this.player.position.x, this.player.position.z);
+    }
+
     if (this.input.isDebugKeyJustPressed('F3')) {
       this.debugOverlay.toggle();
     }
@@ -454,6 +486,7 @@ export class Engine {
     this.fallingBlockManager.update(deltaSeconds);
     this.worldEventQueue.drainNoop();
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
+    this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
 
     // 4. Update camera look
     this.cameraController.update();
