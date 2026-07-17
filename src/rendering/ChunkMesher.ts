@@ -1019,42 +1019,42 @@ export class ChunkMesher {
             //   var19 = x+0.7, var21 = x+0.3  (Z-plane width 0.4)
             //   var23 = z+0.7, var25 = z+0.3  (X-plane width 0.4)
 
-            // ── Plane A: Z-axis (x = 0.3 → 0.7, z = 0 → 1) ──
-            // Front face
+            // ── Plane A: Z-axis (x = 0.3 or 0.7, z = 0 → 1) ──
+            // Left plane at x + 0.3
             buffers.pushQuad([
-              [x + 0.3, y + H + Y_OFF, z + 1],
-              [x + 0.7, y + Y_OFF, z + 1],
-              [x + 0.7, y + Y_OFF, z],
-              [x + 0.3, y + H + Y_OFF, z],
+              [x + 1, y + H + Y_OFF, z + 1],
+              [x + 1, y, z + 1],
+              [x + 1, y, z],
+              [x + 1, y + H + Y_OFF, z],
             ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill, undefined,
             [uR, V0, uR, V1, uL, V1, uL, V0]);
-            // Back face
+            // Right plane at x + 0.7
             buffers.pushQuad([
-              [x + 0.7, y + H + Y_OFF, z + 1],
-              [x + 0.3, y + Y_OFF, z + 1],
-              [x + 0.3, y + Y_OFF, z],
-              [x + 0.7, y + H + Y_OFF, z],
+              [x + 0.0, y + H + Y_OFF, z + 1],
+              [x + 0.0, y, z + 1],
+              [x + 0.0, y, z],
+              [x + 0., y + H + Y_OFF, z],
             ], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill, undefined,
             [uL, V0, uL, V1, uR, V1, uR, V0]);
 
-            // ── Plane B: X-axis (z = 0.3 → 0.7, x = 0 → 1) ──
-            // Front face
+            // ── Plane B: X-axis (z = 0.3 or 0.7, x = 0 → 1) ──
+            // Front plane at z + 0.3
             buffers.pushQuad([
-              [x, y + H + Y_OFF, z + 0.7],
-              [x, y + Y_OFF, z + 0.3],
-              [x + 1, y + Y_OFF, z + 0.3],
-              [x + 1, y + H + Y_OFF, z + 0.7],
+              [x, y + H + Y_OFF, z + 0],
+              [x, y, z + 0],
+              [x + 1, y, z + 0],
+              [x + 1, y + H + Y_OFF, z + 0],
             ], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill, undefined,
             [uR, V0, uR, V1, uL, V1, uL, V0]);
-            // Back face
+            // Back plane at z + 0.7
             buffers.pushQuad([
-              [x + 1, y + H + Y_OFF, z + 0.3],
-              [x + 1, y + Y_OFF, z + 0.7],
-              [x, y + Y_OFF, z + 0.7],
-              [x, y + H + Y_OFF, z + 0.3],
+              [x + 1, y + H + Y_OFF, z + 1],
+              [x + 1, y, z + 1],
+              [x, y, z + 1],
+              [x, y + H + Y_OFF, z + 1],
             ], [0, 0, -1], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill, undefined,
             [uL, V0, uL, V1, uR, V1, uR, V0]);

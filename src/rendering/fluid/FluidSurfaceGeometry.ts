@@ -48,8 +48,8 @@ export function getBetaFluidCornerHeight(
       total += height;
       weight += 1;
     } else if (!access.isSolidForFluidHeight(sampleId)) {
-      total += 1;
-      weight += 1;
+      total += 0;
+      weight += 0;
     }
   }
 
