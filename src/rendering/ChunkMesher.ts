@@ -1025,20 +1025,7 @@ export class ChunkMesher {
 
           } else {
             // ── Ground fire ───────────────────────────────────────
-            // Beta renderBlockFire ground-fire (else branch):
-            //
-            // TWO perpendicular planes, 90° apart, forming a cross:
-            //   Plane A (Z-axis): x=0.3→0.7, z=0→1, front+back
-            //   Plane B (X-axis): z=0.3→0.7, x=0→1, front+back
-            //
-            // Total: exactly 4 quads. No overlapping coplanar planes.
-            // All use the same texture row (row 0).
-            //
-            // Beta variable mapping (with x=0, z=0):
-            //   var19 = x+0.7, var21 = x+0.3  (Z-plane width 0.4)
-            //   var23 = z+0.7, var25 = z+0.3  (X-plane width 0.4)
-
-            // ── Plane A: Z-axis (x = 0.3 → 0.7, z = 0 → 1) ──
+            // DO NOT TOUCH, THIS 100% CORRECT AND SHOULD NOT BE CHANGED. (Beta 1.7.3 fire geometry)
             // Front face
             buffers.pushQuad([
               [x + 1, y + H + Y_OFF, z + 1],
@@ -1059,7 +1046,7 @@ export class ChunkMesher {
             [uL, V0, uL, V1, uR, V1, uR, V0]);
 
             // ── Plane B: X-axis (z = 0.3 or 0.7, x = 0 → 1) ──
-            // Front plane at z + 0.3
+            // DO NOT TOUCH, THIS 100% CORRECT AND SHOULD NOT BE CHANGED. (Beta 1.7.3 fire geometry)
             buffers.pushQuad([
               [x, y + H + Y_OFF, z + 0],
               [x, y, z + 0],
@@ -1069,6 +1056,7 @@ export class ChunkMesher {
             FluidTextureKind.WaterStill, undefined,
             [uR, V0, uR, V1, uL, V1, uL, V0]);
             // Back face
+            // DO NOT TOUCH, THIS 100% CORRECT AND SHOULD NOT BE CHANGED. (Beta 1.7.3 fire geometry)
             buffers.pushQuad([
               [x + 1, y + H + Y_OFF, z + 1],
               [x + 1, y, z + 1],
@@ -1196,12 +1184,16 @@ export class ChunkMesher {
           if (definition === undefined) continue;
 
           // Ice: standard full-cube solid block rendering.
-          // Beta shouldSideBeRendered: super.shouldSideBeRendered(1 - side)
-          // This means ice shows faces against non-opaque neighbours (including other ice).
+          // Beta shouldSideBeRendered: super.shouldSideBeRendered(l ^ 1)
+          // Block.shouldSideBeRendered returns false if neighbour block ID == this block ID.
+          // This prevents internal faces between adjacent ice blocks.
+          // Ice shows faces against non-opaque neighbours (water, air, glass, leaves)
+          // but NOT against opaque blocks (stone, dirt, etc.) or other ice.
           for (const face of FACES) {
             const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-            // Don't hide against other ice or transparent blocks
-            if (this.hidesOpaqueFace(neighbourId) && !this.isIce(neighbourId)) continue;
+            // Beta: don't render face if neighbour is same block (ice) OR neighbour is opaque cube
+            if (neighbourId === blockId) continue;
+            if (this.hidesOpaqueFace(neighbourId)) continue;
 
             const textureName = resolveBlockTexture(definition, face.slot);
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
@@ -1459,7 +1451,14 @@ export class ChunkMesher {
       return false;
     }
 
-    return neighbourDef.solid && !neighbourDef.transparent;
+    // Beta BlockFluid.shouldSideBeRendered: don't render side face if neighbour
+    // material is solid OR liquid. Same fluid material already handled above.
+    // In Beta, "solid material" means blocks like stone, dirt, etc. (opaque cubes).
+    // Leaves, glass, etc. have non-solid materials and don't cull fluids.
+    // We approximate this by checking renderType === 'opaque' (opaque cubes).
+    const isOpaqueCube = neighbourDef.renderType === 'opaque';
+    const isLiquid = neighbourDef.isLiquid === true;
+    return isOpaqueCube || isLiquid;
   }
 
   private isOpaqueMeshBlock(blockId: BlockId): boolean {
