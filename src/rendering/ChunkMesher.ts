@@ -841,7 +841,7 @@ export class ChunkMesher {
               const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
               buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
             }
-          } else if (renderType === 'cross') {
+          } else if (renderType === 'cross' && blockId !== BlockIds.Fire) {
             const textureName = resolveBlockTexture(definition, 'side');
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
             const tint = resolveBlockTint(definition, 'side');
@@ -882,13 +882,13 @@ export class ChunkMesher {
   public buildFires(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
-    // Frame row UVs (normalized V in sprite sheet).
-    // Row 0 = "primary" fire frame, Row 1 = "secondary" fire frame.
-    // Beta alternates which row each plane uses to create visual depth.
+    // Frame row indices for the shader.
+    // The shader computes: fireFrameY = (row + uFireFrame) / frameCount
+    // So row must be the raw index (0 or 1), NOT divided by frame count.
     const ROW0_V0 = 0;
-    const ROW0_V1 = 1 / 32;
-    const ROW1_V0 = 1 / 32;
-    const ROW1_V1 = 2 / 32;
+    const ROW0_V1 = 1;    // raw row index, shader divides by 32
+    const ROW1_V0 = 1;    // raw row index
+    const ROW1_V1 = 2;    // raw row index
 
     for (let y = 0; y < CHUNK_SIZE_Y; y++) {
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
