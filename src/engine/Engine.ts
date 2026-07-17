@@ -60,7 +60,7 @@ const MAX_DELTA_SECONDS = 0.1;
  *
  * Keep this in sync with scripts/verifyDefaultSeedHealth.ts.
  */
-const WORLD_SEED = -3115700454n; //474747474747n
+const WORLD_SEED = -3115700454n;
 
 /**
  * Player spawn (feet position). Fixed X/Z with a generously high Y so the

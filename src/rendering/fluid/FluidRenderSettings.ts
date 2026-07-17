@@ -5,7 +5,7 @@
  * tunable because its supplied sheet has a different visual density.
  */
 export const FLUID_RENDER_SETTINGS = {
-  waterFlowScale: 1.0,
+  waterFlowScale: .55,
   lavaFlowScale: 0.5,
   // Final RGB lift for flowing water only. Keep lighting, AO and tint
   // inputs untouched; tune this single value against stationary water.

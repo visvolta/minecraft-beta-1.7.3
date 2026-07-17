@@ -3,9 +3,10 @@
  *
  * Single layer only (no metadata stacking per user decision).
  * - Height: 0.125 blocks (1/8)
- * - Melts when block light > 11
+ * - Melts when block light > 11 (Beta: getSavedLightValue(EnumSkyBlock.Block, ...) > 11)
  * - Removed when support block below is removed
  * - No gravity (doesn't fall)
+ * - setTickOnLoad=true in Beta → schedules tick on world load
  * - Placed by weather system during snowfall in enableSnow biomes
  */
 
@@ -15,11 +16,18 @@ import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } fr
 export class SnowBehaviour implements BlockBehaviour {
   /**
    * Beta BlockSnow.updateTick(): melt if block light > 11.
-   * TODO: implement proper block light query via LightEngine.
+   * On melt: drop items (no-op for now), set to Air.
    */
-  public scheduledTick(_ctx: BlockBehaviourContext, _x: number, _y: number, _z: number): void {
-    // Beta melting: block light > 11
-    // Deferred until LightEngine exposes getBlocklight through BlockUpdateWorld.
+  public scheduledTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+    const blockLight = ctx.world.getBlocklight(x, y, z);
+    if (blockLight > 11) {
+      // Beta: this.dropBlockAsItem(...) then setBlockWithNotify(x, y, z, 0)
+      ctx.world.setBlock(x, y, z, BlockIds.Air, {
+        reason: 'scheduled',
+        notifyNeighbours: true,
+        updateLighting: true,
+      });
+    }
   }
 
   /**
@@ -29,12 +37,20 @@ export class SnowBehaviour implements BlockBehaviour {
     this.canSnowStay(ctx, x, y, z);
   }
 
+  /**
+   * Beta BlockSnow.canPlaceBlockAt():
+   * Block below must be opaque and solid.
+   */
   private canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
     const below = ctx.world.getBlock(x, y - 1, z);
     if (below === 0) return false;
+    // Beta: blocksList[var5].isOpaqueCube() && material.getIsSolid()
     return isOpaqueSolidBlock(below);
   }
 
+  /**
+   * Beta BlockSnow.canSnowStay(): remove if unsupported.
+   */
   private canSnowStay(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
     if (!this.canPlaceBlockAt(ctx, x, y, z)) {
       ctx.world.setBlock(x, y, z, BlockIds.Air, {
@@ -48,6 +64,10 @@ export class SnowBehaviour implements BlockBehaviour {
   }
 }
 
+/**
+ * Returns true if the block is opaque and solid (Beta isOpaqueCube + material.isSolid).
+ * Used for snow placement support check.
+ */
 function isOpaqueSolidBlock(blockId: number): boolean {
   switch (blockId) {
     case BlockIds.Air:

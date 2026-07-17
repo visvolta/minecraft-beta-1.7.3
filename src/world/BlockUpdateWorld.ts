@@ -74,6 +74,24 @@ export class BlockUpdateWorld {
     return this.chunkManager.hasChunk(chunkX, chunkZ);
   }
 
+  /**
+   * Returns block light level at a world position.
+   * Delegates to LightEngine. Works across chunk borders.
+   * Returns 0 for unloaded chunks or out-of-bounds Y.
+   */
+  public getBlocklight(worldX: number, worldY: number, worldZ: number): number {
+    return this.lightEngine.getBlocklight(worldX, worldY, worldZ);
+  }
+
+  /**
+   * Returns sky light level at a world position.
+   * Delegates to LightEngine. Works across chunk borders.
+   * Returns 15 above world height, 0 below.
+   */
+  public getSkylight(worldX: number, worldY: number, worldZ: number): number {
+    return this.lightEngine.getSkylight(worldX, worldY, worldZ);
+  }
+
   public setBlock(worldX: number, worldY: number, worldZ: number, blockId: BlockId, options: SetBlockOptions = {}): boolean {
     if (worldY < 0 || worldY >= CHUNK_SIZE_Y) {
       return false;

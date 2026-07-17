@@ -207,14 +207,17 @@ export class ChunkRenderer {
   private readonly meshQueue: ChunkMeshingQueue;
   private readonly terrainGroup: THREE.Group;
   private readonly fluidGroup: THREE.Group;
+  private readonly translucentGroup: THREE.Group;
   private readonly cutoutGroup: THREE.Group;
   private readonly fireGroup: THREE.Group;
   private readonly terrainMaterial: THREE.MeshBasicMaterial;
   private readonly fluidMaterial: THREE.MeshBasicMaterial;
+  private readonly translucentMaterial: THREE.MeshBasicMaterial;
   private readonly cutoutMaterial: THREE.MeshBasicMaterial;
   private readonly fireMaterial: THREE.MeshBasicMaterial;
   private readonly terrainMeshes = new Map<string, THREE.Mesh>();
   private readonly fluidMeshes = new Map<string, THREE.Mesh>();
+  private readonly translucentMeshes = new Map<string, THREE.Mesh>();
   private readonly cutoutMeshes = new Map<string, THREE.Mesh>();
   private readonly fireMeshes = new Map<string, THREE.Mesh>();
   private readonly atlas: TextureAtlas;
@@ -258,6 +261,17 @@ export class ChunkRenderer {
     attachHeightAwareFog(this.fluidMaterial);
     attachFluidAnimationShader(this.fluidMaterial, this.fluidAnimationSystem);
 
+    // Translucent material for ice: alpha blending, no fluid animation.
+    // Beta ice uses render pass 1 (translucent). Shares atlas texture.
+    this.translucentMaterial = new THREE.MeshBasicMaterial({
+      map: atlas.texture,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    attachHeightAwareFog(this.translucentMaterial);
+
     this.cutoutMaterial = new THREE.MeshBasicMaterial({ 
       map: atlas.texture,
       vertexColors: true,
@@ -283,6 +297,11 @@ export class ChunkRenderer {
     this.fluidGroup.name = 'chunks-fluids';
     this.fluidGroup.renderOrder = 20;
     scene.add(this.fluidGroup);
+
+    this.translucentGroup = new THREE.Group();
+    this.translucentGroup.name = 'chunks-translucent';
+    this.translucentGroup.renderOrder = 20;
+    scene.add(this.translucentGroup);
 
     this.cutoutGroup = new THREE.Group();
     this.cutoutGroup.name = 'chunks-cutouts';
@@ -429,6 +448,13 @@ export class ChunkRenderer {
       fireMesh.geometry.dispose();
       this.fireMeshes.delete(key);
     }
+
+    const translucentMesh = this.translucentMeshes.get(key);
+    if (translucentMesh !== undefined) {
+      this.translucentGroup.remove(translucentMesh);
+      translucentMesh.geometry.dispose();
+      this.translucentMeshes.delete(key);
+    }
   }
 
   public dispose(): void {
@@ -457,18 +483,26 @@ export class ChunkRenderer {
     }
     this.fireMeshes.clear();
 
+    for (const mesh of this.translucentMeshes.values()) {
+      this.translucentGroup.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    this.translucentMeshes.clear();
+
     this.terrainMaterial.dispose();
     this.fluidMaterial.dispose();
+    this.translucentMaterial.dispose();
     this.cutoutMaterial.dispose();
     this.fireMaterial.dispose();
     this.terrainGroup.removeFromParent();
     this.fluidGroup.removeFromParent();
+    this.translucentGroup.removeFromParent();
     this.cutoutGroup.removeFromParent();
     this.fireGroup.removeFromParent();
   }
 
   public getVisibleMeshCount(): number {
-    return this.terrainMeshes.size + this.fluidMeshes.size + this.cutoutMeshes.size + this.fireMeshes.size;
+    return this.terrainMeshes.size + this.fluidMeshes.size + this.cutoutMeshes.size + this.fireMeshes.size + this.translucentMeshes.size;
   }
 
   public getMeshUploadsThisFrame(): number {
@@ -504,6 +538,8 @@ export class ChunkRenderer {
     for (const mesh of this.terrainMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.fluidMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.cutoutMeshes.values()) addGeometry(mesh.geometry);
+    for (const mesh of this.fireMeshes.values()) addGeometry(mesh.geometry);
+    for (const mesh of this.translucentMeshes.values()) addGeometry(mesh.geometry);
     return total;
   }
 
@@ -514,6 +550,7 @@ export class ChunkRenderer {
       result.fluid.dispose();
       result.cutout.dispose();
       result.fire.dispose();
+      result.translucent.dispose();
       return;
     }
 
@@ -523,6 +560,7 @@ export class ChunkRenderer {
       result.fluid.dispose();
       result.cutout.dispose();
       result.fire.dispose();
+      result.translucent.dispose();
       return;
     }
     this.applyColorModeToGeometry(result.terrain);
@@ -533,6 +571,8 @@ export class ChunkRenderer {
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, result.cutout);
     this.applyColorModeToGeometry(result.fire);
     this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, result.fire);
+    this.applyColorModeToGeometry(result.translucent);
+    this.upsertMesh(this.translucentMeshes, this.translucentGroup, this.translucentMaterial, chunk, key, result.translucent);
     this.meshQueue.markUploaded(result.chunkX, result.chunkZ, result.targetRevision);
     chunk.markClean();
   }
@@ -541,7 +581,8 @@ export class ChunkRenderer {
     return this.validateGeometry(result.terrain, false)
       && this.validateGeometry(result.fluid, true)
       && this.validateGeometry(result.cutout, false)
-      && this.validateGeometry(result.fire, true);
+      && this.validateGeometry(result.fire, true)
+      && this.validateGeometry(result.translucent, false);
   }
 
   private validateGeometry(geometry: THREE.BufferGeometry, fluid: boolean): boolean {
@@ -605,6 +646,10 @@ export class ChunkRenderer {
     this.applyColorModeToGeometry(fireGeometry);
     this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, fireGeometry);
 
+    const translucentGeometry = this.mesher.buildTranslucent(chunk);
+    this.applyColorModeToGeometry(translucentGeometry);
+    this.upsertMesh(this.translucentMeshes, this.translucentGroup, this.translucentMaterial, chunk, key, translucentGeometry);
+
     chunk.markClean();
   }
 
@@ -640,7 +685,7 @@ export class ChunkRenderer {
   }
 
   private updateDynamicLightingUniforms(): void {
-    for (const material of [this.terrainMaterial, this.fluidMaterial, this.cutoutMaterial, this.fireMaterial]) {
+    for (const material of [this.terrainMaterial, this.fluidMaterial, this.cutoutMaterial, this.fireMaterial, this.translucentMaterial]) {
       const uniforms = material.userData.dynamicLightingUniforms as {
         uSkylightSubtracted: { value: number };
         uSunBrightnessFactor: { value: number };
@@ -670,6 +715,9 @@ export class ChunkRenderer {
     for (const mesh of this.fireMeshes.values()) {
       this.applyColorModeToGeometry(mesh.geometry);
     }
+    for (const mesh of this.translucentMeshes.values()) {
+      this.applyColorModeToGeometry(mesh.geometry);
+    }
   }
 
   private updateDynamicColorsOnAllMeshes(): void {
@@ -683,6 +731,9 @@ export class ChunkRenderer {
       this.updateDynamicColorAttributes(mesh.geometry);
     }
     for (const mesh of this.fireMeshes.values()) {
+      this.updateDynamicColorAttributes(mesh.geometry);
+    }
+    for (const mesh of this.translucentMeshes.values()) {
       this.updateDynamicColorAttributes(mesh.geometry);
     }
   }
@@ -773,10 +824,12 @@ export class ChunkRenderer {
       this.terrainMaterial.map = null;
       this.fluidMaterial.map = this.atlas.debugTexture;
       this.cutoutMaterial.map = this.atlas.debugTexture;
+      this.translucentMaterial.map = this.atlas.debugTexture;
     } else {
       this.terrainMaterial.map = this.atlas.texture;
       this.fluidMaterial.map = this.atlas.texture;
       this.cutoutMaterial.map = this.atlas.texture;
+      this.translucentMaterial.map = this.atlas.texture;
     }
 
     this.updateDynamicLightingUniforms();
@@ -784,6 +837,7 @@ export class ChunkRenderer {
     this.fluidMaterial.needsUpdate = true;
     this.cutoutMaterial.needsUpdate = true;
     this.fireMaterial.needsUpdate = true;
+    this.translucentMaterial.needsUpdate = true;
   }
 
   private upsertMesh(

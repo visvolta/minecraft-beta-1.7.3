@@ -5,6 +5,7 @@ import { SurfaceGenerator } from './SurfaceGenerator';
 import { JavaRandom } from './random/JavaRandom';
 import { BetaCaveGenerator } from './caves/BetaCaveGenerator';
 import { BetaTreeDecorator } from './trees/BetaTreeDecorator';
+import { SnowIceGenerator } from './SnowIceGenerator';
 
 /** Optional configuration for BetaWorldGenerator. */
 export interface BetaWorldGeneratorOptions {
@@ -45,6 +46,7 @@ export class BetaWorldGenerator implements WorldGenerator {
   private readonly surfaceGenerator: SurfaceGenerator;
   private readonly caveGenerator: BetaCaveGenerator;
   private readonly treeDecorator: BetaTreeDecorator;
+  private readonly snowIceGenerator: SnowIceGenerator;
   private readonly enableCaves: boolean;
   private readonly enableTrees: boolean;
 
@@ -66,6 +68,7 @@ export class BetaWorldGenerator implements WorldGenerator {
     // pipeline exactly when it recomputes a neighbouring chunk's terrain
     // read-only for tree space-validation purposes.
     this.treeDecorator = new BetaTreeDecorator(worldSeed, this.terrainGenerator, this.enableCaves);
+    this.snowIceGenerator = new SnowIceGenerator();
   }
 
   public populate(chunk: Chunk): void {
@@ -79,6 +82,10 @@ export class BetaWorldGenerator implements WorldGenerator {
     if (this.enableTrees) {
       this.treeDecorator.decorate(chunk.chunkX, chunk.chunkZ, raw.blocks);
     }
+
+    // Snow/ice finalization for cold biomes (Beta ChunkProviderGenerate population phase).
+    // Runs after trees so snow doesn't appear under tree canopies.
+    this.snowIceGenerator.apply(chunk.chunkX, chunk.chunkZ, raw.blocks, raw.climate);
 
     chunk.loadGeneratedBlocks(raw.blocks);
   }

@@ -1,22 +1,20 @@
 /**
  * Beta 1.7.3 snow/ice precipitation simulation.
  *
- * Ports the snow/ice placement logic from World.updateBlocksAndPlayCaveSounds().
- * Runs once per game tick when it's raining, iterating loaded chunks with a
- * PRNG-based position sampler matching Beta's deterministic random sampling.
+ * Ports the snow/ice placement logic from World.updateBlocksAndPlayCaveSounds()
+ * (lines 1938-1952 of World.java).
  *
- * Beta logic (from World.java lines 1920-1950):
- *   for each chunk in loaded set:
- *     with probability 1/16:
- *       pick random (x, z) within chunk
- *       find top solid block (findTopSolidBlock)
- *       check biome.getEnableSnow()
- *       check y >= 0 && y < 128
- *       check block light < 10
- *       if raining && air at y && canPlaceBlockAt && conditions:
- *         place snow
- *       if water still at y-1 with metadata 0:
- *         place ice
+ * Beta exact logic:
+ *   1. For each loaded chunk, 1/16 chance per tick
+ *   2. Pick random (localX, localZ) within chunk
+ *   3. findTopSolidBlock to get surface Y
+ *   4. Check: biome.getEnableSnow() AND y >= 0 AND y < 128
+ *   5. Check: getSavedLightValue(EnumSkyBlock.Block, x, y, z) < 10
+ *   6. Snow: if raining AND air at y AND canPlaceBlockAt AND block below
+ *      is not 0, not ice, and is solid material → place snow
+ *   7. Ice: if waterStill at y-1 with metadata 0 → place ice
+ *
+ * Also handles snow melting via scheduled ticks (not here).
  */
 
 import { BlockIds } from '../../blocks/BlockId';
@@ -34,26 +32,36 @@ export interface PrecipitationMetrics {
   readonly iceFormed: number;
   readonly snowMelted: number;
   readonly iceMelted: number;
-  readonly precipitationUpdates: number;
+  readonly precipitationSamples: number;
+  readonly lightRejections: number;
+  readonly biomeRejections: number;
+  readonly supportRejections: number;
+  readonly loadedChunksSampled: number;
 }
 
 export class PrecipitationSimulator {
   private readonly random: JavaRandom;
 
-  // Metrics (reset each tick)
+  // Per-tick metrics (reset each tick)
   private snowPlaced = 0;
   private iceFormed = 0;
   private snowMelted = 0;
   private iceMelted = 0;
-  private precipitationUpdates = 0;
+  private precipitationSamples = 0;
+  private lightRejections = 0;
+  private biomeRejections = 0;
+  private supportRejections = 0;
+  private loadedChunksSampled = 0;
 
   public constructor(sessionSeed: bigint) {
     this.random = new JavaRandom(sessionSeed ^ 0x5DEECE66Dn);
   }
 
   /**
-   * Run one precipitation tick. Called from Engine when weather is active.
-   * Matches Beta's updateBlocksAndPlayCaveSounds() snow/ice section.
+   * Run one precipitation tick. Called from Engine via game tick callback
+   * when weather is active (raining).
+   *
+   * Matches Beta's updateBlocksAndPlayCaveSounds() snow/ice section exactly.
    */
   public tick(
     chunks: ChunkManager,
@@ -68,57 +76,76 @@ export class PrecipitationSimulator {
     this.iceFormed = 0;
     this.snowMelted = 0;
     this.iceMelted = 0;
-    this.precipitationUpdates = 0;
+    this.precipitationSamples = 0;
+    this.lightRejections = 0;
+    this.biomeRejections = 0;
+    this.supportRejections = 0;
+    this.loadedChunksSampled = 0;
 
     const isRaining = weather.raining;
 
     // Beta: iterate loaded chunks, 1/16 chance per chunk per tick
     for (const chunk of chunks) {
-      // Beta: this.random.nextInt(16) == 0
+      this.loadedChunksSampled += 1;
+
+      // Beta: if (this.rand.nextInt(16) == 0)
       if (this.random.nextInt(16) !== 0) continue;
 
-      this.precipitationUpdates += 1;
+      this.precipitationSamples += 1;
 
-      // Beta: field_9437_g = field_9437_g * 3 + 1013904223
-      // Use chunk coordinates + gameTick as deterministic seed for position
+      // Beta PRNG: field_9437_g = field_9437_g * 3 + 1013904223
+      // Use chunk coordinates + gameTick as deterministic seed
       const var6 = this.nextIntPRNG(chunk.chunkX * 31 + chunk.chunkZ * 17 + gameTick);
       const localX = var6 & 15;
       const localZ = (var6 >> 8) & 15;
       const worldX = chunk.chunkX * CHUNK_SIZE_X + localX;
       const worldZ = chunk.chunkZ * CHUNK_SIZE_Z + localZ;
 
-      // Find top solid block (Beta: findTopSolidBlock)
+      // Beta: findTopSolidBlock(x, z) — scan down from Y=127
       const surfaceY = this.findTopSolidBlock(world, worldX, worldZ);
       if (surfaceY < 0 || surfaceY >= CHUNK_SIZE_Y) continue;
 
-      // Check biome: getEnableSnow()
+      // Beta: getWorldChunkManager().getBiomeGenAt(x, z).getEnableSnow()
       const [climateSample] = climate.sampleRegion(worldX, worldZ, 1, 1);
       if (climateSample === undefined) continue;
       const biome = selectBiome(climateSample);
-      if (!biome.enableSnow) continue;
+      if (!biome.enableSnow) {
+        this.biomeRejections += 1;
+        continue;
+      }
 
-      // Check block light < 10 (Beta: getSavedLightValue(EnumSkyBlock.Block, ...) < 10)
-      // We approximate: if the surface position is exposed to sky
-      // TODO: exact block light check when LightEngine exposes it
+      // Beta: var14.getSavedLightValue(EnumSkyBlock.Block, var7, var9, var8) < 10
+      // This is the block light at the surface position
+      const blockLight = world.getBlocklight(worldX, surfaceY, worldZ);
+      if (blockLight >= 10) {
+        this.lightRejections += 1;
+        continue;
+      }
 
       const blockAtSurface = world.getBlock(worldX, surfaceY, worldZ);
       const blockBelow = world.getBlock(worldX, surfaceY - 1, worldZ);
 
-      // Snow placement (Beta lines 1942-1943)
+      // Snow placement (Beta lines 1942-1943):
+      // if (isRaining() && var15 == 0 && Block.snow.canPlaceBlockAt(...)
+      //     && var10 != 0 && var10 != Block.ice.blockID
+      //     && Block.blocksList[var10].blockMaterial.getIsSolid())
       if (isRaining && blockAtSurface === BlockIds.Air) {
-        // canPlaceBlockAt: block below is opaque and solid
-        if (blockBelow !== 0 && isOpaqueSolid(blockBelow, blocks) && blockBelow !== BlockIds.Ice) {
+        if (blockBelow !== 0 && blockBelow !== BlockIds.Ice && isOpaqueSolid(blockBelow, blocks)) {
           world.setBlock(worldX, surfaceY, worldZ, BlockIds.Snow, {
             reason: 'world',
             notifyNeighbours: true,
             updateLighting: true,
           });
+          // Schedule melting tick (Beta: setTickOnLoad=true)
+          world.scheduleBlockTick(worldX, surfaceY, worldZ, BlockIds.Snow, 40);
           this.snowPlaced += 1;
+        } else {
+          this.supportRejections += 1;
         }
       }
 
-      // Ice formation (Beta line 1947)
-      // Water freezes if: snow biome + block light < 10 + water still at surface-1 with metadata 0
+      // Ice formation (Beta line 1947):
+      // if (var10 == Block.waterStill.blockID && var14.getMetadata(...) == 0)
       if (blockBelow === BlockIds.WaterStill) {
         const waterMeta = world.getBlockMetadata(worldX, surfaceY - 1, worldZ);
         if (waterMeta === 0) {
@@ -127,40 +154,9 @@ export class PrecipitationSimulator {
             notifyNeighbours: true,
             updateLighting: true,
           });
+          // Schedule melting tick
+          world.scheduleBlockTick(worldX, surfaceY - 1, worldZ, BlockIds.Ice, 40);
           this.iceFormed += 1;
-        }
-      }
-    }
-
-    // Snow melting pass: check existing snow blocks for light > 11
-    // Beta: BlockSnow.updateTick melts when block light > 11
-    // We run this as part of the precipitation tick for efficiency
-    for (const chunk of chunks) {
-      for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
-        for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-          for (let ly = 0; ly < CHUNK_SIZE_Y; ly++) {
-            const blockId = chunk.getBlock(lx, ly, lz);
-            if (blockId === BlockIds.Snow) {
-              // Check if snow can still stay (support exists)
-              const worldX = chunk.chunkX * CHUNK_SIZE_X + lx;
-              const worldZ = chunk.chunkZ * CHUNK_SIZE_Z + lz;
-              const below = world.getBlock(worldX, ly - 1, worldZ);
-              if (below === 0 || !isOpaqueSolid(below, blocks)) {
-                world.setBlock(worldX, ly, worldZ, BlockIds.Air, {
-                  reason: 'world',
-                  notifyNeighbours: true,
-                  updateLighting: true,
-                });
-                this.snowMelted += 1;
-              }
-            } else if (blockId === BlockIds.Ice) {
-              // Ice melting: check if biome still allows ice
-              // In Beta, ice melts when block light > 11 - opacity
-              // For now, we only melt ice when the biome warms up
-              // (which doesn't happen in Beta's static biome system)
-              // This is a placeholder for future dynamic weather.
-            }
-          }
         }
       }
     }
@@ -191,13 +187,17 @@ export class PrecipitationSimulator {
       iceFormed: this.iceFormed,
       snowMelted: this.snowMelted,
       iceMelted: this.iceMelted,
-      precipitationUpdates: this.precipitationUpdates,
+      precipitationSamples: this.precipitationSamples,
+      lightRejections: this.lightRejections,
+      biomeRejections: this.biomeRejections,
+      supportRejections: this.supportRejections,
+      loadedChunksSampled: this.loadedChunksSampled,
     };
   }
 }
 
 /**
- * Returns true if the block is opaque and solid (Beta isOpaqueCube + material.isSolid).
+ * Returns true if the block is opaque and solid (Beta material check).
  */
 function isOpaqueSolid(blockId: number, blocks: BlockRegistry): boolean {
   const def = blocks.getById(blockId);

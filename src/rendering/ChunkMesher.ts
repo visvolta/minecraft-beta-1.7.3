@@ -775,7 +775,15 @@ export class ChunkMesher {
               continue;
             }
 
-            const textureName = resolveBlockTexture(definition, face.slot);
+            // Snow-covered grass: Beta BlockGrass.getBlockTexture() checks
+            // if block above has Material.snow → use grass_side_snowed (texture 68)
+            let textureName = resolveBlockTexture(definition, face.slot);
+            if (blockId === BlockIds.Grass && face.slot === 'side') {
+              const above = this.getBlockAt(chunk, x, y + 1, z);
+              if (above === BlockIds.Snow || above === BlockIds.SnowBlock) {
+                textureName = 'grass_side_snowed';
+              }
+            }
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
             const tint = resolveBlockTint(definition, face.slot);
             const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
@@ -1030,8 +1038,8 @@ export class ChunkMesher {
             //   var19 = x+0.7, var21 = x+0.3  (Z-plane width 0.4)
             //   var23 = z+0.7, var25 = z+0.3  (X-plane width 0.4)
 
-            // ── Plane A: Z-axis (x = 0.3 or 0.7, z = 0 → 1) ──
-            // Left plane at x + 0.3
+            // ── Plane A: Z-axis (x = 0.3 → 0.7, z = 0 → 1) ──
+            // Front face
             buffers.pushQuad([
               [x + 1, y + H + Y_OFF, z + 1],
               [x + 1, y, z + 1],
@@ -1040,7 +1048,7 @@ export class ChunkMesher {
             ], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1,
             FluidTextureKind.WaterStill, undefined,
             [uR, V0, uR, V1, uL, V1, uL, V0]);
-            // Right plane at x + 0.7
+            // Back face
             buffers.pushQuad([
               [x + 0.0, y + H + Y_OFF, z + 1],
               [x + 0.0, y, z + 1],
@@ -1168,11 +1176,14 @@ export class ChunkMesher {
   }
 
   /**
-   * Builds ice geometry for a chunk. Ice renders as a full solid block
+   * Builds ice geometry for a chunk. Ice renders as a full solid cube
    * in the translucent pass (render pass 1 in Beta).
-   * Uses the same attribute layout as terrain so lighting/fog work.
+   *
+   * NOT a fluid — uses standard full-cube geometry with per-face UVs,
+   * no fluid animation, no fluid surface height, no fluid corner logic.
+   * Shares the translucent render pass with fluids for correct alpha blending.
    */
-  public buildIce(chunk: Chunk): THREE.BufferGeometry {
+  public buildTranslucent(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
     for (let y = 0; y < CHUNK_SIZE_Y; y++) {
@@ -1184,11 +1195,13 @@ export class ChunkMesher {
           const definition = this.blockRegistry.getById(blockId);
           if (definition === undefined) continue;
 
+          // Ice: standard full-cube solid block rendering.
+          // Beta shouldSideBeRendered: super.shouldSideBeRendered(1 - side)
+          // This means ice shows faces against non-opaque neighbours (including other ice).
           for (const face of FACES) {
             const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-            // Beta: shouldSideBeRendered checks the opposite face (1 - side)
-            // Ice is transparent, so we render faces against non-opaque neighbours
-            if (this.hidesOpaqueFace(neighbourId)) continue;
+            // Don't hide against other ice or transparent blocks
+            if (this.hidesOpaqueFace(neighbourId) && !this.isIce(neighbourId)) continue;
 
             const textureName = resolveBlockTexture(definition, face.slot);
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
@@ -1215,23 +1228,9 @@ export class ChunkMesher {
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
         for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
-          if (!this.isFluid(blockId) && !this.isIce(blockId)) continue;
+          if (!this.isFluid(blockId)) continue;
           const definition = this.blockRegistry.getById(blockId);
           if (definition === undefined) continue;
-
-          // Ice: render as a full solid block with 6 faces
-          if (this.isIce(blockId)) {
-            for (const face of FACES) {
-              const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-              if (this.hidesOpaqueFace(neighbourId)) continue;
-              const textureName = resolveBlockTexture(definition, face.slot);
-              const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-              const tint = resolveBlockTint(definition, face.slot);
-              const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
-              buffers.pushFace(face, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
-            }
-            continue;
-          }
 
           const textureName = resolveBlockTexture(definition, 'side');
           const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;

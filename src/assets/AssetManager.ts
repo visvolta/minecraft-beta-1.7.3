@@ -30,6 +30,11 @@ export class AssetManager {
       }
     }
 
+    // Snow-covered grass side texture (Beta texture 68).
+    // Used by ChunkMesher when a Grass block has Snow above it.
+    // Not referenced by any block definition directly.
+    textureNames.add('grass_side_snowed');
+
     const images = await loadBlockTextureImages(textureNames);
     return TextureAtlas.build(images);
   }

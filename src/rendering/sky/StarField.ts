@@ -73,7 +73,7 @@ const STAR_SEED = 10842n;
  * their sky-space paths cross. Star size is scaled by the same factor
  * so on-screen appearance is preserved.
  */
-const STAR_RADIUS = 480;
+const STAR_RADIUS = 280;
 const STAR_RADIUS_SCALE_VS_BETA = STAR_RADIUS / 100;
 
 /**
@@ -81,7 +81,7 @@ const STAR_RADIUS_SCALE_VS_BETA = STAR_RADIUS / 100;
  * (so 0.25..0.5). Scaling by ~1.4 keeps the classic look but keeps stars
  * visible on modern high-DPI displays without turning them into blobs.
  */
-const STAR_SIZE_SCALE = 1.4;
+const STAR_SIZE_SCALE = 1.0;
 
 /** Per-star brightness range baked into vertex colours (Beta uses uniform 1.0). */
 const STAR_MIN_BRIGHTNESS = 0.7;
