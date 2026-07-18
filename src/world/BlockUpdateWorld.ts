@@ -97,6 +97,15 @@ export class BlockUpdateWorld {
     return this.chunkManager.hasChunk(chunkX, chunkZ);
   }
 
+  /** Runtime generators must not force streaming; all touched chunks must already exist. */
+  public areChunksLoadedAround(worldX: number, worldZ: number, radiusChunks: number): boolean {
+    const { chunkX, chunkZ } = worldToChunkLocal(worldX, worldZ);
+    for (let dz = -radiusChunks; dz <= radiusChunks; dz++) for (let dx = -radiusChunks; dx <= radiusChunks; dx++) {
+      if (!this.chunkManager.hasChunk(chunkX + dx, chunkZ + dz)) return false;
+    }
+    return true;
+  }
+
   public getBlocklight(worldX: number, worldY: number, worldZ: number): number {
     return this.lightEngine.getBlocklight(worldX, worldY, worldZ);
   }

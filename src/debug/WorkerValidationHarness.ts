@@ -3,6 +3,7 @@ import { BlockRegistry } from '../blocks/BlockRegistry';
 import { registerDefaultBlocks } from '../blocks/registerDefaultBlocks';
 import { Chunk } from '../world/Chunk';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
+import { VegetationColorProvider } from '../world/generation/climate/VegetationColors';
 import { blockIdBlocksWeather } from '../world/weather/WeatherBlocking';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from '../world/chunkConstants';
 import { ChunkManager } from '../world/ChunkManager';
@@ -82,7 +83,7 @@ export class WorkerValidationHarness {
       }
     }
     const target = manager.getChunk(0, 0)!;
-    const mesher = new ChunkMesher(manager, this.registry, this.atlas);
+    const mesher = new ChunkMesher(manager, this.registry, this.atlas, new VegetationColorProvider(this.worldSeed));
     const expected = [
       mesher.build(target),
       mesher.buildWater(target),
@@ -179,6 +180,7 @@ export class WorkerValidationHarness {
         targetRevision: target.getRevision(),
         chunks,
         atlasUvs: this.atlas!.getAllUvRects().map(([name, rect]) => ({ name, rect })),
+        worldSeed: this.worldSeed.toString(),
       };
       worker.postMessage(job, chunks.flatMap((chunk) => [chunk.blocks, chunk.metadata, chunk.light]));
     });

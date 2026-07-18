@@ -89,7 +89,7 @@ export class ChunkMeshingQueue {
   private maxDuration = 0;
   private lastUploadTime = 0;
 
-  public constructor(chunkManager: ChunkManager, atlas: TextureAtlas) {
+  public constructor(chunkManager: ChunkManager, atlas: TextureAtlas, private readonly worldSeed: bigint) {
     this.chunkManager = chunkManager;
     this.atlas = atlas;
     if (this.useWorkers) {
@@ -327,6 +327,7 @@ export class ChunkMeshingQueue {
       targetRevision: revision,
       chunks,
       atlasUvs: this.atlas.getAllUvRects().map(([name, rect]) => ({ name, rect })),
+      worldSeed: this.worldSeed.toString(),
     };
   }
 

@@ -2,6 +2,12 @@ import { BlockIds } from '../../blocks/BlockId';
 import type { BlockId } from '../../blocks/BlockId';
 import type { BlockRegistry } from '../../blocks/BlockRegistry';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
+import { TreeGenerator } from '../generation/trees/TreeGenerator';
+import { BigTreeGenerator } from '../generation/trees/BigTreeGenerator';
+import { BirchTreeGenerator } from '../generation/trees/BirchTreeGenerator';
+import { TaigaTree2Generator } from '../generation/trees/TaigaTree2Generator';
+import type { TreeWorldAccessor } from '../generation/trees/TreeWorldAccessor';
+import type { JavaRandom } from '../generation/random/JavaRandom';
 
 function isWater(id: BlockId): boolean {
   return id === BlockIds.WaterFlowing || id === BlockIds.WaterStill;
@@ -116,16 +122,26 @@ class CropBehaviour extends SupportedPlant {
 }
 
 class SaplingBehaviour extends SupportedPlant {
-  public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
-    return isSoil(ctx.world.getBlock(x, y - 1, z));
-  }
-
+  private readonly oak = new TreeGenerator();
+  private readonly birch = new BirchTreeGenerator();
+  private readonly spruce = new TaigaTree2Generator();
+  public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean { return isSoil(ctx.world.getBlock(x, y - 1, z)); }
   public randomTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
     super.randomTick(ctx, x, y, z);
-    if (this.canSurvive(ctx, x, y, z) && (ctx.nextInt?.(7) ?? 0) === 0) {
-      const stage = ctx.world.getBlockMetadata(x, y, z);
-      if (stage === 0) ctx.world.setBlockMetadata(x, y, z, 1, { affectsMesh: true, affectsWeather: false, affectsLight: false });
-    }
+    if (ctx.world.getBlock(x, y, z) !== BlockIds.Sapling || !this.canSurvive(ctx,x,y,z)) return;
+    // Verified BlockSapling order: support check, combined light at y+1, then nextInt(30).
+    if (ctx.world.getSkylight(x, y + 1, z) < 9 || (ctx.nextInt?.(30) ?? 1) !== 0) return;
+    // Known safe deviation: a live client must not synchronously load neighbours for an attempted tree.
+    if (!ctx.world.areChunksLoadedAround(x, z, 1)) return;
+    const species = ctx.world.getBlockMetadata(x,y,z) & 3;
+    const random = { nextInt: (bound: number) => ctx.nextInt?.(bound) ?? 0, nextLong: () => ctx.nextLong?.() ?? 0n } as JavaRandom;
+    const world: TreeWorldAccessor = { getBlock: (wx,wy,wz) => ctx.world.getBlock(wx,wy,wz), setBlock: (wx,wy,wz,id) => { ctx.world.setBlock(wx,wy,wz,id,{ reason:'world', notifyNeighbours:true, updateLighting:true }); }, getHeight: (wx,wz) => { for(let yy=127;yy>=0;yy--) if(ctx.world.getBlock(wx,yy,wz)!==BlockIds.Air) return yy+1; return 0; } };
+    ctx.world.setBlock(x,y,z,BlockIds.Air,{ reason:'world', notifyNeighbours:false, updateLighting:true });
+    let ok: boolean;
+    if (species === 1) ok=this.spruce.generate(world,random,x,y,z);
+    else if (species === 2) ok=this.birch.generate(world,random,x,y,z);
+    else { const generator=(random.nextInt(10)===0) ? new BigTreeGenerator() : this.oak; ok=generator.generate(world,random,x,y,z); }
+    if (!ok) ctx.world.setBlock(x,y,z,BlockIds.Sapling,{metadata:species,reason:'world',notifyNeighbours:true,updateLighting:true});
   }
 }
 

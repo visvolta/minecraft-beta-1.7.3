@@ -23,6 +23,7 @@ export interface ChunkMeshJob {
   readonly targetRevision: number;
   readonly chunks: readonly ChunkSnapshotPayload[];
   readonly atlasUvs: readonly AtlasUvPayload[];
+  readonly worldSeed: string;
 }
 
 export interface MeshAttributeBuffers {

@@ -10,6 +10,7 @@ import { getLightBrightness, TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
 import type { FluidAnimationSystem } from './fluid/FluidAnimationSystem';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import type { FireAnimationSystem } from './fire/FireAnimationSystem';
+import { VegetationColorProvider } from '../world/generation/climate/VegetationColors';
 
 /** Max dirty chunk meshes rebuilt in a single frame. */
 export const MESH_REBUILD_BUDGET = 4;
@@ -259,10 +260,11 @@ export class ChunkRenderer {
     atlas: TextureAtlas,
     fluidAnimationSystem: FluidAnimationSystem,
     fireAnimationSystem: FireAnimationSystem,
+    worldSeed: bigint,
   ) {
     this.chunkManager = chunkManager;
-    this.mesher = new ChunkMesher(chunkManager, blockRegistry, atlas);
-    this.meshQueue = new ChunkMeshingQueue(chunkManager, atlas);
+    this.mesher = new ChunkMesher(chunkManager, blockRegistry, atlas, new VegetationColorProvider(worldSeed));
+    this.meshQueue = new ChunkMeshingQueue(chunkManager, atlas, worldSeed);
     this.atlas = atlas;
     this.fluidAnimationSystem = fluidAnimationSystem;
     this.fireAnimationSystem = fireAnimationSystem;

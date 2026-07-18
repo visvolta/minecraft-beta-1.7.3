@@ -246,6 +246,7 @@ export class Engine {
       this.atlas,
       this.fluidAnimationSystem,
       this.fireAnimationSystem,
+      WORLD_SEED,
     );
     this.chunkStreamer = new ChunkStreamer(
       this.chunkManager,

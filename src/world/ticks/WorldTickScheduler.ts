@@ -114,8 +114,8 @@ export class WorldTickScheduler {
   private tickOnce(): void {
     const start = performance.now();
     const ctx: BlockBehaviourContext = this.events === undefined
-      ? { world: this.updateWorld, gameTick: this.gameTick, nextInt: (bound) => this.randomTicks.nextInt(bound) }
-      : { world: this.updateWorld, gameTick: this.gameTick, nextInt: (bound) => this.randomTicks.nextInt(bound), events: this.events };
+      ? { world: this.updateWorld, gameTick: this.gameTick, nextInt: (bound) => this.randomTicks.nextInt(bound), nextLong: () => this.randomTicks.nextLong() }
+      : { world: this.updateWorld, gameTick: this.gameTick, nextInt: (bound) => this.randomTicks.nextInt(bound), nextLong: () => this.randomTicks.nextLong(), events: this.events };
     let processedScheduledTicks = 0;
     let skippedStaleTicks = 0;
 

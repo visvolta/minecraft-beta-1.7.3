@@ -4,6 +4,8 @@ import { BetaTerrainGenerator } from '../BetaTerrainGenerator';
 import { ClimateSampler } from '../climate/ClimateSampler';
 import { selectBiome } from '../climate/BiomeSelector';
 import type { BiomeId } from '../climate/biomes';
+import { BIOMES } from '../climate/biomes';
+import { BirchTreeGenerator } from './BirchTreeGenerator';
 import { TreeGenerator } from './TreeGenerator';
 import { BigTreeGenerator } from './BigTreeGenerator';
 import { TaigaTree1Generator } from './TaigaTree1Generator';
@@ -33,6 +35,7 @@ export class BetaTreeDecorator {
   private readonly treeGenerator = new TreeGenerator();
   private readonly taigaTree1 = new TaigaTree1Generator();
   private readonly taigaTree2 = new TaigaTree2Generator();
+  private readonly birchTree = new BirchTreeGenerator();
 
   public constructor(worldSeed: bigint, terrainGenerator: BetaTerrainGenerator, enableCaves: boolean) {
     this.worldSeed = worldSeed;
@@ -116,90 +119,32 @@ export class BetaTreeDecorator {
   }
 
   private placeBiomeTrees(scratch: ScratchTreeWorld, biomeId: BiomeId, originX: number, originZ: number): void {
-    const treeNoiseSample = this.terrainGenerator.treeCountNoise.sample2D(
-      originX * 0.5,
-      originZ * 0.5,
-    );
-    const baseTreeFactor = Math.trunc(
-      (treeNoiseSample / 8 + this.random.nextDouble() * 4 + 4) / 3,
-    );
-
-    let treeCount = 0;
-    if (this.random.nextInt(10) === 0) {
-      treeCount++;
-    }
-    treeCount += this.biomeTreeCountBonus(biomeId, baseTreeFactor);
-
-    if (treeCount <= 0) {
-      return;
-    }
-
-    const { generator, isTaiga } = this.selectTreeType(biomeId);
-
-    const bigTreeGenerator = new BigTreeGenerator();
-    bigTreeGenerator.configure(1.0, 1.0, 1.0);
-
-    for (let i = 0; i < treeCount; i++) {
+    const noise = this.terrainGenerator.treeCountNoise.sample2D(originX * 0.5, originZ * 0.5);
+    let count = this.random.nextInt(10) === 0 ? 1 : 0;
+    count += Math.trunc((noise / 8 + this.random.nextDouble() * 4 + 4) / 3) + BIOMES[biomeId].treeDensity;
+    if (count <= 0) return;
+    const profile = BIOMES[biomeId].treeGenerators;
+    for (let i = 0; i < count; i++) {
       const x = originX + this.random.nextInt(CHUNK_SIZE_X) + 8;
       const z = originZ + this.random.nextInt(CHUNK_SIZE_Z) + 8;
       const y = scratch.getHeight(x, z);
-
-      if (isTaiga) {
-        const taigaGenerator = this.random.nextInt(3) === 0 ? this.taigaTree1 : this.taigaTree2;
-        taigaGenerator.generate(scratch, this.random, x, y, z);
-        continue;
-      }
-
-      if (generator === 'big') {
-        bigTreeGenerator.generate(scratch, this.random, x, y, z);
-      } else {
-        this.treeGenerator.generate(scratch, this.random, x, y, z);
-      }
+      const total = profile.reduce((sum, entry) => sum + entry.weight, 0);
+      if (total <= 0) continue;
+      let pick = this.random.nextInt(total);
+      let kind = profile[profile.length - 1]!.kind;
+      for (const entry of profile) { pick -= entry.weight; if (pick < 0) { kind = entry.kind; break; } }
+      if (kind === 'oak') this.treeGenerator.generate(scratch, this.random, x, y, z);
+      else if (kind === 'bigOak') { const big = new BigTreeGenerator(); big.configure(1, 1, 1); big.generate(scratch, this.random, x, y, z); }
+      else if (kind === 'birch') this.birchTree.generate(scratch, this.random, x, y, z);
+      else if (kind === 'spruce') this.taigaTree2.generate(scratch, this.random, x, y, z);
+      else this.taigaTree1.generate(scratch, this.random, x, y, z);
     }
   }
 
   /** Matches WorldChunkManager.a(k1+16, l1+16): one biome sample at the chunk's far corner. */
   private sampleChunkBiome(chunkX: number, chunkZ: number): BiomeId {
-    const sampleX = chunkX * CHUNK_SIZE_X + 16;
-    const sampleZ = chunkZ * CHUNK_SIZE_Z + 16;
-    const [climate] = this.climateSampler.sampleRegion(sampleX, sampleZ, 1, 1);
+    const [climate] = this.climateSampler.sampleRegion(chunkX * CHUNK_SIZE_X + 16, chunkZ * CHUNK_SIZE_Z + 16, 1, 1);
     return selectBiome(climate!).id;
   }
 
-  private biomeTreeCountBonus(biomeId: BiomeId, baseFactor: number): number {
-    switch (biomeId) {
-      case 'forest':
-        return baseFactor + 5;
-      case 'rainforest':
-        return baseFactor + 5;
-      case 'seasonalForest':
-        return baseFactor + 2;
-      case 'taiga':
-        return baseFactor + 5;
-      case 'desert':
-      case 'tundra':
-      case 'plains':
-        return -20;
-      default:
-        return 0;
-    }
-  }
-
-  private selectTreeType(biomeId: BiomeId): { generator: 'oak' | 'big'; isTaiga: boolean } {
-    if (biomeId === 'taiga') {
-      return { generator: 'oak', isTaiga: true };
-    }
-
-    let generator: 'oak' | 'big' = 'oak';
-
-    if (this.random.nextInt(10) === 0) {
-      generator = 'big';
-    }
-
-    if (biomeId === 'rainforest' && this.random.nextInt(3) === 0) {
-      generator = 'big';
-    }
-
-    return { generator, isTaiga: false };
-  }
 }

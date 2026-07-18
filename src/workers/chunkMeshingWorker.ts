@@ -4,6 +4,7 @@ import { registerDefaultBlocks } from '../blocks/registerDefaultBlocks';
 import { ChunkManager } from '../world/ChunkManager';
 import { ChunkMesher } from '../rendering/ChunkMesher';
 import type { AtlasUvRect } from '../assets/TextureAtlas';
+import { VegetationColorProvider } from '../world/generation/climate/VegetationColors';
 import type {
   ChunkMeshJob,
   ChunkMeshResult,
@@ -109,7 +110,7 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
 
     const atlas = new WorkerAtlas();
     atlas.set(job.atlasUvs);
-    const mesher = new ChunkMesher(manager, registry, atlas as never);
+    const mesher = new ChunkMesher(manager, registry, atlas as never, new VegetationColorProvider(BigInt(job.worldSeed)));
     const terrainGeometry = mesher.build(target);
     const waterGeometry = mesher.buildWater(target);
     const lavaGeometry = mesher.buildLava(target);

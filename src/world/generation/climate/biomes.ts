@@ -48,6 +48,12 @@ export interface BiomeDefinition {
    * False for all other biomes.
    */
   readonly enableSnow: boolean;
+  /** Configurable final-look inputs; no original Beta colourizer tables. */
+  readonly vegetationTints: Readonly<Record<'grass' | 'oakLeaves' | 'birchLeaves' | 'spruceLeaves', readonly [number, number, number]>>;
+  readonly vegetationTintStrengths: Readonly<Record<'grass' | 'oakLeaves' | 'birchLeaves' | 'spruceLeaves', number>>;
+  /** Beta-inspired decoration count adjustment and weighted generator IDs. */
+  readonly treeDensity: number;
+  readonly treeGenerators: readonly { readonly kind: 'oak' | 'bigOak' | 'birch' | 'spruce' | 'tallSpruce'; readonly weight: number }[];
 }
 
 export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
@@ -56,6 +62,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Rainforest',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+
+    vegetationTints: { grass: [0x62/255,0xb9/255,0x4a/255], oakLeaves: [0x62/255,0xb9/255,0x4a/255], birchLeaves: [0x62/255,0xb9/255,0x4a/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: 5,
+    treeGenerators: [{ kind: 'bigOak', weight: 1 }, { kind: 'oak', weight: 2 }],
     enableSnow: false,
   },
   swampland: {
@@ -63,6 +74,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Swampland',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+
+    vegetationTints: { grass: [0x6a/255,0xc0/255,0x42/255], oakLeaves: [0x6a/255,0xc0/255,0x42/255], birchLeaves: [0x6a/255,0xc0/255,0x42/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: 0,
+    treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
   },
   seasonalForest: {
@@ -70,6 +86,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Seasonal Forest',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+
+    vegetationTints: { grass: [0x79/255,0xc0/255,0x5a/255], oakLeaves: [0x79/255,0xc0/255,0x5a/255], birchLeaves: [0x79/255,0xc0/255,0x5a/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: 2,
+    treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
   },
   forest: {
@@ -77,6 +98,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Forest',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+
+    vegetationTints: { grass: [0x72/255,0xbd/255,0x52/255], oakLeaves: [0x72/255,0xbd/255,0x52/255], birchLeaves: [0x72/255,0xbd/255,0x52/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: 5,
+    treeGenerators: [{ kind: 'birch', weight: 3 }, { kind: 'bigOak', weight: 4 }, { kind: 'oak', weight: 8 }],
     enableSnow: false,
   },
   savanna: {
@@ -84,6 +110,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Savanna',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+
+    vegetationTints: { grass: [0x8c/255,0xbc/255,0x54/255], oakLeaves: [0x8c/255,0xbc/255,0x54/255], birchLeaves: [0x8c/255,0xbc/255,0x54/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: 0,
+    treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
   },
   shrubland: {
@@ -91,6 +122,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Shrubland',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+
+    vegetationTints: { grass: [0x82/255,0xb8/255,0x55/255], oakLeaves: [0x82/255,0xb8/255,0x55/255], birchLeaves: [0x82/255,0xb8/255,0x55/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: 0,
+    treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
   },
   taiga: {
@@ -98,6 +134,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Taiga',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+
+    vegetationTints: { grass: [0x6d/255,0x9d/255,0x5b/255], oakLeaves: [0x6d/255,0x9d/255,0x5b/255], birchLeaves: [0x6d/255,0x9d/255,0x5b/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: 5,
+    treeGenerators: [{ kind: 'tallSpruce', weight: 1 }, { kind: 'spruce', weight: 2 }],
     enableSnow: true,
   },
   desert: {
@@ -105,6 +146,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Desert',
     topBlock: BlockIds.Sand,
     fillerBlock: BlockIds.Sand,
+
+    vegetationTints: { grass: [0x9f/255,0xb6/255,0x62/255], oakLeaves: [0x9f/255,0xb6/255,0x62/255], birchLeaves: [0x9f/255,0xb6/255,0x62/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: -20,
+    treeGenerators: [],
     enableSnow: false,
   },
   plains: {
@@ -112,6 +158,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Plains',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+
+    vegetationTints: { grass: [0x79/255,0xc0/255,0x5a/255], oakLeaves: [0x79/255,0xc0/255,0x5a/255], birchLeaves: [0x79/255,0xc0/255,0x5a/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: -20,
+    treeGenerators: [],
     enableSnow: false,
   },
   tundra: {
@@ -119,6 +170,11 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     displayName: 'Tundra',
     topBlock: BlockIds.Grass,
     fillerBlock: BlockIds.Dirt,
+
+    vegetationTints: { grass: [0x80/255,0xaa/255,0x72/255], oakLeaves: [0x80/255,0xaa/255,0x72/255], birchLeaves: [0x80/255,0xaa/255,0x72/255], spruceLeaves: [0x61/255,0x9b/255,0x43/255] },
+    vegetationTintStrengths: { grass: 0.6, oakLeaves: 0.6, birchLeaves: 0.5, spruceLeaves: 0.25 },
+    treeDensity: -20,
+    treeGenerators: [],
     enableSnow: true,
   },
 };

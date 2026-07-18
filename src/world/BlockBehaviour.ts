@@ -7,6 +7,8 @@ export interface BlockBehaviourContext {
   readonly gameTick: number;
   /** World-owned deterministic RNG, used for Beta random decisions. */
   readonly nextInt?: (bound: number) => number;
+  /** Same world RNG stream; required by Beta WorldGenBigTree. */
+  readonly nextLong?: () => bigint;
   readonly events?: WorldEventQueue;
 }
 

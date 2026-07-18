@@ -87,6 +87,8 @@ export class RandomTickScheduler {
     return this.random.nextInt(bound);
   }
 
+  public nextLong(): bigint { return this.random.nextLong(); }
+
   public getMetrics(): RandomTickMetrics {
     return this.metrics;
   }

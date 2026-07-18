@@ -6,6 +6,7 @@ import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { BlockDefinition } from '../blocks/BlockDefinition';
 import { resolveBlockTexture } from '../blocks/resolveBlockTexture';
 import { resolveBlockTint } from '../blocks/resolveBlockTint';
+import { vegetationTintKind, type VegetationColorProvider } from '../world/generation/climate/VegetationColors';
 import type { TextureAtlas } from '../assets/TextureAtlas';
 import type { Chunk } from '../world/Chunk';
 import type { ChunkManager } from '../world/ChunkManager';
@@ -521,15 +522,15 @@ export class ChunkMesher {
   private readonly chunkManager: ChunkManager;
   private readonly blockRegistry: BlockRegistry;
   private readonly atlas: TextureAtlas;
+  private readonly vegetationColors: VegetationColorProvider | undefined;
 
-  public constructor(
-    chunkManager: ChunkManager,
-    blockRegistry: BlockRegistry,
-    atlas: TextureAtlas,
-  ) {
-    this.chunkManager = chunkManager;
-    this.blockRegistry = blockRegistry;
-    this.atlas = atlas;
+  public constructor(chunkManager: ChunkManager, blockRegistry: BlockRegistry, atlas: TextureAtlas, vegetationColors?: VegetationColorProvider) {
+    this.chunkManager = chunkManager; this.blockRegistry = blockRegistry; this.atlas = atlas; this.vegetationColors = vegetationColors;
+  }
+
+  private resolveVegetationTint(blockId: BlockId, face: BlockFace, fallback: readonly [number, number, number], worldX: number, worldZ: number): readonly [number, number, number] {
+    const kind = vegetationTintKind(blockId, face);
+    return kind === undefined || this.vegetationColors === undefined ? fallback : this.vegetationColors.getColorAt(kind, worldX, worldZ);
   }
 
   private getLightComponentsAt(chunk: Chunk, lx: number, ly: number, lz: number): LightSample {
@@ -786,7 +787,7 @@ export class ChunkMesher {
               }
             }
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-            const tint = resolveBlockTint(definition, face.slot);
+            const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
 
             buffers.pushFace(
@@ -834,7 +835,7 @@ export class ChunkMesher {
               }
               const textureName = resolveBlockTexture(definition, face.slot);
               const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-              const tint = resolveBlockTint(definition, face.slot);
+              const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
               const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
               buffers.pushFace(face, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
             }
@@ -846,14 +847,14 @@ export class ChunkMesher {
               }
               const textureName = resolveBlockTexture(definition, face.slot);
               const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-              const tint = resolveBlockTint(definition, face.slot);
+              const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
               const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
               buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
             }
           } else if (renderType === 'cross' && blockId !== BlockIds.Fire) {
             const textureName = resolveBlockTexture(definition, 'side');
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-            const tint = resolveBlockTint(definition, 'side');
+            const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const light = this.getLightComponentsAt(chunk, x, y, z);
             buffers.pushCross(x, y, z, uvRect, tint, light);
           } else if (renderType === 'cactus') {
@@ -875,7 +876,7 @@ export class ChunkMesher {
             // Uses custom bounds: 0,0,0 to 1, 0.125, 1
             const textureName = resolveBlockTexture(definition, 'side');
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-            const tint = resolveBlockTint(definition, 'side');
+            const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const light = this.getLightComponentsAt(chunk, x, y, z);
             this.pushSnowBlock(buffers, x, y, z, uvRect, tint, light);
           } else if (renderType === 'ice') {
@@ -1210,7 +1211,7 @@ export class ChunkMesher {
 
             const textureName = resolveBlockTexture(definition, face.slot);
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-            const tint = resolveBlockTint(definition, face.slot);
+            const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
 
             buffers.pushFace(
@@ -1286,7 +1287,7 @@ export class ChunkMesher {
   ): void {
     const textureName = resolveBlockTexture(definition, 'side');
     const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-    const tint = resolveBlockTint(definition, 'side');
+    const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
     // Each visible fluid face samples the cell on the other side of
     // that face. In particular, open-sky water must use the light above
     // the surface rather than the attenuated light stored in the fluid.
