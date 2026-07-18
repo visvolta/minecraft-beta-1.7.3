@@ -14,7 +14,7 @@ import { worldToChunkLocal } from '../world/worldToChunkCoords';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 
 /** Maximum block interaction reach, in blocks. */
-export const INTERACTION_REACH = 5;
+export const INTERACTION_REACH = 4.75;
 
 /**
  * Simple digit-key -> block mapping for this stage (no hotbar UI yet).
@@ -94,13 +94,20 @@ export class InteractionController {
     );
 
     if (this.currentHit === undefined) {
+      if (this.input.isMouseButtonJustPressed('left')) {
+        this.player.swingItem();
+      } else if (this.input.isMouseButtonJustPressed('right')) {
+        this.player.swingItem();
+      }
       return;
     }
 
     if (this.input.isMouseButtonJustPressed('left')) {
       this.breakBlock(this.currentHit);
+      this.player.swingItem();
     } else if (this.input.isMouseButtonJustPressed('right')) {
       this.placeBlock(this.currentHit);
+      this.player.swingItem();
     }
   }
 

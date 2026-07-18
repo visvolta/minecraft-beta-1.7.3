@@ -56,7 +56,9 @@ import { ChunkPersistenceQueue } from '../persistence/queue/ChunkPersistenceQueu
 import type { WorldStorage } from '../persistence/storage/WorldStorage';
 import type { WorldMetadata } from '../persistence/metadata/WorldMetadata';
 import { PlayerModel } from '../player/PlayerModel';
+import { PlayerAnimator } from '../player/PlayerAnimator';
 import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
+import { FirstPersonMotionController } from '../player/FirstPersonMotionController';
 import { CameraModeController, CameraMode } from '../camera/CameraModeController';
 
 /** Maximum delta (seconds) applied in one frame after tab focus / hitch. */
@@ -142,7 +144,9 @@ export class Engine {
   private lastMetadataAutosaveMs = 0;
   private metadataSaveInFlight: Promise<void> | null = null;
   private readonly playerModel: PlayerModel;
+  private readonly playerAnimator: PlayerAnimator;
   private readonly firstPersonArmRenderer: FirstPersonArmRenderer;
+  private readonly firstPersonMotionController: FirstPersonMotionController;
   private readonly cameraModeController: CameraModeController;
 
   public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator, private readonly storage: WorldStorage) {
@@ -178,8 +182,10 @@ export class Engine {
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
     this.cameraModeController = new CameraModeController(this.input, this.blockUpdateWorld, blockRegistry);
     this.playerModel = new PlayerModel();
+    this.playerAnimator = new PlayerAnimator();
     this.firstPersonArmRenderer = new FirstPersonArmRenderer();
-    
+    this.firstPersonMotionController = new FirstPersonMotionController();
+
     this.renderer.scene.add(this.playerModel.root);
 
     this.blockBehaviourRegistry = new BlockBehaviourRegistry();
@@ -661,12 +667,13 @@ export class Engine {
     }
 
     // 7. Apply Camera Mode and Transform
+    this.player.updateAnimationState(deltaSeconds);
     this.cameraModeController.update();
     const camera = this.renderer.camera;
     this.cameraModeController.applyTransform(
-      camera, 
-      this.player, 
-      this.cameraController.getYaw(), 
+      camera,
+      this.player,
+      this.cameraController.getYaw(),
       this.cameraController.getPitch()
     );
 
@@ -674,18 +681,17 @@ export class Engine {
     if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
       this.playerModel.setVisible(false);
       this.firstPersonArmRenderer.setVisible(true);
-      this.firstPersonArmRenderer.update(camera);
+      this.firstPersonMotionController.update(camera, this.player, this.firstPersonArmRenderer, 1.0);
     } else {
       this.playerModel.setVisible(true);
       this.firstPersonArmRenderer.setVisible(false);
-      
-      this.playerModel.updateTransforms(
-        this.player.position.x, 
-        this.player.position.y, 
-        this.player.position.z, 
-        this.cameraController.getYaw(), 
-        this.cameraController.getYaw(), 
-        this.cameraController.getPitch()
+
+      this.playerAnimator.update(
+        this.player,
+        this.playerModel,
+        this.cameraController.getYaw(),
+        this.cameraController.getPitch(),
+        1.0
       );
     }
 
@@ -859,10 +865,10 @@ export class Engine {
     // debug overlay is a separate plain-HTML element composited by the
     // browser on top, not part of this render call).
     this.performanceProfiler.beginRender();
-    
+
     // Clear whole buffer before world render
     this.renderer.renderer.clear();
-    
+
     // Render world
     this.renderer.render();
 
@@ -871,7 +877,7 @@ export class Engine {
       this.renderer.renderer.clearDepth();
       this.renderer.renderer.render(this.firstPersonArmRenderer.scene, camera);
     }
-    
+
     this.performanceProfiler.endRender();
     this.performanceProfiler.endFrame();
   };

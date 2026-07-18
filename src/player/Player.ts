@@ -1,4 +1,10 @@
 import { AABB } from '../physics/AABB';
+import {
+  ANIMATION_SWING_DURATION_SECONDS,
+  ANIMATION_MOVEMENT_SPEED_SCALING,
+  ANIMATION_RETURN_TO_NEUTRAL_SPEED,
+  ANIMATION_WALK_SWING_FREQUENCY
+} from './PlayerConstants.ts';
 
 /** Player hitbox width and depth (blocks). */
 export const PLAYER_WIDTH = 0.6;
@@ -35,6 +41,23 @@ export class Player {
   /** True only while resting on a solid block (set by PlayerPhysics). */
   public grounded = false;
 
+  public distanceWalkedModified = 0;
+  public prevDistanceWalkedModified = 0;
+
+  public isSwinging = false;
+  public swingProgressInt = 0;
+  public swingProgress = 0;
+  public prevSwingProgress = 0;
+
+  public limbSwingAmount = 0;
+  public prevLimbSwingAmount = 0;
+  public limbSwingPhase = 0;
+  public prevLimbSwingPhase = 0;
+  public swingTime = 0;
+
+  public bodyYaw = 0;
+  public prevBodyYaw = 0;
+
   public constructor(spawnX: number, spawnY: number, spawnZ: number) {
     this.position.x = spawnX;
     this.position.y = spawnY;
@@ -58,5 +81,41 @@ export class Player {
       this.position.y + PLAYER_HEIGHT,
       this.position.z + halfWidth,
     );
+  }
+
+  public swingItem(): void {
+    this.swingTime = 0;
+    this.isSwinging = true;
+  }
+
+  public updateAnimationState(deltaSeconds: number): void {
+    this.prevLimbSwingPhase = this.limbSwingPhase;
+    this.prevLimbSwingAmount = this.limbSwingAmount;
+    this.prevSwingProgress = this.swingProgress;
+    this.prevBodyYaw = this.bodyYaw;
+
+    const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+    let targetSwingAmount = 0;
+    if (this.grounded && speed > 0.05) {
+      targetSwingAmount = Math.min(speed * ANIMATION_MOVEMENT_SPEED_SCALING, 1.0);
+    }
+
+    const deltaSwing = targetSwingAmount - this.limbSwingAmount;
+    this.limbSwingAmount += deltaSwing * ANIMATION_RETURN_TO_NEUTRAL_SPEED * deltaSeconds;
+
+    // Phase advances based on smoothed swing amount
+    this.limbSwingPhase += this.limbSwingAmount * ANIMATION_WALK_SWING_FREQUENCY * deltaSeconds * 20.0;
+
+    if (this.isSwinging) {
+      this.swingTime += deltaSeconds;
+      if (this.swingTime >= ANIMATION_SWING_DURATION_SECONDS) {
+        this.swingTime = 0;
+        this.isSwinging = false;
+      }
+    } else {
+      this.swingTime = 0;
+    }
+
+    this.swingProgress = this.swingTime / ANIMATION_SWING_DURATION_SECONDS;
   }
 }

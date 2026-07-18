@@ -4,6 +4,7 @@ import type { Player } from '../player/Player';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import { AIR_BLOCK_ID } from '../world/chunkConstants.ts';
+import { THIRD_PERSON_DISTANCE, THIRD_PERSON_TARGET_OFFSET_Y } from '../player/PlayerConstants.ts';
 
 export enum CameraMode {
   FIRST_PERSON,
@@ -31,7 +32,7 @@ export class CameraModeController {
 
   public applyTransform(camera: PerspectiveCamera, player: Player, yaw: number, pitch: number): void {
     const eyeX = player.position.x;
-    const eyeY = player.getEyeY();
+    const eyeY = player.getEyeY() + THIRD_PERSON_TARGET_OFFSET_Y;
     const eyeZ = player.position.z;
 
     if (this.mode === CameraMode.FIRST_PERSON) {
@@ -40,7 +41,7 @@ export class CameraModeController {
       camera.rotation.set(pitch, yaw, 0);
     } else {
       // THIRD_PERSON_REAR
-      const targetDistance = 4.0;
+      const targetDistance = THIRD_PERSON_DISTANCE;
       let actualDistance = targetDistance;
 
       // Beta 1.7.3 third person camera math
@@ -150,3 +151,4 @@ export class CameraModeController {
     return undefined;
   }
 }
+

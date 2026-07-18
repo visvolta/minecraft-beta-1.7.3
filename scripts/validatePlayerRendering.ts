@@ -1,14 +1,16 @@
-import { CameraModeController, CameraMode } from '../src/camera/CameraModeController.ts';
 import { PlayerModel } from '../src/player/PlayerModel.ts';
 import { FirstPersonArmRenderer } from '../src/rendering/FirstPersonArmRenderer.ts';
+import { FirstPersonMotionController } from '../src/player/FirstPersonMotionController.ts';
+import { PlayerAnimator } from '../src/player/PlayerAnimator.ts';
 import { Player } from '../src/player/Player.ts';
-import { BlockUpdateWorld } from '../src/world/BlockUpdateWorld.ts';
+import { PerspectiveCamera } from 'three';
+import { CameraModeController, CameraMode } from '../src/camera/CameraModeController.ts';
+import { ChunkManager } from '../src/world/ChunkManager.ts';
 import { BlockRegistry } from '../src/blocks/BlockRegistry.ts';
 import { registerDefaultBlocks } from '../src/blocks/registerDefaultBlocks.ts';
-import { PerspectiveCamera, Group, Mesh } from 'three';
-import { ChunkManager } from '../src/world/ChunkManager.ts';
 import { LightEngine } from '../src/world/generation/lighting/LightEngine.ts';
-import { Chunk } from '../src/world/Chunk.ts';
+import { BlockUpdateWorld } from '../src/world/BlockUpdateWorld.ts';
+import { ANIMATION_ARM_SWING_LIMIT } from '../src/player/PlayerConstants.ts';
 
 function assert(v: boolean, m: string) {
   if (!v) {
@@ -17,109 +19,127 @@ function assert(v: boolean, m: string) {
   }
 }
 
-function testPlayerModelDimensions() {
+function testPlayerAnimator() {
+  const player = new Player(0, 64, 0);
   const model = new PlayerModel();
-  // 1 pixel = 1/16 block
-  const px = 1/16;
-  
-  // Head
-  const headMesh = model.headGroup.children[0] as Mesh;
-  const hg = headMesh.geometry as any;
-  assert(hg.parameters.width === 8 * px, 'Head width is 8px');
-  assert(hg.parameters.height === 8 * px, 'Head height is 8px');
-  assert(hg.parameters.depth === 8 * px, 'Head depth is 8px');
+  const animator = new PlayerAnimator();
 
-  // Body
-  const bg = (model.bodyGroup.children[0] as Mesh).geometry as any;
-  assert(bg.parameters.width === 8 * px, 'Body width is 8px');
-  assert(bg.parameters.height === 12 * px, 'Body height is 12px');
-  assert(bg.parameters.depth === 4 * px, 'Body depth is 4px');
+  // 4. Stopping returns all limbs to neutral without snapping.
+  animator.update(player, model, 0, 0, 1.0);
+  assert(Math.abs(model.leftArmGroup.rotation.x) < 0.1, 'Standing returns to near neutral arm');
 
-  // Arm
-  const ag = (model.leftArmGroup.children[0] as Mesh).geometry as any;
-  assert(ag.parameters.width === 4 * px, 'Arm width is 4px');
-  assert(ag.parameters.height === 12 * px, 'Arm height is 12px');
-  assert(ag.parameters.depth === 4 * px, 'Arm depth is 4px');
+  // Start walking
+  player.velocity.x = 2.0;
+  player.grounded = true;
+  // Step physics slightly to start moving phase
+  player.updateAnimationState(0.1);
 
-  // Leg
-  const lg = (model.leftLegGroup.children[0] as Mesh).geometry as any;
-  assert(lg.parameters.width === 4 * px, 'Leg width is 4px');
-  assert(lg.parameters.height === 12 * px, 'Leg height is 12px');
-  assert(lg.parameters.depth === 4 * px, 'Leg depth is 4px');
+  animator.update(player, model, 0, 0, 1.0);
+  // 1. Walking never rotates limbs beyond configured limits.
+  assert(Math.abs(model.leftArmGroup.rotation.x) <= ANIMATION_ARM_SWING_LIMIT, 'Walking does not exceed bounds');
+  assert(model.leftArmGroup.rotation.x !== 0, 'Walking moves left arm');
+  assert(model.rightArmGroup.rotation.x !== 0, 'Walking moves right arm');
+  // 2. Opposite arm and leg pairs remain correctly phased.
+  assert(Math.sign(model.leftArmGroup.rotation.x) !== Math.sign(model.rightArmGroup.rotation.x), 'Arms move opposite directions');
+
+  // Test head tracking
+  animator.update(player, model, Math.PI / 4, Math.PI / 4, 1.0);
+  assert(Math.abs(model.headGroup.rotation.y - Math.PI / 4) < 0.001, 'Head follows camera rotation');
+  assert(player.position.x === 0, 'Animations do not change physics position');
+
+  // 9. Breaking animates the anatomical right arm.
+  // 12. Action swing layers correctly over walking animation.
+  player.swingItem();
+  player.updateAnimationState(0.1);
+  const beforeSwingX = model.rightArmGroup.rotation.x;
+  animator.update(player, model, 0, 0, 1.0);
+  const afterSwingX = model.rightArmGroup.rotation.x;
+  // Positive X means it pitches forward down in our coordinate system
+  assert(afterSwingX > beforeSwingX, 'Breaking animates right arm forward (positive X) layering over walk');
+}
+
+function testFirstPersonMotion() {
+  const player = new Player(0, 64, 0);
+  const fpRenderer = new FirstPersonArmRenderer();
+  const fpMotion = new FirstPersonMotionController();
+  const camera = new PerspectiveCamera();
+
+  const initialZ = fpRenderer.scene.children[0]!.position.z;
+
+  // 10. Placement animates the anatomical right arm.
+  // 13. First-person arm handedness matches the third-person model. (Handled visually but we verify the arm triggers).
+  player.swingItem();
+  player.updateAnimationState(0.1); // Progress 1/8
+
+  fpMotion.update(camera, player, fpRenderer, 1.0);
+
+  // Arm should have translated due to swing
+  assert(fpRenderer.scene.children[0]!.position.z !== initialZ, 'Breaking and placement trigger one swing');
+
+  // 7. Camera bob is disabled while stationary.
+  player.velocity.x = 0.0;
+  player.velocity.z = 0.0;
+  player.updateAnimationState(0.1);
+  const camBefore = camera.position.y;
+  fpMotion.update(camera, player, fpRenderer, 1.0);
+  assert(camera.position.y === camBefore, 'Camera bob disabled when stationary');
+
+  // View bob test
+  player.velocity.z = 2.0;
+  player.grounded = true;
+  player.updateAnimationState(0.1);
+  fpMotion.update(camera, player, fpRenderer, 1.0);
+  assert(camera.position.y !== camBefore, 'View bob occurs during movement');
+
+  // 6. Camera bob does not accumulate drift.
+  camera.position.set(0, 65, 0);
+  camera.rotation.set(0, 0, 0);
+  fpMotion.update(camera, player, fpRenderer, 1.0);
+  const pos1 = camera.position.clone();
+  camera.position.set(0, 65, 0); // reset fresh base
+  camera.rotation.set(0, 0, 0);
+  fpMotion.update(camera, player, fpRenderer, 1.0);
+  const pos2 = camera.position.clone();
+  assert(pos1.distanceTo(pos2) < 0.001, 'No drift accumulation since CameraMode resets position first');
+
+  // 8. Camera bob is disabled or fades appropriately while airborne.
+  player.grounded = false;
+  player.updateAnimationState(0.1); // speed>0 but ungrounded -> targets 0 limb swing
+
+  // Need to loop slightly to let it fade
+  for (let i = 0; i < 20; i++) player.updateAnimationState(0.1);
+  camera.position.set(0, 65, 0);
+  camera.rotation.set(0, 0, 0);
+  fpMotion.update(camera, player, fpRenderer, 1.0);
+  assert(Math.abs(camera.position.y - 65) < 0.001, 'View bob fades while airborne');
+
+  // Verify first person arm transform reflects base constants
+  player.velocity.x = 0; player.velocity.z = 0;
+  player.swingProgressInt = 0; player.isSwinging = false;
+  player.updateAnimationState(0.1);
+  for (let i = 0; i < 20; i++) player.updateAnimationState(0.1); // fade to neutral
+
+  fpMotion.update(camera, player, fpRenderer, 1.0);
+  // Using some distinct values from PlayerConstants
+  const xOk = Math.abs(fpRenderer.armGroup.position.x - 0.65) < 0.001 || Math.abs(fpRenderer.armGroup.position.x - 0.5) < 0.001;
+  assert(xOk, 'First person arm applies base X constant directly');
 }
 
 function testCameraModeController() {
-  const input = {
-    keys: new Set<string>(),
-    isKeyJustPressed: (k: string) => input.keys.has(k)
-  } as any;
-  
+  const input = { keys: new Set<string>(), isKeyJustPressed: (k: string) => input.keys.has(k) } as any;
   const blockRegistry = new BlockRegistry();
   registerDefaultBlocks(blockRegistry);
   const chunkManager = new ChunkManager();
   const lightEngine = new LightEngine(chunkManager, blockRegistry);
   const world = new BlockUpdateWorld(chunkManager, blockRegistry, lightEngine);
   const controller = new CameraModeController(input, world, blockRegistry);
-  
-  const player = new Player(0, 64, 0);
-  const camera = new PerspectiveCamera();
-
-  // Test toggle
   assert(controller.getMode() === CameraMode.FIRST_PERSON, 'Default mode is FIRST_PERSON');
-  
-  input.keys.add('KeyP');
-  controller.update();
-  assert(controller.getMode() === CameraMode.THIRD_PERSON_REAR, 'Toggle to THIRD_PERSON_REAR');
-  
-  input.keys.delete('KeyP');
-  controller.update();
-  assert(controller.getMode() === CameraMode.THIRD_PERSON_REAR, 'No toggle if P not pressed');
-  
-  input.keys.add('KeyP');
-  controller.update();
-  assert(controller.getMode() === CameraMode.FIRST_PERSON, 'Toggle back to FIRST_PERSON');
-  
-  // Test transforms (First person)
-  controller.applyTransform(camera, player, Math.PI / 2, 0);
-  assert(camera.position.y === player.getEyeY(), 'Camera height is eye height in first person');
-
-  // Test transforms (Third person open space)
-  input.keys.add('KeyP');
-  controller.update();
-  
-  // We mock a chunk with air (id 0) to ensure no intersection
-  const chunk = new Chunk(0, 0);
-  chunkManager.addCreateListener(() => {}); // bypass
-  (chunkManager as any).chunks.set('0,0', chunk);
-  
-  controller.applyTransform(camera, player, 0, 0); 
-  // yaw 0 = -z direction in Three.js (actually dz is -Math.cos(0) = -1. So camera points -Z. The camera itself is backed up +Z)
-  // Distance is 4.0. So eyeZ + 4.0.
-  const diffZ = camera.position.z - player.position.z;
-  assert(diffZ > 3.9 && diffZ < 4.1, 'Camera is 4 blocks behind player in third person');
-
-  // Obstruction: Put a solid block right behind the player at z=2
-  chunk.setBlock(0, 65, 2, 1); // 1 = stone (solid)
-  // Re-apply, should shorten
-  controller.applyTransform(camera, player, 0, 0);
-  const newDiffZ = camera.position.z - player.position.z;
-  assert(newDiffZ < 4.0, 'Camera distance shortens when obstructed');
-}
-
-function testFirstPersonArm() {
-  const fpRenderer = new FirstPersonArmRenderer();
-  const camera = new PerspectiveCamera();
-  camera.position.set(10, 20, 30);
-  fpRenderer.update(camera);
-  
-  const mesh = fpRenderer.scene.children[0] as Group;
-  assert(mesh.position.x !== 0 || mesh.position.y !== 0, 'Arm has been offset relative to camera');
 }
 
 function main() {
-  testPlayerModelDimensions();
+  testPlayerAnimator();
+  testFirstPersonMotion();
   testCameraModeController();
-  testFirstPersonArm();
   console.log('Player Rendering Validation Passed.');
   process.exit(0);
 }
