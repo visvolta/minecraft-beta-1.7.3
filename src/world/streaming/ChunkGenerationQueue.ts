@@ -156,6 +156,7 @@ export class ChunkGenerationQueue {
       const t0 = performance.now();
       const chunk = this.chunkManager.getOrCreateChunk(next.chunkX, next.chunkZ);
       this.fallbackGenerator.populate(chunk);
+      chunk.setTerrainPopulated(true);
       const duration = performance.now() - t0;
       this.recordDuration(duration);
       this.completed += 1;
@@ -273,6 +274,7 @@ export class ChunkGenerationQueue {
       const chunk = this.chunkManager.getOrCreateChunk(result.chunkX, result.chunkZ);
       chunk.loadGeneratedBlocks(new Uint8Array(result.blocks));
       chunk.loadGeneratedMetadata(new Uint8Array(result.metadata));
+      chunk.setTerrainPopulated(true);
       this.recordDuration(result.durationMs);
       this.completed += 1;
       completed.push({ chunk, durationMs: result.durationMs });

@@ -4,6 +4,7 @@ import type { WorldGenerator } from './WorldGenerator';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from './chunkConstants';
 import type { LightEngine } from './generation/lighting/LightEngine';
 import { ChunkGenerationQueue, type ChunkGenerationStats } from './streaming/ChunkGenerationQueue';
+import type { ChunkPersistenceQueue } from '../persistence/queue/ChunkPersistenceQueue';
 
 /** Chebyshev radius (square) for loading chunks around the camera. */
 export const CHUNK_LOAD_RADIUS = 6;
@@ -33,7 +34,9 @@ export class ChunkStreamer {
   private readonly chunkRenderer: ChunkRenderer;
   private readonly lightEngine: LightEngine;
   private readonly generationQueue: ChunkGenerationQueue;
+  private readonly persistenceQueue: ChunkPersistenceQueue;
   private readonly desiredChunks = new Set<string>();
+  private readonly loadingChunks = new Set<string>();
 
   private lastChunkX: number | null = null;
   private lastChunkZ: number | null = null;
@@ -47,10 +50,12 @@ export class ChunkStreamer {
     chunkRenderer: ChunkRenderer,
     lightEngine: LightEngine,
     worldSeed: bigint,
+    persistenceQueue: ChunkPersistenceQueue,
   ) {
     this.chunkManager = chunkManager;
     this.chunkRenderer = chunkRenderer;
     this.lightEngine = lightEngine;
+    this.persistenceQueue = persistenceQueue;
     this.generationQueue = new ChunkGenerationQueue(chunkManager, generator, worldSeed);
   }
 
@@ -138,7 +143,7 @@ export class ChunkStreamer {
         const priority = distanceSq * 1000 - (critical ? 5000 : 0) - cameraBoost - movementBoost;
         this.desiredChunks.add(this.key(x, z));
 
-        if (!this.chunkManager.hasChunk(x, z)) {
+        if (!this.chunkManager.hasChunk(x, z) && !this.loadingChunks.has(this.key(x, z))) {
           toRequest.push({ x, z, priority, critical });
         }
       }
@@ -146,7 +151,7 @@ export class ChunkStreamer {
 
     toRequest.sort((a, b) => a.priority - b.priority);
     for (const request of toRequest) {
-      this.generationQueue.enqueue(request.x, request.z, request.priority, request.critical);
+      this.dispatchLoad(request.x, request.z, request.priority, request.critical);
     }
     this.generationQueue.cancelUndesired(this.desiredChunks);
 
@@ -160,14 +165,68 @@ export class ChunkStreamer {
 
       if (dist > CHUNK_UNLOAD_RADIUS) {
         toUnload.push({ x: chunk.chunkX, z: chunk.chunkZ });
+      } else {
+        this.persistenceQueue.cancelUnload(chunk);
       }
     }
 
     for (const { x, z } of toUnload) {
-      this.chunkRenderer.removeChunkMesh(x, z);
-      this.chunkManager.removeChunk(x, z);
-      this.markNeighboursDirty(x, z);
+      const chunk = this.chunkManager.getChunk(x, z);
+      if (chunk) {
+        if (!chunk.isPersistenceDirty()) {
+          this.chunkRenderer.removeChunkMesh(x, z);
+          this.chunkManager.removeChunk(x, z);
+          this.markNeighboursDirty(x, z);
+        } else {
+          this.persistenceQueue.requestUnload(chunk).then(() => {
+            if (!this.desiredChunks.has(this.key(x, z))) {
+              this.chunkRenderer.removeChunkMesh(x, z);
+              this.chunkManager.removeChunk(x, z);
+              this.markNeighboursDirty(x, z);
+            }
+          });
+        }
+      }
     }
+  }
+
+  private dispatchLoad(x: number, z: number, priority: number, critical: boolean): void {
+    const k = this.key(x, z);
+    this.loadingChunks.add(k);
+
+    this.persistenceQueue.enqueueRead(x, z).then(chunk => {
+      if (!this.desiredChunks.has(k)) {
+        this.loadingChunks.delete(k);
+        return;
+      }
+
+      if (chunk === 'corrupt') {
+        // Leave it as missing but block generation to prevent overwrite
+        const dummy = this.chunkManager.getOrCreateChunk(x, z);
+        dummy.markCorrupt();
+        this.loadingChunks.delete(k);
+      } else if (chunk === undefined) {
+        // Miss, fallback to generation
+        this.generationQueue.enqueue(x, z, priority, critical);
+        this.loadingChunks.delete(k);
+      } else {
+        // Hit, integrate chunk
+        const managed = this.chunkManager.getOrCreateChunk(x, z);
+        managed.loadGeneratedBlocks(chunk.copyBlocks());
+        managed.loadGeneratedMetadata(chunk.copyMetadata());
+        managed.loadLightData(chunk.copyLight());
+        const heightmap = chunk.copyHeightmap();
+        if (heightmap) managed.loadHeightmap(heightmap);
+        managed.setTerrainPopulated(chunk.isTerrainPopulated());
+        managed.getScheduledTicks().load(chunk.getScheduledTicks().drainAll());
+        managed.markPersistenceClean(chunk.getPersistenceRevision());
+
+        this.lightEngine.initializeChunkLighting(managed);
+        this.lightEngine.reconcileChunkBorders(managed);
+        this.markNeighboursDirty(managed.chunkX, managed.chunkZ);
+        this.loadingChunks.delete(k);
+      }
+    });
   }
 
   private markNeighboursDirty(chunkX: number, chunkZ: number): void {

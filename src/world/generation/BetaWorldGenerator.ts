@@ -87,6 +87,9 @@ export class BetaWorldGenerator implements WorldGenerator {
     // Runs after trees so snow doesn't appear under tree canopies.
     this.snowIceGenerator.apply(chunk.chunkX, chunk.chunkZ, raw.blocks, raw.climate);
 
-    chunk.loadGeneratedBlocks(raw.blocks);
+    if (!chunk.isTerrainPopulated()) {
+      chunk.loadGeneratedBlocks(raw.blocks);
+      chunk.setTerrainPopulated(true);
+    }
   }
 }

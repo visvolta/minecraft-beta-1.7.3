@@ -16,6 +16,8 @@
     "preview": "vite preview",
     "validate:trees": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateTrees.js",
     "validate:saves": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateSaves.js",
+    "validate:regions": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateRegions.js",
+    "validate:persistence-integration": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePersistenceIntegration.js",
     "validate:nbt": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateNbt.js"
   },
   "dependencies": {

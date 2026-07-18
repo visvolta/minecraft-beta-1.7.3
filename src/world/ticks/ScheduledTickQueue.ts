@@ -23,6 +23,11 @@ export class ScheduledTickQueue {
   private readonly sequences: number[] = [];
   private readonly keys = new Set<string>();
   private duplicateSuppressions = 0;
+  private readonly onMutate: (() => void) | undefined;
+
+  public constructor(onMutate?: () => void) {
+    this.onMutate = onMutate;
+  }
 
   public get size(): number {
     return this.blockIds.length;
@@ -63,6 +68,7 @@ export class ScheduledTickQueue {
     this.dueTicks.splice(insertAt, 0, dueTick);
     this.sequences.splice(insertAt, 0, sequence);
     this.keys.add(key);
+    this.onMutate?.();
     return true;
   }
 
@@ -81,6 +87,7 @@ export class ScheduledTickQueue {
     this.blockIds.shift();
     this.dueTicks.shift();
     this.sequences.shift();
+    this.onMutate?.();
     return entry;
   }
 
@@ -96,6 +103,14 @@ export class ScheduledTickQueue {
   public oldestAge(currentTick: number): number {
     if (this.dueTicks.length === 0) return 0;
     return Math.max(0, currentTick - this.dueTicks[0]!);
+  }
+
+  public getEntries(): readonly ScheduledTickEntry[] {
+    const entries: ScheduledTickEntry[] = [];
+    for (let i = 0; i < this.blockIds.length; i++) {
+      entries.push(this.entryAt(i));
+    }
+    return entries;
   }
 
   public drainAll(): ScheduledTickEntry[] {
@@ -121,6 +136,7 @@ export class ScheduledTickQueue {
     this.dueTicks.length = 0;
     this.sequences.length = 0;
     this.keys.clear();
+    this.onMutate?.();
   }
 
   private entryAt(index: number): ScheduledTickEntry {

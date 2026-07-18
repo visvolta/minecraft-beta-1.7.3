@@ -53,7 +53,11 @@ export class Chunk {
   private meshRevision = 0;
   private lightRevision = 0;
   private weatherRevision = 0;
-  private readonly scheduledTicks = new ScheduledTickQueue();
+  private persistenceRevision = 0;
+  private lastSavedRevision = 0;
+  private terrainPopulated = false;
+  private corrupt = false;
+  private readonly scheduledTicks = new ScheduledTickQueue(() => this.markPersistenceDirty());
 
   /**
    * Cached per-column height: for each (localX, localZ), one past the
@@ -95,6 +99,47 @@ export class Chunk {
     this.meshRevision += 1;
   }
 
+  private markPersistenceDirty(): void {
+    this.persistenceRevision += 1;
+  }
+
+  public getPersistenceRevision(): number {
+    return this.persistenceRevision;
+  }
+
+  public isPersistenceDirty(): boolean {
+    return this.persistenceRevision !== this.lastSavedRevision;
+  }
+
+  public markPersistenceClean(savedRevision: number): void {
+    if (this.lastSavedRevision < savedRevision) {
+      this.lastSavedRevision = savedRevision;
+    }
+  }
+
+  public markAsLoadedFromDisk(): void {
+    this.lastSavedRevision = this.persistenceRevision;
+  }
+
+  public isTerrainPopulated(): boolean {
+    return this.terrainPopulated;
+  }
+
+  public setTerrainPopulated(populated: boolean): void {
+    if (this.terrainPopulated !== populated) {
+      this.terrainPopulated = populated;
+      this.markPersistenceDirty();
+    }
+  }
+
+  public isCorrupt(): boolean {
+    return this.corrupt;
+  }
+
+  public markCorrupt(): void {
+    this.corrupt = true;
+  }
+
   public getRevision(): number {
     return this.meshRevision;
   }
@@ -124,6 +169,7 @@ export class Chunk {
     this.precipitationHeightmap = undefined;
     this.blockRevision += 1;
     this.weatherRevision += 1;
+    this.markPersistenceDirty();
     this.markDirty();
   }
 
@@ -166,8 +212,10 @@ export class Chunk {
       return;
     }
     const idx = this.index(localX, localY, localZ);
+    if ((this.light[idx]! & 0x0F) === (value & 0x0F)) return;
     this.light[idx] = (this.light[idx]! & 0xF0) | (value & 0x0F);
     this.lightRevision += 1;
+    this.markPersistenceDirty();
     this.markDirty();
   }
 
@@ -183,8 +231,10 @@ export class Chunk {
       return;
     }
     const idx = this.index(localX, localY, localZ);
+    if (((this.light[idx]! >> 4) & 0x0F) === (value & 0x0F)) return;
     this.light[idx] = (this.light[idx]! & 0x0F) | ((value & 0x0F) << 4);
     this.lightRevision += 1;
+    this.markPersistenceDirty();
     this.markDirty();
   }
 
@@ -214,6 +264,7 @@ export class Chunk {
     }
     this.metadata[idx] = value;
     this.metadataRevision += 1;
+    this.markPersistenceDirty();
     if (options.affectsWeather === true) {
       this.precipitationHeightmap = undefined;
       this.weatherRevision += 1;
@@ -357,12 +408,18 @@ export class Chunk {
     return new Uint8Array(this.light);
   }
 
+  public copyHeightmap(): Int16Array | undefined {
+    if (this.heightmap === undefined) return undefined;
+    return new Int16Array(this.heightmap);
+  }
+
   public loadGeneratedMetadata(data: Uint8Array): void {
     if (data.length !== CHUNK_VOLUME) {
       throw new RangeError(`Metadata array length ${data.length} does not match chunk volume ${CHUNK_VOLUME}.`);
     }
     this.metadata.set(data);
     this.metadataRevision += 1;
+    this.markPersistenceDirty();
     this.markDirty();
   }
 
@@ -371,7 +428,16 @@ export class Chunk {
       throw new RangeError(`Light array length ${data.length} does not match chunk volume ${CHUNK_VOLUME}.`);
     }
     this.light.set(data);
+    this.markPersistenceDirty();
     this.markDirty();
+  }
+
+  public loadHeightmap(data: Int16Array): void {
+    if (data.length !== CHUNK_SIZE_X * CHUNK_SIZE_Z) {
+      throw new RangeError(`Heightmap array length ${data.length} does not match ${CHUNK_SIZE_X * CHUNK_SIZE_Z}.`);
+    }
+    this.heightmap = new Int16Array(data);
+    this.markPersistenceDirty();
   }
 
   /**
