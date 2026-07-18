@@ -18,6 +18,7 @@
     "validate:saves": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateSaves.js",
     "validate:regions": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateRegions.js",
     "validate:persistence-integration": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePersistenceIntegration.js",
+    "validate:player-spawn": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePlayerSpawn.js",
     "validate:nbt": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateNbt.js"
   },
   "dependencies": {

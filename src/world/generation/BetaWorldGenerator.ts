@@ -71,6 +71,30 @@ export class BetaWorldGenerator implements WorldGenerator {
     this.snowIceGenerator = new SnowIceGenerator();
   }
 
+  public getFirstUncoveredBlock(worldX: number, worldZ: number): { blockId: number; height: number } {
+    const chunkX = Math.floor(worldX / 16);
+    const chunkZ = Math.floor(worldZ / 16);
+    const raw = this.terrainGenerator.generate(chunkX, chunkZ);
+    this.surfaceGenerator.apply(chunkX, chunkZ, raw.blocks, raw.climate);
+
+    // Normalize to 0-15. worldX & 15 is slightly incorrect for negative numbers in some languages,
+    // but in JS, bitwise ops are 32-bit signed ints, so `worldX & 15` correctly handles negatives mapping to 0-15.
+    const localX = worldX & 15;
+    const localZ = worldZ & 15;
+
+    let y = 63;
+    while (y < 127) {
+      const idx = localX + localZ * 16 + (y + 1) * 256;
+      if (raw.blocks[idx] === 0) {
+        break;
+      }
+      y++;
+    }
+
+    const blockIdx = localX + localZ * 16 + y * 256;
+    return { blockId: raw.blocks[blockIdx]!, height: y };
+  }
+
   public populate(chunk: Chunk): void {
     const raw = this.terrainGenerator.generate(chunk.chunkX, chunk.chunkZ);
     this.surfaceGenerator.apply(chunk.chunkX, chunk.chunkZ, raw.blocks, raw.climate);

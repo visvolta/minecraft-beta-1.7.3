@@ -51,6 +51,9 @@ import { WorkerValidationHarness } from '../debug/WorkerValidationHarness';
 import { BlockTestGrid } from '../debug/BlockTestGrid';
 import type { IUpdatable } from './IUpdatable';
 import type { WorldSaveCoordinator } from '../persistence/coordinator/WorldSaveCoordinator';
+import { RegionCoordinator } from '../persistence/queue/RegionCoordinator';
+import { ChunkPersistenceQueue } from '../persistence/queue/ChunkPersistenceQueue';
+import type { WorldStorage } from '../persistence/storage/WorldStorage';
 import type { WorldMetadata } from '../persistence/metadata/WorldMetadata';
 
 /** Maximum delta (seconds) applied in one frame after tab focus / hitch. */
@@ -130,17 +133,21 @@ export class Engine {
 
   private running = false;
   private animationFrameId: number | null = null;
+  private readonly regionCoordinator: RegionCoordinator;
+  private readonly chunkPersistenceQueue: ChunkPersistenceQueue;
   private lastFrameTimeMs: number | null = null;
   private lastMetadataAutosaveMs = 0;
   private metadataSaveInFlight: Promise<void> | null = null;
-  private readonly onPageHideBound = (): void => { void this.saveMetadata(true); };
 
-  public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator) {
+  public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator, private readonly storage: WorldStorage) {
     const metadata = saveCoordinator.getMetadata();
     const worldSeed = BigInt(metadata.seed);
     this.atlas = atlas;
     this.chunkManager = new ChunkManager();
     this.worldGenerator = new BetaWorldGenerator(worldSeed);
+    this.regionCoordinator = new RegionCoordinator(this.storage, metadata.worldId);
+    this.chunkPersistenceQueue = new ChunkPersistenceQueue(this.regionCoordinator);
+    this.saveCoordinator.attachPersistence(this.chunkManager, this.chunkPersistenceQueue);
     this.worldTime = new WorldTime();
     this.worldTime.setTotalTicks(metadata.timeTicks);
 
@@ -260,6 +267,7 @@ export class Engine {
       this.chunkRenderer,
       this.lightEngine,
       worldSeed,
+      this.chunkPersistenceQueue,
     );
 
     this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
@@ -461,8 +469,6 @@ export class Engine {
   }
 
   public start(): void {
-    window.addEventListener('pagehide', this.onPageHideBound);
-    window.addEventListener('beforeunload', this.onPageHideBound);
     if (this.running) {
       return;
     }
@@ -630,8 +636,16 @@ export class Engine {
     if (this.noClipEnabled) {
       this.debugController.update(deltaSeconds);
     } else {
-      this.playerController.update();
-      this.playerPhysics.update(this.player, deltaSeconds);
+      const chunkX = Math.floor(this.player.position.x / 16);
+      const chunkZ = Math.floor(this.player.position.z / 16);
+      if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
+        this.playerController.update();
+        this.playerPhysics.update(this.player, deltaSeconds);
+      } else {
+        // Pause physics if the containing chunk is not yet loaded
+        // Ensure streamer knows this is the highest priority chunk
+        this.chunkStreamer.dispatchCriticalLoad(chunkX, chunkZ);
+      }
     }
 
     // 7. Move camera to the player's eye position

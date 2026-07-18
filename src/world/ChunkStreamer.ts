@@ -59,6 +59,13 @@ export class ChunkStreamer {
     this.generationQueue = new ChunkGenerationQueue(chunkManager, generator, worldSeed);
   }
 
+  public dispatchCriticalLoad(chunkX: number, chunkZ: number): void {
+    if (!this.chunkManager.hasChunk(chunkX, chunkZ) && !this.loadingChunks.has(this.key(chunkX, chunkZ))) {
+      this.desiredChunks.add(this.key(chunkX, chunkZ));
+      this.dispatchLoad(chunkX, chunkZ, -1000000, true);
+    }
+  }
+
   /**
    * Re-evaluates the loaded set when first run or when the camera chunk changes.
    */
