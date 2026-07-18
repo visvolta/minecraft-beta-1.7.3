@@ -41,9 +41,10 @@ export class CameraController {
   }
 
   /** Current yaw in radians, needed by PlayerController to move relative to look direction. */
-  public getYaw(): number {
-    return this.yaw;
-  }
+  public getYaw(): number { return this.yaw; }
+  public getPitch(): number { return this.pitch; }
+  /** Restores persisted view before the first frame. */
+  public setRotation(yaw: number, pitch: number): void { this.yaw = yaw; this.pitch = THREE.MathUtils.clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT); this.applyRotation(); }
 
   private applyRotation(): void {
     this.camera.rotation.y = this.yaw;

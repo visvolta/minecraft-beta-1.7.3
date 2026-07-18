@@ -172,4 +172,10 @@ export class WorldTime {
     const day = this.getDayNumber();
     this.ticks = day * TICKS_PER_DAY + targetTicks;
   }
+  /** Persistence restoration; total ticks are the authoritative world-time value. */
+  public setTotalTicks(ticks: number): void {
+    if (!Number.isFinite(ticks) || ticks < 0) throw new Error('Invalid persisted world time');
+    this.ticks = Math.floor(ticks);
+  }
+
 }

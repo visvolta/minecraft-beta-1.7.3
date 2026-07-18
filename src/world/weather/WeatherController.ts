@@ -78,6 +78,10 @@ export class WeatherController {
     return this.state;
   }
 
+  public restore(state: { readonly raining: boolean; readonly thundering: boolean; readonly rainTime: number; readonly thunderTime: number }): void {
+    this.state.raining = state.raining; this.state.thundering = state.thundering; this.state.rainTime = state.rainTime; this.state.thunderTime = state.thunderTime;
+  }
+
   private tickOnce(): void {
     if (this.forced === null) {
       // Beta updateWeather() — thunder timer first, then rain timer.

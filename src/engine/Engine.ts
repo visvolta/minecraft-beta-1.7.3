@@ -50,6 +50,8 @@ import { PerformanceProfiler } from '../debug/PerformanceProfiler';
 import { WorkerValidationHarness } from '../debug/WorkerValidationHarness';
 import { BlockTestGrid } from '../debug/BlockTestGrid';
 import type { IUpdatable } from './IUpdatable';
+import type { WorldSaveCoordinator } from '../persistence/coordinator/WorldSaveCoordinator';
+import type { WorldMetadata } from '../persistence/metadata/WorldMetadata';
 
 /** Maximum delta (seconds) applied in one frame after tab focus / hitch. */
 const MAX_DELTA_SECONDS = 0.1;
@@ -62,7 +64,7 @@ const MAX_DELTA_SECONDS = 0.1;
  *
  * Keep this in sync with scripts/verifyDefaultSeedHealth.ts.
  */
-const WORLD_SEED = -47n;
+const METADATA_AUTOSAVE_MS = 30_000;
 
 /**
  * Player spawn (feet position). Fixed X/Z with a generously high Y so the
@@ -70,9 +72,6 @@ const WORLD_SEED = -47n;
  * unlike the old flat world) and falls onto it under gravity + collision.
  * No spawn search or saved spawn data yet — fixed for this stage.
  */
-const SPAWN_X = 8;
-const SPAWN_Y = 140;
-const SPAWN_Z = 8;
 
 /**
  * Application lifecycle and game loop.
@@ -132,12 +131,18 @@ export class Engine {
   private running = false;
   private animationFrameId: number | null = null;
   private lastFrameTimeMs: number | null = null;
+  private lastMetadataAutosaveMs = 0;
+  private metadataSaveInFlight: Promise<void> | null = null;
+  private readonly onPageHideBound = (): void => { void this.saveMetadata(true); };
 
-  public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas) {
+  public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator) {
+    const metadata = saveCoordinator.getMetadata();
+    const worldSeed = BigInt(metadata.seed);
     this.atlas = atlas;
     this.chunkManager = new ChunkManager();
-    this.worldGenerator = new BetaWorldGenerator(WORLD_SEED);
+    this.worldGenerator = new BetaWorldGenerator(worldSeed);
     this.worldTime = new WorldTime();
+    this.worldTime.setTotalTicks(metadata.timeTicks);
 
     this.renderer = new Renderer();
 
@@ -146,8 +151,9 @@ export class Engine {
       this.renderer.camera,
       this.input,
     );
+    this.cameraController.setRotation(metadata.player.yaw, metadata.player.pitch);
 
-    this.player = new Player(SPAWN_X, SPAWN_Y, SPAWN_Z);
+    this.player = new Player(metadata.player.x, metadata.player.y, metadata.player.z);
     this.playerController = new PlayerController(
       this.input,
       this.cameraController,
@@ -164,9 +170,9 @@ export class Engine {
     registerPlantBehaviours(this.blockBehaviourRegistry, blockRegistry);
     registerSupportBehaviours(this.blockBehaviourRegistry, blockRegistry);
     // Fire needs WeatherController + ChunkManager for rain/sky-exposure checks.
-    const sessionSeed = BigInt(Date.now()) & 0xffffffffffffffffn;
-    this.weatherController = new WeatherController(sessionSeed);
-    this.precipitationSimulator = new PrecipitationSimulator(sessionSeed);
+    this.weatherController = new WeatherController(worldSeed);
+    this.weatherController.restore(metadata.weather);
+    this.precipitationSimulator = new PrecipitationSimulator(worldSeed);
     registerFireBehaviour(this.blockBehaviourRegistry, blockRegistry, this.weatherController, this.chunkManager);
     registerSnowIceBehaviours(this.blockBehaviourRegistry);
     registerFallingBlockBehaviours(this.blockBehaviourRegistry, blockRegistry, this.fallingBlockManager);
@@ -176,7 +182,7 @@ export class Engine {
     (this as any)._leafBehaviour = leafBehaviour;
     (this as any)._logBehaviour = logBehaviour;
 
-    const randomTickScheduler = new RandomTickScheduler(WORLD_SEED);
+    const randomTickScheduler = new RandomTickScheduler(worldSeed);
     this.worldTickScheduler = new WorldTickScheduler(
       this.chunkManager,
       this.blockUpdateWorld,
@@ -211,7 +217,7 @@ export class Engine {
     this.cloudRenderer = new CloudRenderer(this.renderer.scene);
 
     // Stage 18: weather. WeatherController already created above for fire.
-    this.climateSampler = new ClimateSampler(WORLD_SEED);
+    this.climateSampler = new ClimateSampler(worldSeed);
     this.precipitationRenderer = new PrecipitationRenderer(
       this.renderer.scene,
       this.chunkManager,
@@ -223,7 +229,7 @@ export class Engine {
     this.lightningManager = new LightningManager(
       this.chunkManager,
       blockRegistry,
-      sessionSeed,
+      worldSeed,
     );
     this.lightningRenderer = new LightningRenderer(this.renderer.scene);
 
@@ -246,14 +252,14 @@ export class Engine {
       this.atlas,
       this.fluidAnimationSystem,
       this.fireAnimationSystem,
-      WORLD_SEED,
+      worldSeed,
     );
     this.chunkStreamer = new ChunkStreamer(
       this.chunkManager,
       this.worldGenerator,
       this.chunkRenderer,
       this.lightEngine,
-      WORLD_SEED,
+      worldSeed,
     );
 
     this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
@@ -276,7 +282,7 @@ export class Engine {
       this.rainSplashRenderer,
       this.lightningRenderer,
       this.renderer.renderer,
-      WORLD_SEED,
+      worldSeed,
       this.worldTime,
       this.performanceProfiler,
       this.worldTickScheduler,
@@ -284,8 +290,14 @@ export class Engine {
       this.worldEventQueue,
     );
 
-    const validationHarness = new WorkerValidationHarness(WORLD_SEED, this.atlas);
+    const validationHarness = new WorkerValidationHarness(worldSeed, this.atlas);
     (window as unknown as { __mcDebug?: Record<string, unknown> }).__mcDebug = {
+      saveWorldMetadata: () => this.saveMetadata(true),
+      // Compatibility alias: metadata only; blocks, chunks, inventory, and entities are not persisted.
+      saveWorld: () => this.saveMetadata(true),
+      getSaveMetrics: () => this.saveCoordinator.getMetrics(),
+      inspectWorldMetadata: () => this.saveCoordinator.getMetadata(),
+      isWorldDirty: () => this.saveCoordinator.isDirty(),
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
       validateMeshWorkers: () => validationHarness.validateMeshWorker(),
       getTickMetrics: () => this.worldTickScheduler.getMetrics(),
@@ -449,6 +461,8 @@ export class Engine {
   }
 
   public start(): void {
+    window.addEventListener('pagehide', this.onPageHideBound);
+    window.addEventListener('beforeunload', this.onPageHideBound);
     if (this.running) {
       return;
     }
@@ -594,6 +608,11 @@ export class Engine {
 
     // 3. Advance world time and world block-tick infrastructure.
     this.worldTime.update(deltaSeconds);
+    const now = performance.now();
+    if (now - this.lastMetadataAutosaveMs >= METADATA_AUTOSAVE_MS) {
+      this.lastMetadataAutosaveMs = now;
+      void this.saveMetadata(false);
+    }
     this.worldTickScheduler.update(deltaSeconds);
     this.fallingBlockManager.update(deltaSeconds);
     this.worldEventQueue.drainNoop();
@@ -797,4 +816,17 @@ export class Engine {
     this.performanceProfiler.endRender();
     this.performanceProfiler.endFrame();
   };
+  private snapshotMetadata(): WorldMetadata {
+    const current = this.saveCoordinator.getMetadata();
+    const weather = this.weatherController.getState();
+    return { ...current, player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime } };
+  }
+
+  private async saveMetadata(force: boolean): Promise<void> {
+    if (this.metadataSaveInFlight !== null) return this.metadataSaveInFlight;
+    this.saveCoordinator.update(this.snapshotMetadata());
+    this.metadataSaveInFlight = this.saveCoordinator.save(force).finally(() => { this.metadataSaveInFlight = null; });
+    return this.metadataSaveInFlight;
+  }
+
 }

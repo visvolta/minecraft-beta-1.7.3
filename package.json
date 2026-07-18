@@ -14,7 +14,9 @@
     "validate:leaf-decay": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateLeafDecay.js",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "validate:trees": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateTrees.js"
+    "validate:trees": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateTrees.js",
+    "validate:saves": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateSaves.js",
+    "validate:nbt": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateNbt.js"
   },
   "dependencies": {
     "three": "^0.185.1"

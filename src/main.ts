@@ -3,6 +3,7 @@ import { BlockRegistry } from './blocks/BlockRegistry';
 import { registerDefaultBlocks } from './blocks/registerDefaultBlocks';
 import { AssetManager } from './assets/AssetManager';
 import { Engine } from './engine/Engine';
+import { openDefaultWorld } from './persistence/WorldPersistence';
 
 async function bootstrap(): Promise<void> {
   const blockRegistry = new BlockRegistry();
@@ -11,7 +12,8 @@ async function bootstrap(): Promise<void> {
   // Nothing renders until the block texture atlas has finished loading.
   const atlas = await AssetManager.loadBlockAtlas(blockRegistry);
 
-  const engine = new Engine(blockRegistry, atlas);
+  const saveCoordinator = await openDefaultWorld();
+  const engine = new Engine(blockRegistry, atlas, saveCoordinator);
   engine.start();
 }
 
