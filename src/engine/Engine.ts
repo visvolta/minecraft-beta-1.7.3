@@ -55,6 +55,9 @@ import { RegionCoordinator } from '../persistence/queue/RegionCoordinator';
 import { ChunkPersistenceQueue } from '../persistence/queue/ChunkPersistenceQueue';
 import type { WorldStorage } from '../persistence/storage/WorldStorage';
 import type { WorldMetadata } from '../persistence/metadata/WorldMetadata';
+import { PlayerModel } from '../player/PlayerModel';
+import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
+import { CameraModeController, CameraMode } from '../camera/CameraModeController';
 
 /** Maximum delta (seconds) applied in one frame after tab focus / hitch. */
 const MAX_DELTA_SECONDS = 0.1;
@@ -138,6 +141,9 @@ export class Engine {
   private lastFrameTimeMs: number | null = null;
   private lastMetadataAutosaveMs = 0;
   private metadataSaveInFlight: Promise<void> | null = null;
+  private readonly playerModel: PlayerModel;
+  private readonly firstPersonArmRenderer: FirstPersonArmRenderer;
+  private readonly cameraModeController: CameraModeController;
 
   public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator, private readonly storage: WorldStorage) {
     const metadata = saveCoordinator.getMetadata();
@@ -170,6 +176,12 @@ export class Engine {
 
     this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
+    this.cameraModeController = new CameraModeController(this.input, this.blockUpdateWorld, blockRegistry);
+    this.playerModel = new PlayerModel();
+    this.firstPersonArmRenderer = new FirstPersonArmRenderer();
+    
+    this.renderer.scene.add(this.playerModel.root);
+
     this.blockBehaviourRegistry = new BlockBehaviourRegistry();
     this.worldEventQueue = new WorldEventQueue();
     this.fallingBlockManager = new FallingBlockManager(this.blockUpdateWorld, blockRegistry, this.chunkManager, this.renderer.scene, atlas, this.worldEventQueue);
@@ -648,13 +660,34 @@ export class Engine {
       }
     }
 
-    // 7. Move camera to the player's eye position
+    // 7. Apply Camera Mode and Transform
+    this.cameraModeController.update();
     const camera = this.renderer.camera;
-    camera.position.set(
-      this.player.position.x,
-      this.player.getEyeY(),
-      this.player.position.z,
+    this.cameraModeController.applyTransform(
+      camera, 
+      this.player, 
+      this.cameraController.getYaw(), 
+      this.cameraController.getPitch()
     );
+
+    // 7a. Update Player Model and Visibility Rules
+    if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
+      this.playerModel.setVisible(false);
+      this.firstPersonArmRenderer.setVisible(true);
+      this.firstPersonArmRenderer.update(camera);
+    } else {
+      this.playerModel.setVisible(true);
+      this.firstPersonArmRenderer.setVisible(false);
+      
+      this.playerModel.updateTransforms(
+        this.player.position.x, 
+        this.player.position.y, 
+        this.player.position.z, 
+        this.cameraController.getYaw(), 
+        this.cameraController.getYaw(), 
+        this.cameraController.getPitch()
+      );
+    }
 
     // 7b. Stage 18: advance weather simulation. Renderer-independent;
     //     only produces a WeatherState the rest of the frame reads from.
@@ -826,7 +859,19 @@ export class Engine {
     // debug overlay is a separate plain-HTML element composited by the
     // browser on top, not part of this render call).
     this.performanceProfiler.beginRender();
+    
+    // Clear whole buffer before world render
+    this.renderer.renderer.clear();
+    
+    // Render world
     this.renderer.render();
+
+    // Render first-person arm layer over the world (no depth clash)
+    if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
+      this.renderer.renderer.clearDepth();
+      this.renderer.renderer.render(this.firstPersonArmRenderer.scene, camera);
+    }
+    
     this.performanceProfiler.endRender();
     this.performanceProfiler.endFrame();
   };

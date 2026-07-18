@@ -77,6 +77,7 @@ export class Renderer {
     );
 
     this.renderer = new THREE.WebGLRenderer({ antialias: false });
+    this.renderer.autoClear = false; // We handle clearing manually now
     this.renderer.setPixelRatio(PIXEL_RATIO);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
