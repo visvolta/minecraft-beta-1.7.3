@@ -7,6 +7,7 @@ import { PlayerController } from '../player/PlayerController';
 import { InteractionController } from '../player/InteractionController';
 import { PlayerPhysics } from '../physics/PlayerPhysics';
 import { BlockHighlight } from '../rendering/BlockHighlight';
+import { DestroyOverlayRenderer } from '../rendering/DestroyOverlayRenderer.ts';
 import { ChunkRenderer, attachEntityLighting } from '../rendering/ChunkRenderer';
 import { FogController } from '../rendering/FogController';
 import { Renderer } from '../rendering/Renderer';
@@ -129,6 +130,7 @@ export class Engine {
   private readonly playerPhysics: PlayerPhysics;
   private readonly interactionController: InteractionController;
   private readonly blockHighlight: BlockHighlight;
+  private readonly destroyOverlayRenderer: DestroyOverlayRenderer;
   private readonly atlas: TextureAtlas;
   private readonly chunkManager: ChunkManager;
   private readonly worldGenerator: BetaWorldGenerator;
@@ -288,18 +290,6 @@ export class Engine {
     this.firstPersonArmRenderer.armGroup.add(this.firstPersonHeldBlockMesh);
     this.playerModel.rightArmGroup.add(this.thirdPersonHeldBlockMesh);
 
-    // Unmistakable magenta debug cube for visual validation of first-person held-block rendering
-    const debugGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
-    const debugMat = new THREE.MeshBasicMaterial({
-      color: 0xff00ff,
-      depthTest: false,
-      depthWrite: false,
-    });
-    const debugHeldBlockMesh = new THREE.Mesh(debugGeo, debugMat);
-    // Align with the hand in the first-person arm mesh group
-    debugHeldBlockMesh.position.set(0.0, -0.625, -0.125);
-    this.firstPersonArmRenderer.armGroup.add(debugHeldBlockMesh);
-
     this.renderer.scene.add(this.playerModel.root);
 
     this.blockBehaviourRegistry = new BlockBehaviourRegistry();
@@ -381,6 +371,12 @@ export class Engine {
       this.blockUpdateWorld,
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
+    this.destroyOverlayRenderer = new DestroyOverlayRenderer(
+      this.renderer.scene,
+      atlas,
+      blockRegistry,
+      this.blockUpdateWorld,
+    );
     this.fluidAnimationSystem = new FluidAnimationSystem();
     this.fireAnimationSystem = new FireAnimationSystem();
 
@@ -629,6 +625,7 @@ export class Engine {
     this.input.stop();
     this.debugOverlay.dispose();
     this.blockHighlight.dispose();
+    this.destroyOverlayRenderer.dispose();
     this.chunkStreamer.dispose();
     this.fallingBlockManager.dispose();
     this.lightningRenderer.dispose();
@@ -802,6 +799,16 @@ export class Engine {
     if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
       this.playerModel.setVisible(false);
       this.firstPersonArmRenderer.setVisible(true);
+
+      const isHoldingBlock = this.interactionController.getSelectedBlockId() !== 0;
+      if (isHoldingBlock) {
+        // Hide the bare arm, but keep the armGroup visible so held block is rendered
+        this.firstPersonArmRenderer.setArmMeshVisible(false);
+      } else {
+        // Show the bare arm
+        this.firstPersonArmRenderer.setArmMeshVisible(true);
+      }
+
       this.firstPersonMotionController.update(camera, this.player, this.firstPersonArmRenderer, 1.0);
     } else {
       this.playerModel.setVisible(true);
@@ -907,7 +914,7 @@ export class Engine {
     );
 
     // 10. Update interaction (raycast targeting + break/place edits)
-    this.interactionController.update();
+    this.interactionController.update(deltaSeconds);
 
     // 10a. Update held block selection if changed
     const currentBlockId = this.interactionController.getSelectedBlockId();
@@ -985,6 +992,11 @@ export class Engine {
 
     // 13. Update the block highlight to match the current target
     this.blockHighlight.setTarget(this.interactionController.getCurrentHit()?.blockPos);
+
+    // Update the block breaking destroy crack overlay
+    const activeMiningPos = this.interactionController.breakingController.getMiningBlockPos();
+    const progress = this.interactionController.breakingController.getProgress();
+    this.destroyOverlayRenderer.update(activeMiningPos, progress);
 
     // 14. Update debug overlay stats. Frame timing is recorded every
     // frame (so FPS smoothing stays accurate even while the overlay is

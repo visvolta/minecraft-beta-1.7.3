@@ -7,11 +7,12 @@ import type { Input } from '../input/Input';
 import { AABB } from '../physics/AABB';
 import type { Player } from './Player';
 import type { ChunkManager } from '../world/ChunkManager';
-import { AIR_BLOCK_ID, CHUNK_SIZE_Y } from '../world/chunkConstants';
+import { CHUNK_SIZE_Y } from '../world/chunkConstants';
 import type { RaycastHit } from '../world/Raycaster';
 import { Raycaster } from '../world/Raycaster';
 import { worldToChunkLocal } from '../world/worldToChunkCoords';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
+import { BreakingController } from './BreakingController';
 
 /** Maximum block interaction reach, in blocks. */
 export const INTERACTION_REACH = 4.75;
@@ -43,6 +44,7 @@ export class InteractionController {
   private readonly blockRegistry: BlockRegistry;
   private readonly raycaster: Raycaster;
   private readonly blockUpdateWorld: BlockUpdateWorld;
+  public readonly breakingController: BreakingController;
 
   private readonly lookDirection = new THREE.Vector3();
 
@@ -62,8 +64,9 @@ export class InteractionController {
     this.player = player;
     this.chunkManager = chunkManager;
     this.blockRegistry = blockRegistry;
-    this.raycaster = new Raycaster(chunkManager, blockRegistry);
     this.blockUpdateWorld = blockUpdateWorld;
+    this.raycaster = new Raycaster(chunkManager, blockRegistry);
+    this.breakingController = new BreakingController(player, chunkManager, blockRegistry, blockUpdateWorld);
   }
 
   /** Currently targeted block, if any (for BlockHighlight to render). */
@@ -82,7 +85,7 @@ export class InteractionController {
    * before dirty chunk meshes are rebuilt (so edits this frame are picked
    * up in the same frame's rebuild pass).
    */
-  public update(): void {
+  public update(deltaSeconds: number): void {
     this.updateSelectedBlock();
 
     this.camera.getWorldDirection(this.lookDirection);
@@ -93,6 +96,9 @@ export class InteractionController {
       INTERACTION_REACH,
     );
 
+    const isLeftClickHeld = this.input.isMouseButtonPressed('left');
+    this.breakingController.update(this.currentHit, isLeftClickHeld, deltaSeconds);
+
     if (this.currentHit === undefined) {
       if (this.input.isMouseButtonJustPressed('left')) {
         this.player.swingItem();
@@ -102,10 +108,7 @@ export class InteractionController {
       return;
     }
 
-    if (this.input.isMouseButtonJustPressed('left')) {
-      this.breakBlock(this.currentHit);
-      this.player.swingItem();
-    } else if (this.input.isMouseButtonJustPressed('right')) {
+    if (this.input.isMouseButtonJustPressed('right')) {
       this.placeBlock(this.currentHit);
       this.player.swingItem();
     }
@@ -122,11 +125,6 @@ export class InteractionController {
         this.selectedBlockId = blockId;
       }
     }
-  }
-
-  /** Replaces the targeted block with Air. Air itself is never a valid hit. */
-  private breakBlock(hit: RaycastHit): void {
-    this.setBlock(hit.blockPos.x, hit.blockPos.y, hit.blockPos.z, AIR_BLOCK_ID);
   }
 
   /** Places the selected block adjacent to the hit face, if the position is valid. */

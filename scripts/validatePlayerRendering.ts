@@ -11,6 +11,8 @@ import { registerDefaultBlocks } from '../src/blocks/registerDefaultBlocks.ts';
 import { LightEngine } from '../src/world/generation/lighting/LightEngine.ts';
 import { BlockUpdateWorld } from '../src/world/BlockUpdateWorld.ts';
 import { ANIMATION_ARM_SWING_LIMIT } from '../src/player/PlayerConstants.ts';
+import { BreakingController } from '../src/player/BreakingController.ts';
+import { BlockIds } from '../src/blocks/BlockId.ts';
 
 function assert(v: boolean, m: string) {
   if (!v) {
@@ -136,9 +138,81 @@ function testCameraModeController() {
   assert(controller.getMode() === CameraMode.FIRST_PERSON, 'Default mode is FIRST_PERSON');
 }
 
+function testFirstPersonArmRenderer() {
+  const fpRenderer = new FirstPersonArmRenderer();
+
+  // Initially arm and sleeve meshes should be visible by default
+  assert(fpRenderer.armMesh.visible === true, 'Arm mesh is visible by default');
+
+  // After calling setArmMeshVisible(false), both should be invisible
+  fpRenderer.setArmMeshVisible(false);
+  assert(fpRenderer.armMesh.visible === false, 'Arm mesh can be hidden');
+  assert(fpRenderer.sleeveMesh.visible === false, 'Sleeve mesh can be hidden');
+
+  // After calling setArmMeshVisible(true), armMesh should be visible again
+  fpRenderer.setArmMeshVisible(true);
+  assert(fpRenderer.armMesh.visible === true, 'Arm mesh can be shown');
+}
+
+function testBreakingController() {
+  const player = new Player(0, 64, 0);
+  player.grounded = true;
+  const chunkManager = new ChunkManager();
+  const blockRegistry = new BlockRegistry();
+  registerDefaultBlocks(blockRegistry);
+  const lightEngine = new LightEngine(chunkManager, blockRegistry);
+  const world = new BlockUpdateWorld(chunkManager, blockRegistry, lightEngine);
+
+  // Initialize a mock chunk so we can set blocks
+  const chunk = chunkManager.getOrCreateChunk(0, 0);
+  chunk.setBlock(0, 64, 0, BlockIds.Bedrock);
+
+  const breaking = new BreakingController(player, chunkManager, blockRegistry, world);
+
+  const bedrockHit = {
+    blockPos: { x: 0, y: 64, z: 0 },
+    face: { x: 0, y: 1, z: 0 },
+    distance: 1.0,
+  } as any;
+
+  breaking.update(bedrockHit, true, 0.05); // 1 tick (0.05s)
+  assert(breaking.getProgress() === 0.0, 'Bedrock cannot be cracked or broken');
+
+  // Grass
+  world.setBlock(0, 64, 0, BlockIds.Grass, { reason: 'player', notifyNeighbours: false, updateLighting: false });
+  breaking.reset();
+
+  for (let i = 0; i < 17; i++) {
+    breaking.update(bedrockHit, true, 0.05);
+  }
+  assert(breaking.getProgress() < 1.0 && breaking.getProgress() > 0.0, 'Grass not broken in 17 ticks');
+
+  breaking.update(bedrockHit, true, 0.05);
+  assert(world.getBlock(0, 64, 0) === BlockIds.Air, 'Grass broken at 18 ticks');
+
+  // Wait out the 5-tick cooldown
+  for (let i = 0; i < 5; i++) {
+    breaking.update(undefined, false, 0.05);
+  }
+
+  // Stone
+  world.setBlock(0, 64, 0, BlockIds.Stone, { reason: 'player', notifyNeighbours: false, updateLighting: false });
+  breaking.reset();
+
+  for (let i = 0; i < 149; i++) {
+    breaking.update(bedrockHit, true, 0.05);
+  }
+  assert(breaking.getProgress() < 1.0 && breaking.getProgress() > 0.0, 'Stone not broken in 149 ticks');
+
+  breaking.update(bedrockHit, true, 0.05);
+  assert(world.getBlock(0, 64, 0) === BlockIds.Air, 'Stone broken at 150 ticks');
+}
+
 function main() {
   testPlayerAnimator();
   testFirstPersonMotion();
+  testFirstPersonArmRenderer();
+  testBreakingController();
   testCameraModeController();
   console.log('Player Rendering Validation Passed.');
   process.exit(0);

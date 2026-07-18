@@ -35,6 +35,11 @@ export class AssetManager {
     // Not referenced by any block definition directly.
     textureNames.add('grass_side_snowed');
 
+    // Add destruction stage textures to the atlas.
+    for (let i = 0; i < 10; i++) {
+      textureNames.add(`destroy_stage_${i}`);
+    }
+
     const images = await loadBlockTextureImages(textureNames);
     return TextureAtlas.build(images);
   }

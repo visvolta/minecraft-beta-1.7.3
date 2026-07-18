@@ -17,7 +17,11 @@ export class FirstPersonArmRenderer {
   private readonly armGeo: BoxGeometry;
   private readonly sleeveGeo: BoxGeometry;
 
-  private readonly sleeveMesh: Mesh;
+  public readonly armMesh: Mesh;
+  public readonly sleeveMesh: Mesh;
+
+  private armVisible = true;
+  private isLegacy = true;
 
   public constructor() {
     const px = PLAYER_MODEL_SCALE;
@@ -38,13 +42,13 @@ export class FirstPersonArmRenderer {
     this.sleeveGeo = new BoxGeometry(4 * px * ols, 12 * px * ols, 4 * px * ols);
 
     // Meshes
-    const armMesh = new Mesh(this.armGeo, this.material);
-    armMesh.position.set(0, PLAYER_MODEL_SHOULDER_OFFSET_Y, 0);
+    this.armMesh = new Mesh(this.armGeo, this.material);
+    this.armMesh.position.set(0, PLAYER_MODEL_SHOULDER_OFFSET_Y, 0);
 
     this.sleeveMesh = new Mesh(this.sleeveGeo, this.material);
     this.sleeveMesh.position.set(0, PLAYER_MODEL_SHOULDER_OFFSET_Y, 0);
 
-    this.armGroup.add(armMesh);
+    this.armGroup.add(this.armMesh);
     this.armGroup.add(this.sleeveMesh);
     this.armGroup.scale.set(FIRST_PERSON_ARM_SCALE, FIRST_PERSON_ARM_SCALE, FIRST_PERSON_ARM_SCALE);
 
@@ -53,6 +57,20 @@ export class FirstPersonArmRenderer {
 
   public setVisible(visible: boolean): void {
     this.armGroup.visible = visible;
+  }
+
+  public setArmMeshVisible(visible: boolean): void {
+    this.armVisible = visible;
+    this.updateMeshVisibilities();
+  }
+
+  private updateMeshVisibilities(): void {
+    this.armMesh.visible = this.armVisible;
+    if (this.isLegacy) {
+      this.sleeveMesh.visible = false;
+    } else {
+      this.sleeveMesh.visible = this.armVisible;
+    }
   }
 
   /**
@@ -65,18 +83,16 @@ export class FirstPersonArmRenderer {
       this.material.needsUpdate = true;
     }
 
-    const isLegacy = skinManager.getIsLegacy();
+    this.isLegacy = skinManager.getIsLegacy();
 
-    // Map Right Arm: (40, 16)
-    skinManager.applyUVsToGeometry(this.armGeo, skinManager.getPartUVs(40, 16, 4, 12, 4, true));
+    // Map Right Arm: (40, 16) - Use unmirrored mapping (matching third-person right arm reference)
+    skinManager.applyUVsToGeometry(this.armGeo, skinManager.getPartUVs(40, 16, 4, 12, 4, false));
 
-    if (isLegacy) {
-      // Legacy skin: right sleeve overlay does not exist
-      this.sleeveMesh.visible = false;
-    } else {
+    if (!this.isLegacy) {
       // Modern skin: map Right Sleeve: (40, 32)
-      skinManager.applyUVsToGeometry(this.sleeveGeo, skinManager.getPartUVs(40, 32, 4, 12, 4));
-      this.sleeveMesh.visible = true;
+      skinManager.applyUVsToGeometry(this.sleeveGeo, skinManager.getPartUVs(40, 32, 4, 12, 4, false));
     }
+
+    this.updateMeshVisibilities();
   }
 }

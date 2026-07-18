@@ -622,4 +622,99 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
 
   // Wooden slab: non-full block (half height). blocksWeather: false.
   registerSimple(BlockIds.WoodSlab, 'wood_slab', 'Oak Wood Slab', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
+
+  // Post-process blocks to apply authentic Beta 1.7.3 hardness and harvestableByHand properties
+  const hardnessMap: Record<number, number> = {
+    [BlockIds.Air]: 0.0,
+    [BlockIds.Stone]: 1.5,
+    [BlockIds.Grass]: 0.6,
+    [BlockIds.Dirt]: 0.5,
+    [BlockIds.Cobblestone]: 2.0,
+    [BlockIds.Bedrock]: -1.0,
+    [BlockIds.Sand]: 0.5,
+    [BlockIds.Gravel]: 0.6,
+    [BlockIds.Clay]: 0.6,
+    [BlockIds.Podzol]: 0.5,
+    [BlockIds.Log]: 2.0,
+    [BlockIds.SpruceLog]: 2.0,
+    [251]: 2.0, // BirchLog
+    [BlockIds.Leaves]: 0.2,
+    [BlockIds.SpruceLeaves]: 0.2,
+    [250]: 0.2, // BirchLeaves
+    [BlockIds.Obsidian]: 10.0,
+    [BlockIds.MossyCobblestone]: 2.0,
+    [BlockIds.CoalOre]: 3.0,
+    [BlockIds.IronOre]: 3.0,
+    [BlockIds.GoldOre]: 3.0,
+    [BlockIds.RedstoneOre]: 3.0,
+    [BlockIds.DiamondOre]: 3.0,
+    [BlockIds.LapisOre]: 3.0,
+    [BlockIds.Chest]: 2.5,
+    [BlockIds.Spawner]: 5.0,
+    [BlockIds.Dandelion]: 0.0,
+    [BlockIds.Rose]: 0.0,
+    [BlockIds.BrownMushroom]: 0.0,
+    [BlockIds.RedMushroom]: 0.0,
+    [BlockIds.TallGrass]: 0.0,
+    [BlockIds.DeadBush]: 0.0,
+    [BlockIds.Reed]: 0.0,
+    [BlockIds.Pumpkin]: 1.0,
+    [BlockIds.Cactus]: 0.4,
+    [BlockIds.WaterFlowing]: 100.0,
+    [BlockIds.WaterStill]: 100.0,
+    [BlockIds.LavaFlowing]: 100.0,
+    [BlockIds.LavaStill]: 100.0,
+    [BlockIds.Sapling]: 0.0,
+    [BlockIds.Fire]: 0.0,
+    [BlockIds.Farmland]: 0.6,
+    [BlockIds.Crops]: 0.0,
+    [BlockIds.Snow]: 0.1,
+    [BlockIds.Ice]: 0.5,
+    [BlockIds.Glass]: 0.3,
+    [BlockIds.SnowBlock]: 0.2,
+    [BlockIds.Torch]: 0.0,
+    [BlockIds.RedstoneTorch]: 0.0,
+    [BlockIds.Ladder]: 0.4,
+    [BlockIds.SignPost]: 1.0,
+    [BlockIds.WallSign]: 1.0,
+    [BlockIds.StoneButton]: 0.5,
+    [BlockIds.Lever]: 0.5,
+    [BlockIds.StonePressurePlate]: 0.5,
+    [BlockIds.WoodDoor]: 3.0,
+    [BlockIds.RedstoneBlock]: 5.0,
+    [BlockIds.RedstoneLampOff]: 0.3,
+    [BlockIds.RedstoneLampOn]: 0.3,
+    [BlockIds.Planks]: 2.0,
+    [BlockIds.Bookshelf]: 1.5,
+    [BlockIds.Wool]: 0.8,
+    [BlockIds.TNT]: 0.0,
+    [BlockIds.Netherrack]: 0.4,
+    [BlockIds.Fence]: 2.0,
+    [BlockIds.WoodStairs]: 2.0,
+    [BlockIds.WoodSlab]: 2.0,
+  };
+
+  const handHarvestableMap: Record<number, boolean> = {
+    [BlockIds.Stone]: false,
+    [BlockIds.Cobblestone]: false,
+    [BlockIds.Bedrock]: false,
+    [BlockIds.Obsidian]: false,
+    [BlockIds.MossyCobblestone]: false,
+    [BlockIds.CoalOre]: false,
+    [BlockIds.IronOre]: false,
+    [BlockIds.GoldOre]: false,
+    [BlockIds.RedstoneOre]: false,
+    [BlockIds.DiamondOre]: false,
+    [BlockIds.LapisOre]: false,
+    [BlockIds.Spawner]: false,
+    [BlockIds.Snow]: false,
+    [BlockIds.SnowBlock]: false,
+    [BlockIds.Netherrack]: false,
+  };
+
+  for (const def of registry.values()) {
+    const mutableDef = def as any;
+    mutableDef.hardness = hardnessMap[def.id] !== undefined ? hardnessMap[def.id] : 1.0;
+    mutableDef.harvestableByHand = handHarvestableMap[def.id] !== undefined ? handHarvestableMap[def.id] : true;
+  }
 }

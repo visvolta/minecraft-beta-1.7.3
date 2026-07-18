@@ -300,6 +300,13 @@ export class Input {
   }
 
   /**
+   * True while the given mouse button is held down (continuous state).
+   */
+  public isMouseButtonPressed(button: MouseButton): boolean {
+    return this.mouseButtonsDown.has(MOUSE_BUTTON_INDEX[button]);
+  }
+
+  /**
    * True only on the frame a mouse button transitioned from up to down
    * (edge-triggered), so a held button doesn't repeat the action every frame.
    */
