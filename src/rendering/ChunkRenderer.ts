@@ -18,7 +18,7 @@ export const MESH_REBUILD_BUDGET = 4;
 export const FOG_HEIGHT_START = 62;
 export const FOG_HEIGHT_END = 96;
 
-function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
+export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
   const uniforms = {
     uSkylightSubtracted: { value: 0 },
     uSunBrightnessFactor: { value: 1 },
@@ -61,6 +61,79 @@ function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
           float visibility = max(brightness, uTextureMinBrightness) * aoFactorScalar * faceBrightness;
           vColor.xyz = tintColor * visibility;
         }`,
+      );
+  };
+  material.needsUpdate = true;
+}
+
+export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
+  const uniforms = {
+    uSkylightSubtracted: { value: 0 },
+    uSunBrightnessFactor: { value: 1 },
+    uTextureMinBrightness: { value: TEXTURE_MIN_BRIGHTNESS },
+    uDynamicLightingEnabled: { value: 1 },
+    uStaticSkyLight: { value: 15.0 },
+    uStaticBlockLight: { value: 0.0 },
+    uStaticAoFactor: { value: 1.0 },
+    uStaticFaceBrightness: { value: 1.0 },
+  };
+  material.userData.dynamicLightingUniforms = uniforms;
+  material.onBeforeCompile = (shader): void => {
+    shader.uniforms.uSkylightSubtracted = uniforms.uSkylightSubtracted;
+    shader.uniforms.uSunBrightnessFactor = uniforms.uSunBrightnessFactor;
+    shader.uniforms.uTextureMinBrightness = uniforms.uTextureMinBrightness;
+    shader.uniforms.uDynamicLightingEnabled = uniforms.uDynamicLightingEnabled;
+    shader.uniforms.uStaticSkyLight = uniforms.uStaticSkyLight;
+    shader.uniforms.uStaticBlockLight = uniforms.uStaticBlockLight;
+    shader.uniforms.uStaticAoFactor = uniforms.uStaticAoFactor;
+    shader.uniforms.uStaticFaceBrightness = uniforms.uStaticFaceBrightness;
+
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform float uSkylightSubtracted;
+        uniform float uSunBrightnessFactor;
+        uniform float uTextureMinBrightness;
+        uniform float uDynamicLightingEnabled;
+
+        uniform float uStaticSkyLight;
+        uniform float uStaticBlockLight;
+        uniform float uStaticAoFactor;
+        uniform float uStaticFaceBrightness;
+
+        varying vec3 vEntityLightingFactor;
+
+        float betaLightBrightness(float lightLevel) {
+          float clamped = clamp(lightLevel, 0.0, 15.0);
+          float darkness = 1.0 - clamped / 15.0;
+          return (1.0 - darkness) / (darkness * 3.0 + 1.0);
+        }`,
+      )
+      .replace(
+        '#include <color_vertex>',
+        `#include <color_vertex>
+        vEntityLightingFactor = vec3(1.0);
+        if (uDynamicLightingEnabled > 0.5) {
+          float effectiveSky = max(0.0, uStaticSkyLight - uSkylightSubtracted);
+          float skyBrightness = betaLightBrightness(effectiveSky) * uSunBrightnessFactor;
+          float blockBrightness = betaLightBrightness(uStaticBlockLight);
+          float brightness = max(skyBrightness, blockBrightness);
+          float visibility = max(brightness, uTextureMinBrightness) * uStaticAoFactor * uStaticFaceBrightness;
+          vEntityLightingFactor = vec3(visibility);
+        }`,
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vEntityLightingFactor;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        diffuseColor.rgb *= vEntityLightingFactor;`,
       );
   };
   material.needsUpdate = true;

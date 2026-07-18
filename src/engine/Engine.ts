@@ -7,7 +7,7 @@ import { PlayerController } from '../player/PlayerController';
 import { InteractionController } from '../player/InteractionController';
 import { PlayerPhysics } from '../physics/PlayerPhysics';
 import { BlockHighlight } from '../rendering/BlockHighlight';
-import { ChunkRenderer } from '../rendering/ChunkRenderer';
+import { ChunkRenderer, attachEntityLighting } from '../rendering/ChunkRenderer';
 import { FogController } from '../rendering/FogController';
 import { Renderer } from '../rendering/Renderer';
 import { SkyRenderer } from '../rendering/sky/SkyRenderer';
@@ -60,6 +60,38 @@ import { PlayerAnimator } from '../player/PlayerAnimator';
 import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
 import { FirstPersonMotionController } from '../player/FirstPersonMotionController';
 import { CameraModeController, CameraMode } from '../camera/CameraModeController';
+import * as THREE from 'three';
+import { PlayerSkinManager } from '../player/PlayerSkinManager';
+import { resolveBlockTexture } from '../blocks/resolveBlockTexture';
+import { resolveBlockTint } from '../blocks/resolveBlockTint';
+import type { BlockId } from '../blocks/BlockId';
+import {
+  FIRST_PERSON_HELD_BLOCK_X,
+  FIRST_PERSON_HELD_BLOCK_Y,
+  FIRST_PERSON_HELD_BLOCK_Z,
+  FIRST_PERSON_HELD_BLOCK_PITCH,
+  FIRST_PERSON_HELD_BLOCK_YAW,
+  FIRST_PERSON_HELD_BLOCK_ROLL,
+  FIRST_PERSON_HELD_BLOCK_SCALE,
+  THIRD_PERSON_HELD_BLOCK_X,
+  THIRD_PERSON_HELD_BLOCK_Y,
+  THIRD_PERSON_HELD_BLOCK_Z,
+  THIRD_PERSON_HELD_BLOCK_PITCH,
+  THIRD_PERSON_HELD_BLOCK_YAW,
+  THIRD_PERSON_HELD_BLOCK_ROLL,
+  THIRD_PERSON_HELD_BLOCK_SCALE
+} from '../player/PlayerConstants';
+
+interface EntityLightingUniforms {
+  uSkylightSubtracted: { value: number };
+  uSunBrightnessFactor: { value: number };
+  uTextureMinBrightness: { value: number };
+  uDynamicLightingEnabled: { value: number };
+  uStaticSkyLight: { value: number };
+  uStaticBlockLight: { value: number };
+  uStaticAoFactor: { value: number };
+  uStaticFaceBrightness: { value: number };
+}
 
 /** Maximum delta (seconds) applied in one frame after tab focus / hitch. */
 const MAX_DELTA_SECONDS = 0.1;
@@ -149,10 +181,23 @@ export class Engine {
   private readonly firstPersonMotionController: FirstPersonMotionController;
   private readonly cameraModeController: CameraModeController;
 
-  public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator, private readonly storage: WorldStorage) {
+  private readonly skinManager: PlayerSkinManager;
+  private readonly blockRegistry: BlockRegistry;
+  private readonly heldBlockMaterial: THREE.MeshBasicMaterial;
+  private readonly firstPersonHeldBlockMesh: THREE.Mesh;
+  private readonly thirdPersonHeldBlockMesh: THREE.Mesh;
+  private lastSelectedBlockId: BlockId = 0;
+
+  private readonly playerModelUniforms: EntityLightingUniforms | undefined;
+  private readonly firstPersonArmUniforms: EntityLightingUniforms | undefined;
+  private readonly heldBlockUniforms: EntityLightingUniforms | undefined;
+
+  public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator, private readonly storage: WorldStorage, skinManager: PlayerSkinManager) {
     const metadata = saveCoordinator.getMetadata();
     const worldSeed = BigInt(metadata.seed);
     this.atlas = atlas;
+    this.blockRegistry = blockRegistry;
+    this.skinManager = skinManager;
     this.chunkManager = new ChunkManager();
     this.worldGenerator = new BetaWorldGenerator(worldSeed);
     this.regionCoordinator = new RegionCoordinator(this.storage, metadata.worldId);
@@ -185,6 +230,75 @@ export class Engine {
     this.playerAnimator = new PlayerAnimator();
     this.firstPersonArmRenderer = new FirstPersonArmRenderer();
     this.firstPersonMotionController = new FirstPersonMotionController();
+
+    // Apply the active skin texture to the models
+    this.playerModel.updateSkin(this.skinManager);
+    this.firstPersonArmRenderer.updateSkin(this.skinManager);
+
+    // Initialize Held Block Material with generalized fog/lighting shader
+    this.heldBlockMaterial = new THREE.MeshBasicMaterial({
+      map: atlas.texture,
+      vertexColors: true,
+      transparent: true,
+      alphaTest: 0.3,
+      fog: false, // Exclude foreground hand held blocks from distance fog
+    });
+    attachEntityLighting(this.heldBlockMaterial);
+
+    this.playerModelUniforms = this.playerModel.material.userData.dynamicLightingUniforms as EntityLightingUniforms | undefined;
+    this.firstPersonArmUniforms = this.firstPersonArmRenderer.material.userData.dynamicLightingUniforms as EntityLightingUniforms | undefined;
+    this.heldBlockUniforms = this.heldBlockMaterial.userData.dynamicLightingUniforms as EntityLightingUniforms | undefined;
+
+    // Dummy initial geometries
+    this.firstPersonHeldBlockMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.heldBlockMaterial);
+    this.thirdPersonHeldBlockMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.heldBlockMaterial);
+
+    this.firstPersonHeldBlockMesh.position.set(
+      FIRST_PERSON_HELD_BLOCK_X,
+      FIRST_PERSON_HELD_BLOCK_Y,
+      FIRST_PERSON_HELD_BLOCK_Z
+    );
+    this.firstPersonHeldBlockMesh.rotation.set(
+      FIRST_PERSON_HELD_BLOCK_PITCH,
+      FIRST_PERSON_HELD_BLOCK_YAW,
+      FIRST_PERSON_HELD_BLOCK_ROLL
+    );
+    this.firstPersonHeldBlockMesh.scale.set(
+      FIRST_PERSON_HELD_BLOCK_SCALE,
+      FIRST_PERSON_HELD_BLOCK_SCALE,
+      FIRST_PERSON_HELD_BLOCK_SCALE
+    );
+
+    this.thirdPersonHeldBlockMesh.position.set(
+      THIRD_PERSON_HELD_BLOCK_X,
+      THIRD_PERSON_HELD_BLOCK_Y,
+      THIRD_PERSON_HELD_BLOCK_Z
+    );
+    this.thirdPersonHeldBlockMesh.rotation.set(
+      THIRD_PERSON_HELD_BLOCK_PITCH,
+      THIRD_PERSON_HELD_BLOCK_YAW,
+      THIRD_PERSON_HELD_BLOCK_ROLL
+    );
+    this.thirdPersonHeldBlockMesh.scale.set(
+      THIRD_PERSON_HELD_BLOCK_SCALE,
+      THIRD_PERSON_HELD_BLOCK_SCALE,
+      THIRD_PERSON_HELD_BLOCK_SCALE
+    );
+
+    this.firstPersonArmRenderer.armGroup.add(this.firstPersonHeldBlockMesh);
+    this.playerModel.rightArmGroup.add(this.thirdPersonHeldBlockMesh);
+
+    // Unmistakable magenta debug cube for visual validation of first-person held-block rendering
+    const debugGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+    const debugMat = new THREE.MeshBasicMaterial({
+      color: 0xff00ff,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const debugHeldBlockMesh = new THREE.Mesh(debugGeo, debugMat);
+    // Align with the hand in the first-person arm mesh group
+    debugHeldBlockMesh.position.set(0.0, -0.625, -0.125);
+    this.firstPersonArmRenderer.armGroup.add(debugHeldBlockMesh);
 
     this.renderer.scene.add(this.playerModel.root);
 
@@ -576,6 +690,13 @@ export class Engine {
       this.debugOverlay.toggle();
     }
 
+    if (this.input.isKeyJustPressed('KeyU')) {
+      const active = this.skinManager.toggleDebugMode();
+      this.playerModel.updateSkin(this.skinManager);
+      this.firstPersonArmRenderer.updateSkin(this.skinManager);
+      console.log(`[SkinManager] Toggled UV-debug skin diagnostic mode. Active: ${active}`);
+    }
+
     if (this.input.isDebugKeyJustPressed('F4')) {
       this.rawLightDebugMode = !this.rawLightDebugMode;
       if (this.rawLightDebugMode) {
@@ -788,6 +909,30 @@ export class Engine {
     // 10. Update interaction (raycast targeting + break/place edits)
     this.interactionController.update();
 
+    // 10a. Update held block selection if changed
+    const currentBlockId = this.interactionController.getSelectedBlockId();
+    if (currentBlockId !== this.lastSelectedBlockId) {
+      this.lastSelectedBlockId = currentBlockId;
+      this.updateHeldBlockMesh(currentBlockId);
+    }
+
+    // 10b. Query and update static player and arm lighting defensively
+    const px = Math.floor(this.player.position.x);
+    const py = Math.floor(this.player.position.y);
+    const pz = Math.floor(this.player.position.z);
+    const skyLight = this.blockUpdateWorld.getSkylight(px, py, pz);
+    const blockLight = this.blockUpdateWorld.getBlocklight(px, py, pz);
+
+    const uniformSets = [this.playerModelUniforms, this.firstPersonArmUniforms, this.heldBlockUniforms];
+    for (const uniforms of uniformSets) {
+      if (uniforms && uniforms.uStaticSkyLight && uniforms.uStaticBlockLight) {
+        uniforms.uStaticSkyLight.value = skyLight;
+        uniforms.uStaticBlockLight.value = blockLight;
+        uniforms.uSkylightSubtracted.value = atmos.effectiveSkylightSubtracted;
+        uniforms.uSunBrightnessFactor.value = atmos.sunBrightnessFactor;
+      }
+    }
+
     // 11. Rebuild dirty chunk meshes (budgeted, terrain + water together);
     // picks up this frame's edits
     this.chunkRenderer.update(
@@ -892,6 +1037,69 @@ export class Engine {
     this.saveCoordinator.update(this.snapshotMetadata());
     this.metadataSaveInFlight = this.saveCoordinator.save(force).finally(() => { this.metadataSaveInFlight = null; });
     return this.metadataSaveInFlight;
+  }
+
+  private updateHeldBlockMesh(blockId: BlockId): void {
+    if (!blockId) {
+      this.firstPersonHeldBlockMesh.visible = false;
+      this.thirdPersonHeldBlockMesh.visible = false;
+    } else {
+      const newGeo = this.buildHeldBlockGeometry(blockId);
+
+      this.firstPersonHeldBlockMesh.geometry.dispose();
+      this.firstPersonHeldBlockMesh.geometry = newGeo;
+
+      this.thirdPersonHeldBlockMesh.geometry.dispose();
+      this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
+
+      this.firstPersonHeldBlockMesh.visible = true;
+      this.thirdPersonHeldBlockMesh.visible = true;
+    }
+  }
+
+  private buildHeldBlockGeometry(blockId: BlockId): THREE.BufferGeometry {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const def = this.blockRegistry.getById(blockId);
+    if (!def) return geometry;
+
+    const uvs = new Float32Array(48);
+    const colors = new Float32Array(72); // 24 vertices * 3 channels
+
+    const faces = [
+      { slot: 'side', f: 0 },   // +X (Right)
+      { slot: 'side', f: 1 },   // -X (Left)
+      { slot: 'top', f: 2 },    // +Y (Top)
+      { slot: 'bottom', f: 3 }, // -Y (Bottom)
+      { slot: 'side', f: 4 },   // +Z (Front)
+      { slot: 'side', f: 5 },   // -Z (Back)
+    ] as const;
+
+    for (const { slot, f } of faces) {
+      const texName = resolveBlockTexture(def, slot) || 'stone';
+      const uvRect = this.atlas.getUvRect(texName) || { u0: 0, v0: 0, u1: 1, v1: 1 };
+      const tint = resolveBlockTint(def, slot);
+
+      const offsetUv = f * 8;
+      uvs[offsetUv + 0] = uvRect.u0;
+      uvs[offsetUv + 1] = uvRect.v0;
+      uvs[offsetUv + 2] = uvRect.u1;
+      uvs[offsetUv + 3] = uvRect.v0;
+      uvs[offsetUv + 4] = uvRect.u0;
+      uvs[offsetUv + 5] = uvRect.v1;
+      uvs[offsetUv + 6] = uvRect.u1;
+      uvs[offsetUv + 7] = uvRect.v1;
+
+      const offsetCol = f * 12;
+      for (let v = 0; v < 4; v++) {
+        colors[offsetCol + v * 3 + 0] = tint[0];
+        colors[offsetCol + v * 3 + 1] = tint[1];
+        colors[offsetCol + v * 3 + 2] = tint[2];
+      }
+    }
+
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    return geometry;
   }
 
 }

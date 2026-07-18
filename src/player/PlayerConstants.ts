@@ -21,9 +21,28 @@ export const THIRD_PERSON_DISTANCE = 4.0;
 // By default, the camera targets exactly the eye level.
 export const THIRD_PERSON_TARGET_OFFSET_Y = 0.0;
 
+// --- Held Block and Outer Layer Tuning Constants ---
+export const FIRST_PERSON_HELD_BLOCK_X = 0.0;
+export const FIRST_PERSON_HELD_BLOCK_Y = -10 * PLAYER_MODEL_SCALE;
+export const FIRST_PERSON_HELD_BLOCK_Z = -2 * PLAYER_MODEL_SCALE;
+export const FIRST_PERSON_HELD_BLOCK_PITCH = 0;
+export const FIRST_PERSON_HELD_BLOCK_YAW = Math.PI / 4;
+export const FIRST_PERSON_HELD_BLOCK_ROLL = 0;
+export const FIRST_PERSON_HELD_BLOCK_SCALE = 0.4;
+
+export const THIRD_PERSON_HELD_BLOCK_X = 0;
+export const THIRD_PERSON_HELD_BLOCK_Y = -10 * PLAYER_MODEL_SCALE;
+export const THIRD_PERSON_HELD_BLOCK_Z = -2 * PLAYER_MODEL_SCALE;
+export const THIRD_PERSON_HELD_BLOCK_PITCH = 0;
+export const THIRD_PERSON_HELD_BLOCK_YAW = 0;
+export const THIRD_PERSON_HELD_BLOCK_ROLL = 0;
+export const THIRD_PERSON_HELD_BLOCK_SCALE = 0.35;
+
+export const PLAYER_OUTER_LAYER_SCALE = 1.05;
+
 // --- Animation Tuning Constants ---
 
-export const ANIMATION_WALK_SWING_FREQUENCY = 0.6662;
+export const ANIMATION_WALK_SWING_FREQUENCY = 0.586;
 export const ANIMATION_ARM_SWING_LIMIT = 2.0;
 export const ANIMATION_LEG_SWING_LIMIT = 1.4;
 export const ANIMATION_MOVEMENT_SPEED_SCALING = 0.3; // Dampens swing amplitude relative to walk speed
