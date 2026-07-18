@@ -51,8 +51,6 @@ import { WorkerValidationHarness } from '../debug/WorkerValidationHarness';
 import { BlockTestGrid } from '../debug/BlockTestGrid';
 import type { IUpdatable } from './IUpdatable';
 import type { WorldSaveCoordinator } from '../persistence/coordinator/WorldSaveCoordinator';
-import { RegionCoordinator } from '../persistence/queue/RegionCoordinator';
-import { ChunkPersistenceQueue } from '../persistence/queue/ChunkPersistenceQueue';
 import type { WorldMetadata } from '../persistence/metadata/WorldMetadata';
 
 /** Maximum delta (seconds) applied in one frame after tab focus / hitch. */
@@ -82,8 +80,6 @@ const METADATA_AUTOSAVE_MS = 30_000;
  * The block registry and texture atlas are built before the Engine exists
  * (asset loading is asynchronous) and are handed in already populated.
  */
-import type { WorldStorage } from '../persistence/storage/WorldStorage';
-
 export class Engine {
   private readonly renderer: Renderer;
   private readonly input: Input;
@@ -134,21 +130,17 @@ export class Engine {
 
   private running = false;
   private animationFrameId: number | null = null;
-  private readonly regionCoordinator: RegionCoordinator;
-  private readonly chunkPersistenceQueue: ChunkPersistenceQueue;
   private lastFrameTimeMs: number | null = null;
   private lastMetadataAutosaveMs = 0;
   private metadataSaveInFlight: Promise<void> | null = null;
+  private readonly onPageHideBound = (): void => { void this.saveMetadata(true); };
 
-  public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator, private readonly storage: WorldStorage) {
+  public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator) {
     const metadata = saveCoordinator.getMetadata();
     const worldSeed = BigInt(metadata.seed);
     this.atlas = atlas;
     this.chunkManager = new ChunkManager();
     this.worldGenerator = new BetaWorldGenerator(worldSeed);
-    this.regionCoordinator = new RegionCoordinator(this.storage, metadata.worldId);
-    this.chunkPersistenceQueue = new ChunkPersistenceQueue(this.regionCoordinator);
-    this.saveCoordinator.attachPersistence(this.chunkManager, this.chunkPersistenceQueue);
     this.worldTime = new WorldTime();
     this.worldTime.setTotalTicks(metadata.timeTicks);
 
@@ -268,7 +260,6 @@ export class Engine {
       this.chunkRenderer,
       this.lightEngine,
       worldSeed,
-      this.chunkPersistenceQueue,
     );
 
     this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
@@ -470,6 +461,8 @@ export class Engine {
   }
 
   public start(): void {
+    window.addEventListener('pagehide', this.onPageHideBound);
+    window.addEventListener('beforeunload', this.onPageHideBound);
     if (this.running) {
       return;
     }

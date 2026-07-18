@@ -12,8 +12,8 @@ async function bootstrap(): Promise<void> {
   // Nothing renders until the block texture atlas has finished loading.
   const atlas = await AssetManager.loadBlockAtlas(blockRegistry);
 
-  const { coordinator: saveCoordinator, storage } = await openDefaultWorld();
-  const engine = new Engine(blockRegistry, atlas, saveCoordinator, storage);
+  const saveCoordinator = await openDefaultWorld();
+  const engine = new Engine(blockRegistry, atlas, saveCoordinator);
   engine.start();
 }
 
