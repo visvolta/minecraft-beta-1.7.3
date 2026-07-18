@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import type { ChunkManager } from '../../world/ChunkManager';
 import type { BlockRegistry } from '../../blocks/BlockRegistry';
+import { BlockIds } from '../../blocks/BlockId';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../../world/chunkConstants';
 import { ClimateSampler } from '../../world/generation/climate/ClimateSampler';
 import { selectBiome } from '../../world/generation/climate/BiomeSelector';
 import type { BiomeId } from '../../world/generation/climate/biomes';
 import type { AtmosphericState } from '../AtmosphericState';
 import { blockIdBlocksWeather } from '../../world/weather/WeatherBlocking';
+import { fluidSurfaceHeight } from '../../world/fluid/FluidMetadata';
+import { getBetaFluidCornerHeight } from '../fluid/FluidSurfaceGeometry';
 
 /**
  * Beta-style batched precipitation renderer (Rain + Snow).
@@ -175,7 +178,9 @@ export class PrecipitationRenderer {
     this.root = new THREE.Group();
     this.root.name = 'precipitationLayer';
     this.root.frustumCulled = false;
-    this.root.renderOrder = 15;
+    // Task requires precipitation to be occluded by transparent depth pre-pass.
+    // Final order: 0 opaque, 10 cutout, 19 depth pre-pass (water/lava/ice/glass), 20-22 colour, 25 fire, 30 rain/snow
+    this.root.renderOrder = 30;
     scene.add(this.root);
 
     const loader = new THREE.TextureLoader();
@@ -211,14 +216,14 @@ export class PrecipitationRenderer {
 
     this.rainMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.rainMaterial);
     this.rainMesh.name = 'rainSheets';
-    this.rainMesh.renderOrder = 15;
+    this.rainMesh.renderOrder = 30;
     this.rainMesh.frustumCulled = false;
     this.rainMesh.visible = false;
     this.root.add(this.rainMesh);
 
     this.snowMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.snowMaterial);
     this.snowMesh.name = 'snowSheets';
-    this.snowMesh.renderOrder = 15;
+    this.snowMesh.renderOrder = 30;
     this.snowMesh.frustumCulled = false;
     this.snowMesh.visible = false;
     this.root.add(this.snowMesh);
@@ -338,7 +343,6 @@ export class PrecipitationRenderer {
     const columns: ColumnInfo[] = [];
     this.sampledWeatherRevisions.clear();
 
-    // ClimateSampler.sampleRegion returns row-major; we walk +Z outer, +X inner.
     const climates = this.climateSampler.sampleRegion(
       cameraCellX - R,
       cameraCellZ - R,
@@ -356,7 +360,6 @@ export class PrecipitationRenderer {
         const kind = biomeToPrecip(biome.id);
         if (kind === 'none') continue;
 
-        // Distance-squared edge fade (Beta formula).
         const distX = dx;
         const distZ = dz;
         const distFrac = Math.sqrt(distX * distX + distZ * distZ) / R;
@@ -365,9 +368,10 @@ export class PrecipitationRenderer {
         const outerFade = distFrac < 0.85 ? 1 : Math.max(0, (1 - distFrac) / 0.15);
         const edgeFade = betaEdgeFade * outerFade;
 
-        // Top solid block in this column.
-        const topY = this.getTopSolidBlockY(wx, wz);
-        // Skip columns where eye is entirely above the storm band.
+        // Top blocking surface — must account for Ice, Glass, Water, Lava, Leaves etc.
+        // Previously used only highest opaque block; now uses precipitation heightmap which includes
+        // all blocksWeather (Ice, Glass, Water, Lava) and for fluids uses rendered surface height.
+        const topY = this.getTopBlockingSurfaceY(wx, wz);
         const bandTop = eyeBlockY + R;
         if (topY >= bandTop) continue;
 
@@ -401,7 +405,16 @@ export class PrecipitationRenderer {
     return false;
   }
 
-  private getTopSolidBlockY(worldX: number, worldZ: number): number {
+  /**
+   * Returns the Y of the topmost weather-blocking surface in this column.
+   * Accounts for:
+   * - opaque full cubes (Stone, Dirt)
+   * - Ice, Glass (full translucent)
+   * - Water/Lava surfaces (uses rendered fluid surface height, not integer top)
+   * - Leaves etc (blocksWeather true)
+   * If no blocking block, returns CHUNK_SIZE_Y.
+   */
+  private getTopBlockingSurfaceY(worldX: number, worldZ: number): number {
     const chunkX = Math.floor(worldX / CHUNK_SIZE_X);
     const chunkZ = Math.floor(worldZ / CHUNK_SIZE_Z);
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
@@ -409,10 +422,112 @@ export class PrecipitationRenderer {
     this.sampledWeatherRevisions.set(`${chunkX},${chunkZ}`, chunk.getWeatherRevision());
     const localX = ((worldX % CHUNK_SIZE_X) + CHUNK_SIZE_X) % CHUNK_SIZE_X;
     const localZ = ((worldZ % CHUNK_SIZE_Z) + CHUNK_SIZE_Z) % CHUNK_SIZE_Z;
-    return chunk.getPrecipitationHeight(
+
+    const precipHeight = chunk.getPrecipitationHeight(
       localX,
       localZ,
       (blockId) => blockIdBlocksWeather(this.blockRegistry, blockId),
+    );
+
+    if (precipHeight < 0) return CHUNK_SIZE_Y;
+
+    // precipHeight is one past blocking block (air above). Blocking block Y = precipHeight -1
+    const blockingY = precipHeight - 1;
+    if (blockingY < 0) return CHUNK_SIZE_Y;
+
+    const blockId = chunk.getBlock(localX, blockingY, localZ);
+
+    // For fluids, use rendered surface height (sloped) rather than integer top
+    if (blockId === BlockIds.WaterFlowing || blockId === BlockIds.WaterStill || blockId === BlockIds.LavaFlowing || blockId === BlockIds.LavaStill) {
+      return this.getFluidSurfaceY(worldX, blockingY, worldZ, blockId);
+    }
+
+    // For Ice, Glass, and other full blocks, top surface is blockingY+1
+    // For partial blocks (e.g., leaves are full), same.
+    return blockingY + 1;
+  }
+
+  /**
+   * Computes fluid surface Y for a fluid block at (worldX, y, worldZ).
+   * Uses Beta corner height sampling (same as mesher) to get sloped surface,
+   * then returns y + average corner height.
+   * Falls back to fluidSurfaceHeight(metadata) if corner sampling fails.
+   */
+  private getFluidSurfaceY(worldX: number, blockY: number, worldZ: number, fluidBlockId: number): number {
+    const chunkX = Math.floor(worldX / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(worldZ / CHUNK_SIZE_Z);
+    const localX = ((worldX % CHUNK_SIZE_X) + CHUNK_SIZE_X) % CHUNK_SIZE_X;
+    const localZ = ((worldZ % CHUNK_SIZE_Z) + CHUNK_SIZE_Z) % CHUNK_SIZE_Z;
+    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+    if (chunk === undefined) return blockY + 1;
+
+    const metadata = chunk.getBlockMetadata(localX, blockY, localZ);
+
+    // If source or full, return full height quickly
+    const h00 = this.sampleFluidCornerHeight(worldX, blockY, worldZ, fluidBlockId, 0, 0);
+    const h10 = this.sampleFluidCornerHeight(worldX, blockY, worldZ, fluidBlockId, 1, 0);
+    const h11 = this.sampleFluidCornerHeight(worldX, blockY, worldZ, fluidBlockId, 1, 1);
+    const h01 = this.sampleFluidCornerHeight(worldX, blockY, worldZ, fluidBlockId, 0, 1);
+
+    const avg = (h00 + h10 + h11 + h01) / 4;
+    // Clamp to reasonable range (0..1)
+    const clamped = Math.max(0, Math.min(1, avg));
+    // If flat metadata fallback gives different, use max of both to avoid rain inside fluid
+    const flat = fluidSurfaceHeight(metadata);
+    return blockY + Math.max(clamped, flat);
+  }
+
+  private sampleFluidCornerHeight(worldX: number, blockY: number, worldZ: number, fluidBlockId: number, dx: number, dz: number): number {
+    const cornerX = dx === 0 ? worldX : worldX + 1;
+    const cornerZ = dz === 0 ? worldZ : worldZ + 1;
+
+    // Accessor for getBetaFluidCornerHeight — samples 4 blocks around corner
+    const isSameFluid = (a: number, b: number): boolean => {
+      const waterA = a === BlockIds.WaterFlowing || a === BlockIds.WaterStill;
+      const waterB = b === BlockIds.WaterFlowing || b === BlockIds.WaterStill;
+      const lavaA = a === BlockIds.LavaFlowing || a === BlockIds.LavaStill;
+      const lavaB = b === BlockIds.LavaFlowing || b === BlockIds.LavaStill;
+      return (waterA && waterB) || (lavaA && lavaB);
+    };
+
+    const getBlock = (x: number, y: number, z: number): number => {
+      if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
+      const cx = Math.floor(x / CHUNK_SIZE_X);
+      const cz = Math.floor(z / CHUNK_SIZE_Z);
+      const ch = this.chunkManager.getChunk(cx, cz);
+      if (ch === undefined) return 0;
+      const lx = ((x % CHUNK_SIZE_X) + CHUNK_SIZE_X) % CHUNK_SIZE_X;
+      const lz = ((z % CHUNK_SIZE_Z) + CHUNK_SIZE_Z) % CHUNK_SIZE_Z;
+      return ch.getBlock(lx, y, lz);
+    };
+
+    const getMetadata = (x: number, y: number, z: number): number => {
+      if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
+      const cx = Math.floor(x / CHUNK_SIZE_X);
+      const cz = Math.floor(z / CHUNK_SIZE_Z);
+      const ch = this.chunkManager.getChunk(cx, cz);
+      if (ch === undefined) return 0;
+      const lx = ((x % CHUNK_SIZE_X) + CHUNK_SIZE_X) % CHUNK_SIZE_X;
+      const lz = ((z % CHUNK_SIZE_Z) + CHUNK_SIZE_Z) % CHUNK_SIZE_Z;
+      return ch.getBlockMetadata(lx, y, lz);
+    };
+
+    const isSolidForFluidHeight = (id: number): boolean => {
+      const def = this.blockRegistry.getById(id);
+      return def !== undefined && def.solid && def.renderType !== 'leaves';
+    };
+
+    return getBetaFluidCornerHeight(
+      {
+        getBlock,
+        getMetadata,
+        isSameFluid,
+        isSolidForFluidHeight,
+      },
+      cornerX,
+      blockY,
+      cornerZ,
+      fluidBlockId,
     );
   }
 

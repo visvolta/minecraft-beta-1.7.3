@@ -1,6 +1,7 @@
 export enum WorldEventType {
   LavaIgnitionAttempt = 1,
   TntIgniteAttempt = 2,
+  ItemDrop = 3,
 }
 
 export interface LavaIgnitionAttemptEvent {
@@ -25,4 +26,17 @@ export interface TntIgniteAttemptEvent {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+}
+
+export interface ItemDropEvent {
+  readonly type: WorldEventType.ItemDrop;
+  readonly eventId: number;
+  readonly worldTick: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly itemId: number;
+  readonly metadata: number;
+  readonly count: number;
+  readonly source: string;
 }

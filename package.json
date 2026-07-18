@@ -10,6 +10,8 @@
     "validate:scheduler": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateScheduler.js",
     "validate:fluid": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateFluid.js",
     "validate:block-behaviours": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateBlockBehaviours.js",
+    "validate:transparency": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateTransparency.js",
+    "validate:leaf-decay": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateLeafDecay.js",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },

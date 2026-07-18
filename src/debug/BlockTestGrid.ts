@@ -14,6 +14,7 @@ import type { BlockId } from '../blocks/BlockId';
 import { BlockIds } from '../blocks/BlockId';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
+import { LEAF_DECAY_FLAG } from '../blocks/leafUtils';
 
 /** Block IDs excluded from the test grid (internal/debug, or Air). */
 const EXCLUDED_IDS = new Set<number>([
@@ -42,6 +43,13 @@ interface TestGridState {
   readonly rows: number;
   readonly cellSpacing: number;
   readonly cells: readonly GridCell[];
+  // Leaf decay samples
+  readonly leafDecaySamples?: readonly LeafDecaySample[];
+}
+
+interface LeafDecaySample {
+  readonly name: string;
+  readonly blocks: readonly { x: number; y: number; z: number; id: BlockId; meta?: number }[];
 }
 
 /** Excluded block IDs that are not meant to appear in-world. */
@@ -61,6 +69,8 @@ export class BlockTestGrid {
   /**
    * Generates (or rebuilds) the test grid at the player's position.
    * Called on F2 press (edge-triggered).
+   * Also generates Stage 5 leaf decay samples — stable and active destructive.
+   * Active samples are rebuilt on each F2 press (manual reset).
    */
   public generate(playerX: number, playerZ: number): void {
     // 1. Clear previous grid if it exists
@@ -101,6 +111,9 @@ export class BlockTestGrid {
 
     const rows = Math.ceil(blocks.length / columns);
 
+    // Leaf decay samples offset to avoid overlapping main grid
+    const leafDecaySamples = this.buildLeafDecaySamples(originX, gridY, originZ, columns, cellSpacing);
+
     this.currentGrid = {
       originX,
       originY: gridY,
@@ -109,10 +122,12 @@ export class BlockTestGrid {
       rows,
       cellSpacing,
       cells,
+      leafDecaySamples,
     };
 
     // 4. Place blocks
     this.placeGrid(this.currentGrid);
+    this.placeLeafDecaySamples(this.currentGrid);
   }
 
   /**
@@ -295,6 +310,144 @@ export class BlockTestGrid {
     // No special handling needed — stone below is already placed.
   }
 
+  private buildLeafDecaySamples(originX: number, gridY: number, originZ: number, columns: number, cellSpacing: number): LeafDecaySample[] {
+    const samples: LeafDecaySample[] = [];
+    // Place leaf decay samples far from main grid to keep stable
+    const baseX = originX + columns * cellSpacing + 10;
+    const baseZ = originZ;
+    const baseY = gridY;
+
+    const oakLog = BlockIds.Log;
+    const spruceLog = (BlockIds as any).SpruceLog ?? 252;
+    const birchLog = (BlockIds as any).BirchLog ?? 251;
+    const oakLeaves = BlockIds.Leaves;
+    const spruceLeaves = (BlockIds as any).SpruceLeaves ?? 253;
+    const birchLeaves = (BlockIds as any).BirchLeaves ?? 250;
+    const stone = BlockIds.Stone;
+
+    // Stable: Oak Log + Oak Leaves directly adjacent (should NOT decay)
+    samples.push({
+      name: 'stable_oak',
+      blocks: [
+        { x: baseX, y: baseY, z: baseZ, id: stone },
+        { x: baseX, y: baseY + 1, z: baseZ, id: oakLog },
+        { x: baseX + 1, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 },
+      ],
+    });
+
+    // Stable: Spruce Log + Spruce Leaves
+    samples.push({
+      name: 'stable_spruce',
+      blocks: [
+        { x: baseX + 5, y: baseY, z: baseZ, id: stone },
+        { x: baseX + 5, y: baseY + 1, z: baseZ, id: spruceLog },
+        { x: baseX + 6, y: baseY + 1, z: baseZ, id: spruceLeaves, meta: 0 },
+      ],
+    });
+
+    // Stable: Birch Log + Birch Leaves
+    samples.push({
+      name: 'stable_birch',
+      blocks: [
+        { x: baseX + 10, y: baseY, z: baseZ, id: stone },
+        { x: baseX + 10, y: baseY + 1, z: baseZ, id: birchLog },
+        { x: baseX + 11, y: baseY + 1, z: baseZ, id: birchLeaves, meta: 0 },
+      ],
+    });
+
+    // Stable: small canopy connected at distance 4 (log at 0, leaves chain 4 away)
+    samples.push({
+      name: 'stable_distance4',
+      blocks: [
+        { x: baseX + 15, y: baseY, z: baseZ, id: stone },
+        { x: baseX + 15, y: baseY + 1, z: baseZ, id: oakLog },
+        { x: baseX + 16, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 },
+        { x: baseX + 17, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 },
+        { x: baseX + 18, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 },
+        { x: baseX + 19, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 }, // distance 4 from log
+      ],
+    });
+
+    // Visual: distance 5 (should decay if marked) — stable visual shows layout but not auto-decaying (no flag)
+    samples.push({
+      name: 'visual_distance5',
+      blocks: [
+        { x: baseX + 25, y: baseY, z: baseZ, id: stone },
+        { x: baseX + 25, y: baseY + 1, z: baseZ, id: oakLog },
+        { x: baseX + 26, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 },
+        { x: baseX + 27, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 },
+        { x: baseX + 28, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 },
+        { x: baseX + 29, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 },
+        { x: baseX + 30, y: baseY + 1, z: baseZ, id: oakLeaves, meta: 0 }, // distance 5 -> should decay if marked
+      ],
+    });
+
+    // Visual: diagonal-only connection (should decay)
+    samples.push({
+      name: 'visual_diagonal',
+      blocks: [
+        { x: baseX + 35, y: baseY, z: baseZ, id: stone },
+        { x: baseX + 35, y: baseY + 1, z: baseZ, id: oakLog },
+        { x: baseX + 36, y: baseY + 1, z: baseZ + 1, id: oakLeaves, meta: 0 }, // diagonal, not orthogonal
+      ],
+    });
+
+    // Active destructive: small unsupported canopy already marked with decay flag 8
+    // This will decay gradually via random ticks — manual reset via F2 rebuild
+    const decayFlag = LEAF_DECAY_FLAG;
+    samples.push({
+      name: 'active_marked_canopy',
+      blocks: [
+        { x: baseX, y: baseY, z: baseZ + 10, id: stone },
+        { x: baseX + 1, y: baseY + 1, z: baseZ + 10, id: oakLeaves, meta: decayFlag },
+        { x: baseX + 2, y: baseY + 1, z: baseZ + 10, id: oakLeaves, meta: decayFlag },
+        { x: baseX, y: baseY, z: baseZ + 15, id: stone },
+        { x: baseX, y: baseY + 5, z: baseZ + 15, id: oakLeaves, meta: decayFlag }, // floating, should decay
+      ],
+    });
+
+    // Active: trunk-removal test — log with leaves, user can break log to trigger marking
+    samples.push({
+      name: 'active_trunk_removal',
+      blocks: [
+        { x: baseX + 10, y: baseY, z: baseZ + 10, id: stone },
+        { x: baseX + 10, y: baseY + 1, z: baseZ + 10, id: oakLog },
+        { x: baseX + 11, y: baseY + 1, z: baseZ + 10, id: oakLeaves, meta: 0 },
+        { x: baseX + 12, y: baseY + 1, z: baseZ + 10, id: oakLeaves, meta: 0 },
+      ],
+    });
+
+    // Cross-chunk test: place log at chunk border (x=15 local) and leaves at x=16 (next chunk)
+    // We place near baseX which may be at chunk border depending on world, but we create explicit pair
+    samples.push({
+      name: 'cross_chunk',
+      blocks: [
+        // Place at a known chunk border: use world coordinates that are at 16 boundary
+        // We'll place log at 31 (which is chunk 1, local 15) and leaves at 32 (chunk 2, local 0)
+        { x: baseX + 20, y: baseY, z: baseZ + 20, id: stone },
+        { x: 31, y: baseY + 1, z: baseZ + 20, id: oakLog },
+        { x: 32, y: baseY + 1, z: baseZ + 20, id: oakLeaves, meta: 0 },
+      ],
+    });
+
+    return samples;
+  }
+
+  private placeLeafDecaySamples(grid: TestGridState): void {
+    const samples = grid.leafDecaySamples;
+    if (!samples) return;
+    for (const sample of samples) {
+      for (const b of sample.blocks) {
+        this.world.setBlock(b.x, b.y, b.z, b.id, {
+          metadata: b.meta ?? 0,
+          reason: 'world',
+          notifyNeighbours: true,
+          updateLighting: true,
+        });
+      }
+    }
+  }
+
   private clearGrid(grid: TestGridState): void {
     for (const cell of grid.cells) {
       const { worldX: x, worldY: y, worldZ: z } = cell;
@@ -323,6 +476,25 @@ export class BlockTestGrid {
           notifyNeighbours: false,
           updateLighting: true,
         });
+      }
+    }
+
+    // Clear leaf decay samples
+    if (grid.leafDecaySamples) {
+      for (const sample of grid.leafDecaySamples) {
+        for (const b of sample.blocks) {
+          this.world.setBlock(b.x, b.y, b.z, BlockIds.Air, {
+            reason: 'world',
+            notifyNeighbours: true,
+            updateLighting: true,
+          });
+          // Also clear foundation stone below if we placed one
+          this.world.setBlock(b.x, b.y - 1, b.z, BlockIds.Air, {
+            reason: 'world',
+            notifyNeighbours: false,
+            updateLighting: true,
+          });
+        }
       }
     }
   }

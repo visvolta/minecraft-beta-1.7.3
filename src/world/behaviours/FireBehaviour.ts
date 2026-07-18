@@ -38,8 +38,10 @@ const ENCOURAGEMENT = new Map<BlockId, number>([
   [BlockIds.WoodStairs, 5],  // Block.stairCompactPlanks
   [BlockIds.Log, 5],         // Block.wood (log)
   [BlockIds.SpruceLog, 5],   // Project-internal: spruce log same as oak
+  [BlockIds.BirchLog, 5],    // Birch log
   [BlockIds.Leaves, 30],     // Block.leaves
   [BlockIds.SpruceLeaves, 30],
+  [BlockIds.BirchLeaves, 30],
   [BlockIds.Bookshelf, 30],  // Block.bookShelf
   [BlockIds.TNT, 15],        // Block.tnt
   [BlockIds.TallGrass, 60],  // Block.tallGrass
@@ -52,8 +54,10 @@ const ABILITY_TO_CATCH_FIRE = new Map<BlockId, number>([
   [BlockIds.WoodStairs, 20],
   [BlockIds.Log, 5],
   [BlockIds.SpruceLog, 5],
+  [BlockIds.BirchLog, 5],
   [BlockIds.Leaves, 60],
   [BlockIds.SpruceLeaves, 60],
+  [BlockIds.BirchLeaves, 60],
   [BlockIds.Bookshelf, 20],
   [BlockIds.TNT, 100],
   [BlockIds.TallGrass, 100],

@@ -1,4 +1,4 @@
-import { WorldEventType, type LavaIgnitionAttemptEvent, type TntIgniteAttemptEvent } from './WorldEvent';
+import { WorldEventType, type LavaIgnitionAttemptEvent, type TntIgniteAttemptEvent, type ItemDropEvent } from './WorldEvent';
 import type { BlockDropEvent } from './BlockDropEvent';
 
 const CAPACITY = 256;
@@ -19,6 +19,9 @@ export class WorldEventQueue {
   private discarded = 0;
   private readonly blockDrops: BlockDropEvent[] = [];
   private readonly tntIgniteAttempts: TntIgniteAttemptEvent[] = [];
+  private readonly itemDrops: ItemDropEvent[] = [];
+  private totalItemDrops = 0;
+  private discardedItemDrops = 0;
 
   public enqueueLavaIgnitionAttempt(
     worldTick: number,
@@ -85,7 +88,7 @@ export class WorldEventQueue {
   }
 
   public enqueueBlockDrop(gameTick: number, sourceEntityId: number, blockId: number, metadata: number, x: number, y: number, z: number, reason: 'placement_failed' | 'lifetime_expired'): void {
-    if (this.count + this.blockDrops.length >= CAPACITY) {
+    if (this.count + this.blockDrops.length + this.itemDrops.length >= CAPACITY) {
       this.discarded += 1;
       return;
     }
@@ -100,6 +103,53 @@ export class WorldEventQueue {
     return this.blockDrops.length;
   }
 
+  // Leaf decay item drops — bounded, consumed via drain, metrics for overflow
+  public enqueueItemDrop(
+    gameTick: number,
+    x: number,
+    y: number,
+    z: number,
+    itemId: number,
+    metadata: number,
+    count: number,
+    source: string,
+  ): void {
+    if (this.itemDrops.length >= CAPACITY) {
+      this.discardedItemDrops += 1;
+      this.discarded += 1;
+      return;
+    }
+    this.itemDrops.push({
+      type: WorldEventType.ItemDrop,
+      eventId: this.nextEventId++,
+      worldTick: gameTick,
+      x,
+      y,
+      z,
+      itemId,
+      metadata,
+      count,
+      source,
+    });
+    this.totalItemDrops += 1;
+  }
+
+  public drainItemDrops(): ItemDropEvent[] {
+    return this.itemDrops.splice(0, this.itemDrops.length);
+  }
+
+  public getItemDropCount(): number {
+    return this.itemDrops.length;
+  }
+
+  public getTotalItemDrops(): number {
+    return this.totalItemDrops;
+  }
+
+  public getDiscardedItemDropCount(): number {
+    return this.discardedItemDrops;
+  }
+
   public drainNoop(): number {
     const drained = this.count;
     this.head = 0;
@@ -108,7 +158,7 @@ export class WorldEventQueue {
   }
 
   public getQueueDepth(): number {
-    return this.count;
+    return this.count + this.blockDrops.length + this.tntIgniteAttempts.length + this.itemDrops.length;
   }
 
   public getTotalLavaIgnitionAttempts(): number {

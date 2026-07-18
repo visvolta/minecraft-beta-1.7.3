@@ -106,6 +106,12 @@ export const BlockIds = {
   WoodSlab: 44,
   /** Beta 1.7.3 netherrack. Supports infinite fire. */
   Netherrack: 87,
+  /** Beta 1.7.3 glass (transparent solid). */
+  Glass: 20,
+  /** Temporary Birch Leaves for Stage 5 species validation (temp ID, see SpruceLeaves). */
+  BirchLeaves: 250,
+  /** Temporary Birch Log for Stage 5 F2 samples (temp ID). */
+  BirchLog: 251,
 } as const;
 
 /** Numeric block ID (Beta 1.7.3 compatible). */

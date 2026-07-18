@@ -25,6 +25,8 @@ import { registerFireBehaviour } from '../world/behaviours/FireBehaviour';
 import { registerSnowIceBehaviours } from '../world/behaviours/registerSnowIceBehaviours';
 import { PrecipitationSimulator } from '../world/weather/PrecipitationSimulator';
 import { registerFallingBlockBehaviours } from '../world/behaviours/FallingBlockBehaviour';
+import { registerLeafBehaviour } from '../world/behaviours/LeafBehaviour';
+import { registerLogBehaviour } from '../world/behaviours/LogBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
@@ -60,7 +62,7 @@ const MAX_DELTA_SECONDS = 0.1;
  *
  * Keep this in sync with scripts/verifyDefaultSeedHealth.ts.
  */
-const WORLD_SEED = -3115700454n;
+const WORLD_SEED = -47n;
 
 /**
  * Player spawn (feet position). Fixed X/Z with a generously high Y so the
@@ -162,25 +164,33 @@ export class Engine {
     registerPlantBehaviours(this.blockBehaviourRegistry, blockRegistry);
     registerSupportBehaviours(this.blockBehaviourRegistry, blockRegistry);
     // Fire needs WeatherController + ChunkManager for rain/sky-exposure checks.
-    // WeatherController is session-seeded (not tied to WORLD_SEED) so weather
-    // timing is fresh each session, matching Beta behaviour.
     const sessionSeed = BigInt(Date.now()) & 0xffffffffffffffffn;
     this.weatherController = new WeatherController(sessionSeed);
     this.precipitationSimulator = new PrecipitationSimulator(sessionSeed);
     registerFireBehaviour(this.blockBehaviourRegistry, blockRegistry, this.weatherController, this.chunkManager);
     registerSnowIceBehaviours(this.blockBehaviourRegistry);
     registerFallingBlockBehaviours(this.blockBehaviourRegistry, blockRegistry, this.fallingBlockManager);
+    // Stage 5 leaf decay
+    const leafBehaviour = registerLeafBehaviour(this.blockBehaviourRegistry);
+    const logBehaviour = registerLogBehaviour(this.blockBehaviourRegistry);
+    (this as any)._leafBehaviour = leafBehaviour;
+    (this as any)._logBehaviour = logBehaviour;
 
+    const randomTickScheduler = new RandomTickScheduler(WORLD_SEED);
     this.worldTickScheduler = new WorldTickScheduler(
       this.chunkManager,
       this.blockUpdateWorld,
       this.blockBehaviourRegistry,
-      new RandomTickScheduler(WORLD_SEED),
+      randomTickScheduler,
       this.worldEventQueue,
     );
     this.blockUpdateWorld.setScheduleCallback((x, y, z, id, delay) =>
       this.worldTickScheduler.schedule(x, y, z, id, delay),
     );
+    this.blockUpdateWorld.setBehaviourRegistry(this.blockBehaviourRegistry);
+    this.blockUpdateWorld.setEventQueue(this.worldEventQueue);
+    this.blockUpdateWorld.setGameTickProvider(() => this.worldTickScheduler.getGameTick());
+    this.blockUpdateWorld.setNextIntProvider((bound: number) => randomTickScheduler.nextInt(bound));
 
     // Register precipitation tick as a game tick callback (runs at 20 TPS)
     this.worldTickScheduler.addGameTickCallback(() => {
@@ -312,6 +322,81 @@ export class Engine {
         activeSnowfall: this.weatherController.getState().raining,
         weatherMode: this.weatherController.getState().getEffectiveMode(this.weatherController.getState().partialTick),
       }),
+      getLeafDecayMetrics: () => {
+        const leaf = (this as any)._leafBehaviour as { getMetrics?: () => any } | undefined;
+        const log = (this as any)._logBehaviour as { getMetrics?: () => any } | undefined;
+        return {
+          ...(leaf?.getMetrics?.() ?? {}),
+          ...(log?.getMetrics?.() ?? {}),
+          pendingItemDrops: this.worldEventQueue.getItemDropCount(),
+          totalItemDrops: this.worldEventQueue.getTotalItemDrops(),
+          discardedItemDrops: this.worldEventQueue.getDiscardedItemDropCount(),
+          queueDepth: this.worldEventQueue.getQueueDepth(),
+        };
+      },
+      drainLeafDecayDrops: () => this.worldEventQueue.drainItemDrops(),
+      resetLeafDecayMetrics: () => {
+        const leaf = (this as any)._leafBehaviour as { resetMetrics?: () => void } | undefined;
+        const log = (this as any)._logBehaviour as { resetMetrics?: () => void } | undefined;
+        leaf?.resetMetrics?.();
+        log?.resetMetrics?.();
+      },
+      inspectLeafDecayArea: (x: number, y: number, z: number, radius = 4) => {
+        const results: any[] = [];
+        const cx = Math.floor(x);
+        const cy = Math.floor(y);
+        const cz = Math.floor(z);
+        // Guard check for area
+        let guardPass = true;
+        const minCX = Math.floor((cx - radius - 1) / 16);
+        const maxCX = Math.floor((cx + radius + 1) / 16);
+        const minCZ = Math.floor((cz - radius - 1) / 16);
+        const maxCZ = Math.floor((cz + radius + 1) / 16);
+        for (let cxx = minCX; cxx <= maxCX; cxx++) {
+          for (let czz = minCZ; czz <= maxCZ; czz++) {
+            if (!this.chunkManager.hasChunk(cxx, czz)) {
+              guardPass = false;
+            }
+          }
+        }
+        for (let dx = -radius; dx <= radius; dx++) {
+          for (let dy = -radius; dy <= radius; dy++) {
+            for (let dz = -radius; dz <= radius; dz++) {
+              const wx = cx + dx;
+              const wy = cy + dy;
+              const wz = cz + dz;
+              if (wy < 0 || wy >= 128) continue;
+              const bid = this.blockUpdateWorld.getBlock(wx, wy, wz);
+              // Only report leaves and logs
+              const isLeaf = bid === 18 || bid === 250 || bid === 253;
+              const isLog = bid === 17 || bid === 251 || bid === 252;
+              if (!isLeaf && !isLog) continue;
+              const meta = this.blockUpdateWorld.getBlockMetadata(wx, wy, wz);
+              const hasFlag = (meta & 8) !== 0;
+              const species = meta & 3;
+              results.push({
+                x: wx,
+                y: wy,
+                z: wz,
+                blockId: bid,
+                blockName: isLeaf ? 'leaves' : 'log',
+                metadata: meta,
+                hasDecayFlag: hasFlag,
+                species,
+                guardPass,
+              });
+            }
+          }
+        }
+        return {
+          center: { x: cx, y: cy, z: cz },
+          radius,
+          guardPass,
+          leaves: results.filter((r) => r.blockName === 'leaves'),
+          logs: results.filter((r) => r.blockName === 'log'),
+          all: results,
+        };
+      },
       inspectFluid: (x: number, y: number, z: number) => {
         const blockId = this.blockUpdateWorld.getBlock(x, y, z);
         const metadata = this.blockUpdateWorld.getBlockMetadata(x, y, z);

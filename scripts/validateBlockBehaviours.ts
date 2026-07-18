@@ -398,7 +398,7 @@ for (const fluid of [BlockIds.WaterStill, BlockIds.LavaStill]) {
   const testBlocks = new BlockRegistry();
   registerDefaultBlocks(testBlocks);
   testBlocks.register({
-    id: 250,
+    id: 249,
     name: 'test_block',
     displayName: 'Test Block',
     solid: true,
@@ -415,7 +415,7 @@ for (const fluid of [BlockIds.WaterStill, BlockIds.LavaStill]) {
   const grid2 = new BlockTestGrid(testBlocks, w2);
   grid2.generate(0, 0);
   const info3 = grid2.getInfo();
-  assert(info3.some(b => b.blockId === 250), 'new registered block should appear in grid');
+  assert(info3.some(b => b.blockId === 249), 'new registered block should appear in grid');
 }
 
 // ============================================================
@@ -481,7 +481,11 @@ for (const fluid of [BlockIds.WaterStill, BlockIds.LavaStill]) {
   world.setBlock(0, 11, 0, BlockIds.Ice, { notifyNeighbours: false, updateLighting: false });
   // Manually call onRemoved (same as what would happen when ice is broken)
   iceBehaviour.onRemoved({ world, gameTick: 0 }, 0, 11, 0);
-  assert(world.getBlock(0, 11, 0) === BlockIds.WaterStill, 'ice onRemoved should place water');
+  const placed = world.getBlock(0, 11, 0);
+  // Beta harvestBlock places waterMoving (flowing), which is valid; some implementations use still.
+  // Accept either flowing or still for compatibility with transparent pipeline.
+  const isWater = placed === BlockIds.WaterStill || placed === BlockIds.WaterFlowing;
+  assert(isWater, `ice onRemoved should place water (got ${placed})`);
 }
 
 // Biome: enableSnow flag

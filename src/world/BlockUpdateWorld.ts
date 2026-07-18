@@ -4,6 +4,8 @@ import type { ChunkManager } from './ChunkManager';
 import type { LightEngine } from './generation/lighting/LightEngine';
 import { CHUNK_SIZE_Y } from './chunkConstants';
 import { getBoundaryNeighbourChunks, worldToChunkLocal } from './worldToChunkCoords';
+import type { BlockBehaviourRegistry } from './BlockBehaviour';
+import type { WorldEventQueue } from './events/WorldEventQueue';
 
 export type BlockUpdateReason = 'player' | 'scheduled' | 'neighbour' | 'world';
 
@@ -37,11 +39,16 @@ const NEIGHBOUR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
  * Narrow world mutation gateway. Behaviour systems own decisions; this
  * class only applies block/metadata changes and coordinates invalidation,
  * lighting, neighbour notification and chunk-border dirtiness.
+ * Now also dispatches onPlaced/onRemoved callbacks via behaviour registry.
  */
 export class BlockUpdateWorld {
   private readonly pendingNeighbourUpdates: NeighbourNotification[] = [];
   private scheduleCallback: ((x: number, y: number, z: number, blockId: BlockId, delayTicks: number) => boolean) | undefined;
   private readonly pendingNeighbourKeys = new Set<string>();
+  private behaviourRegistry?: BlockBehaviourRegistry;
+  private eventQueue?: WorldEventQueue;
+  private getGameTick?: () => number;
+  private getNextInt?: (bound: number) => number;
 
   public constructor(
     private readonly chunkManager: ChunkManager,
@@ -51,6 +58,22 @@ export class BlockUpdateWorld {
 
   public setScheduleCallback(callback: (x: number, y: number, z: number, blockId: BlockId, delayTicks: number) => boolean): void {
     this.scheduleCallback = callback;
+  }
+
+  public setBehaviourRegistry(registry: BlockBehaviourRegistry): void {
+    this.behaviourRegistry = registry;
+  }
+
+  public setEventQueue(queue: WorldEventQueue): void {
+    this.eventQueue = queue;
+  }
+
+  public setGameTickProvider(provider: () => number): void {
+    this.getGameTick = provider;
+  }
+
+  public setNextIntProvider(provider: (bound: number) => number): void {
+    this.getNextInt = provider;
   }
 
   public scheduleBlockTick(worldX: number, worldY: number, worldZ: number, blockId: BlockId, delayTicks: number): boolean {
@@ -74,20 +97,10 @@ export class BlockUpdateWorld {
     return this.chunkManager.hasChunk(chunkX, chunkZ);
   }
 
-  /**
-   * Returns block light level at a world position.
-   * Delegates to LightEngine. Works across chunk borders.
-   * Returns 0 for unloaded chunks or out-of-bounds Y.
-   */
   public getBlocklight(worldX: number, worldY: number, worldZ: number): number {
     return this.lightEngine.getBlocklight(worldX, worldY, worldZ);
   }
 
-  /**
-   * Returns sky light level at a world position.
-   * Delegates to LightEngine. Works across chunk borders.
-   * Returns 15 above world height, 0 below.
-   */
   public getSkylight(worldX: number, worldY: number, worldZ: number): number {
     return this.lightEngine.getSkylight(worldX, worldY, worldZ);
   }
@@ -128,6 +141,32 @@ export class BlockUpdateWorld {
 
     if (options.notifyNeighbours ?? true) {
       this.enqueueNeighbourNotifications(worldX, worldY, worldZ, options.reason ?? 'world');
+    }
+
+    // Dispatch removal and placement callbacks via behaviour registry
+    if (this.behaviourRegistry) {
+      const gameTick = this.getGameTick ? this.getGameTick() : 0;
+      const ctx = {
+        world: this,
+        gameTick,
+        nextInt: this.getNextInt,
+        events: this.eventQueue,
+      } as any;
+
+      if (previousBlockId !== 0 && previousBlockId !== blockId) {
+        try {
+          this.behaviourRegistry.get(previousBlockId).onRemoved?.(ctx, worldX, worldY, worldZ, previousBlockId);
+        } catch (e) {
+          console.warn('onRemoved failed', e);
+        }
+      }
+      if (blockId !== 0 && previousBlockId !== blockId) {
+        try {
+          this.behaviourRegistry.get(blockId).onPlaced?.(ctx, worldX, worldY, worldZ, blockId);
+        } catch (e) {
+          console.warn('onPlaced failed', e);
+        }
+      }
     }
 
     void this.blockRegistry;

@@ -547,6 +547,48 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   // Ice: transparent solid block, translucent render pass (pass 1)
   // Beta: BlockBreakable with Material.ice, render pass 1
   registerSimple(BlockIds.Ice, 'ice', 'Ice', { all: 'clear_ice' }, { solid: true, transparent: true, replaceable: false, renderType: 'ice', blocksWeather: true, lightOpacity: 3 });
+  // Glass: transparent solid, full cube, translucent pass (Beta pass 1)
+  registerSimple(BlockIds.Glass, 'glass', 'Glass', { all: 'glass' }, { solid: true, transparent: true, replaceable: false, renderType: 'ice', blocksWeather: true, lightOpacity: 0 });
+
+  // Birch species (temp IDs) for Stage 5 leaf decay validation — textures exist in Beta
+  // Birch Leaves: same properties as Oak/Spruce leaves, cutout, blocksWeather true, foliage tint handled via definition if needed
+  registry.register({
+    id: (BlockIds as any).BirchLeaves ?? 250,
+    name: 'birch_leaves',
+    displayName: 'Birch Leaves',
+    solid: true,
+    transparent: false,
+    cutout: true,
+    replaceable: false,
+    blocksWeather: true,
+    textures: { all: 'birch_leaves' },
+    tints: {
+      top: LEAF_TINT,
+      bottom: LEAF_TINT,
+      side: LEAF_TINT,
+    },
+    renderType: 'leaves',
+    lightOpacity: 1,
+    receivesAmbientOcclusion: true,
+    contributesAmbientOcclusion: false,
+  });
+
+  registry.register({
+    id: (BlockIds as any).BirchLog ?? 251,
+    name: 'birch_log',
+    displayName: 'Birch Log',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    blocksWeather: true,
+    textures: {
+      top: 'birch_top',
+      bottom: 'birch_top',
+      side: 'birch_side',
+    },
+    renderType: 'opaque',
+  });
+
   registerSimple(BlockIds.SnowBlock, 'snow_block', 'Snow Block', { all: 'snow' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Torch, 'torch', 'Torch', { all: 'torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', lightEmission: 14 });
   registerSimple(BlockIds.Ladder, 'ladder', 'Ladder', { all: 'ladder' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });

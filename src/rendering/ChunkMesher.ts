@@ -1155,8 +1155,10 @@ export class ChunkMesher {
       case BlockIds.WoodStairs:
       case BlockIds.Log:
       case BlockIds.SpruceLog:
+      case BlockIds.BirchLog:
       case BlockIds.Leaves:
       case BlockIds.SpruceLeaves:
+      case BlockIds.BirchLeaves:
       case BlockIds.Bookshelf:
       case BlockIds.TNT:
       case BlockIds.TallGrass:
@@ -1177,12 +1179,15 @@ export class ChunkMesher {
   }
 
   /**
-   * Builds ice geometry for a chunk. Ice renders as a full solid cube
-   * in the translucent pass (render pass 1 in Beta).
-   *
-   * NOT a fluid — uses standard full-cube geometry with per-face UVs,
-   * no fluid animation, no fluid surface height, no fluid corner logic.
-   * Shares the translucent render pass with fluids for correct alpha blending.
+   * Builds translucent solid geometry for a chunk (Ice, Glass).
+   * Ice/Glass are full cubes rendered in translucent pass (Beta pass 1).
+   * NOT fluids — no fluid surface logic.
+   * Culls:
+   *  - Same block type (Ice-Ice, Glass-Glass) → hidden internal face
+   *  - Opaque solid neighbours (Stone etc) → hidden
+   *  - Shows against transparent (Water, Lava, other translucent type, Air, Leaves, etc)
+   * This matches Beta BlockBreakable.shouldSideBeRendered and the task requirement
+   * that adjacent Ice faces are absent from geometry (10 faces for two adjacent Ice).
    */
   public buildTranslucent(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
@@ -1191,18 +1196,17 @@ export class ChunkMesher {
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
         for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
-          if (!this.isIce(blockId)) continue;
+          if (!this.isTranslucentSolid(blockId)) continue;
 
           const definition = this.blockRegistry.getById(blockId);
           if (definition === undefined) continue;
 
-          // Ice: standard full-cube solid block rendering.
-          // Beta shouldSideBeRendered: super.shouldSideBeRendered(1 - side)
-          // This means ice shows faces against non-opaque neighbours (including other ice).
           for (const face of FACES) {
             const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-            // Don't hide against other ice or transparent blocks
-            if (this.hidesOpaqueFace(neighbourId) && !this.isIce(neighbourId)) continue;
+            // Cull same translucent type (Ice-Ice, Glass-Glass) — required by task #1
+            if (neighbourId === blockId) continue;
+            // Cull against opaque solids (Stone, Dirt, etc.)
+            if (this.hidesOpaqueFace(neighbourId)) continue;
 
             const textureName = resolveBlockTexture(definition, face.slot);
             const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
@@ -1446,6 +1450,15 @@ export class ChunkMesher {
 
   private isIce(blockId: BlockId): boolean {
     return blockId === BlockIds.Ice;
+  }
+
+  private isGlass(blockId: BlockId): boolean {
+    // Glass may not exist in older registry, use numeric check 20 as fallback
+    return blockId === (BlockIds as any).Glass || blockId === 20;
+  }
+
+  private isTranslucentSolid(blockId: BlockId): boolean {
+    return this.isIce(blockId) || this.isGlass(blockId);
   }
 
   private isWater(blockId: BlockId): boolean {
