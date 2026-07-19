@@ -150,7 +150,8 @@ function testMenuInputAndLeakageFixes(): void {
   const invCtrl = { isOpen: false, close: () => { invCtrl.isOpen = false; }, open: () => { invCtrl.isOpen = true; }, updateScale: () => {} } as any;
   const tableCtrl = { isOpen: true, close: () => { tableCtrl.isOpen = false; }, open: () => { tableCtrl.isOpen = true; }, updateScale: () => {} } as any;
   const furnaceCtrl = { isOpen: false, close: () => {}, updateScale: () => {} } as any;
-  const router = new MenuInputRouter(invCtrl, tableCtrl, furnaceCtrl, { scale: 3 } as any);
+  const chestCtrl = { isOpen: false, close: () => {}, updateScale: () => {} } as any;
+  const router = new MenuInputRouter(invCtrl, tableCtrl, furnaceCtrl, chestCtrl, { scale: 3 } as any);
   
   // Simulate E key when table is open -> table closes ONLY, inventory does NOT open
   router['handleKeyDown']({ code: 'KeyE', preventDefault: () => {}, stopImmediatePropagation: () => {} } as any);

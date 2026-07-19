@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import type { BlockDefinition } from '../blocks/BlockDefinition';
 import type { TextureAtlas } from '../assets/TextureAtlas';
-import { resolveBlockTexture } from '../blocks/resolveBlockTexture';
+import { resolveBlockTexture, getSemanticFace } from '../blocks/resolveBlockTexture';
 import { resolveBlockTint } from '../blocks/resolveBlockTint';
 import { BlockIds } from '../blocks/BlockId';
+import { FaceDirection } from '../blocks/BlockFace';
 
 /** Fresh isolated standard cube: BoxGeometry owns exact shared vertices, winding and normals. */
 export class IsolatedBlockModelBuilder {
@@ -34,10 +35,12 @@ export class IsolatedBlockModelBuilder {
     const g = new THREE.BoxGeometry(1, 1, 1);
     const uv = g.getAttribute('uv') as THREE.BufferAttribute;
     const col = new Float32Array(72);
-    const slots: Array<'side'|'top'|'bottom'|'front'> = ['side', 'side', 'top', 'bottom', 'front', 'side'];
+    const faces: Array<FaceDirection> = [FaceDirection.EAST, FaceDirection.WEST, FaceDirection.TOP, FaceDirection.BOTTOM, FaceDirection.SOUTH, FaceDirection.NORTH];
 
-    slots.forEach((slot, f) => {
-      const r = atlas.getUvRect(resolveBlockTexture(def, slot) ?? '');
+    faces.forEach((dir, f) => {
+      const slot = getSemanticFace(dir, 3);
+      const name = resolveBlockTexture(def, slot);
+      const r = name ? atlas.getUvRect(name) : undefined;
       const t = resolveBlockTint(def, slot);
       const b = f * 4;
       for (const [n, x, y] of [[0, r?.u0 ?? 0, r?.v1 ?? 1], [1, r?.u1 ?? 1, r?.v1 ?? 1], [2, r?.u0 ?? 0, r?.v0 ?? 0], [3, r?.u1 ?? 1, r?.v0 ?? 0]] as const) {
@@ -49,6 +52,7 @@ export class IsolatedBlockModelBuilder {
       }
     });
 
+    g.rotateX(Math.PI);
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
     return g;
   }

@@ -1,18 +1,23 @@
 import { ItemStack, getMaxStackSize } from './ItemStack';
 
 export class Inventory {
-  // Full 36 slots: 0-8 are Hotbar, 9-35 are Main Inventory
-  private readonly slots: (ItemStack | null)[] = Array(36).fill(null);
+  private readonly slots: (ItemStack | null)[];
+  private readonly size: number;
+  private readonly isPlayer: boolean;
 
-  public constructor() {}
+  public constructor(size = 36, isPlayer = true) {
+    this.size = size;
+    this.isPlayer = isPlayer;
+    this.slots = Array(size).fill(null);
+  }
 
   public getStack(slotIndex: number): ItemStack | null {
-    if (slotIndex < 0 || slotIndex >= 36) return null;
+    if (slotIndex < 0 || slotIndex >= this.size) return null;
     return this.slots[slotIndex] ?? null;
   }
 
   public setStack(slotIndex: number, stack: ItemStack | null): void {
-    if (slotIndex < 0 || slotIndex >= 36) return;
+    if (slotIndex < 0 || slotIndex >= this.size) return;
     this.slots[slotIndex] = stack;
   }
 
@@ -29,7 +34,7 @@ export class Inventory {
     const maxStack = getMaxStackSize(dummyStack.identity);
 
     // Step 1: Merge into compatible partial stacks first
-    for (let i = 0; i < 36; i++) {
+    for (let i = 0; i < this.size; i++) {
       const stack = this.slots[i];
       if (stack !== null && stack !== undefined && stack.matches(dummyStack) && stack.count < maxStack) {
         const space = maxStack - stack.count;
@@ -43,28 +48,43 @@ export class Inventory {
       }
     }
 
-    // Step 2: Fill empty hotbar slots 0-8
-    for (let i = 0; i < 9; i++) {
-      if (this.slots[i] === null) {
-        const toAdd = Math.min(maxStack, remaining);
-        this.slots[i] = new ItemStack(id, type, toAdd, metadata);
-        remaining -= toAdd;
+    if (this.isPlayer && this.size === 36) {
+      // Step 2: Fill empty hotbar slots 0-8
+      for (let i = 0; i < 9; i++) {
+        if (this.slots[i] === null) {
+          const toAdd = Math.min(maxStack, remaining);
+          this.slots[i] = new ItemStack(id, type, toAdd, metadata);
+          remaining -= toAdd;
 
-        if (remaining <= 0) {
-          return count; // Fully accepted
+          if (remaining <= 0) {
+            return count; // Fully accepted
+          }
         }
       }
-    }
 
-    // Step 3: Fill empty main-inventory slots 9-35
-    for (let i = 9; i < 36; i++) {
-      if (this.slots[i] === null) {
-        const toAdd = Math.min(maxStack, remaining);
-        this.slots[i] = new ItemStack(id, type, toAdd, metadata);
-        remaining -= toAdd;
+      // Step 3: Fill empty main-inventory slots 9-35
+      for (let i = 9; i < 36; i++) {
+        if (this.slots[i] === null) {
+          const toAdd = Math.min(maxStack, remaining);
+          this.slots[i] = new ItemStack(id, type, toAdd, metadata);
+          remaining -= toAdd;
 
-        if (remaining <= 0) {
-          return count; // Fully accepted
+          if (remaining <= 0) {
+            return count; // Fully accepted
+          }
+        }
+      }
+    } else {
+      // Simple left-to-right fill for non-player inventories
+      for (let i = 0; i < this.size; i++) {
+        if (this.slots[i] === null) {
+          const toAdd = Math.min(maxStack, remaining);
+          this.slots[i] = new ItemStack(id, type, toAdd, metadata);
+          remaining -= toAdd;
+
+          if (remaining <= 0) {
+            return count; // Fully accepted
+          }
         }
       }
     }

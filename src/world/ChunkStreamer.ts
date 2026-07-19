@@ -1,5 +1,6 @@
 import type { ChunkRenderer } from '../rendering/ChunkRenderer';
 import type { ChunkManager } from './ChunkManager';
+import type { Chunk } from './Chunk';
 import type { WorldGenerator } from './WorldGenerator';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from './chunkConstants';
 import type { LightEngine } from './generation/lighting/LightEngine';
@@ -51,6 +52,7 @@ export class ChunkStreamer {
     lightEngine: LightEngine,
     worldSeed: bigint,
     persistenceQueue: ChunkPersistenceQueue,
+    private readonly onChunkLoaded?: (chunk: Chunk) => void
   ) {
     this.chunkManager = chunkManager;
     this.chunkRenderer = chunkRenderer;
@@ -116,6 +118,7 @@ export class ChunkStreamer {
       this.lightEngine.initializeChunkLighting(chunk);
       this.lightEngine.reconcileChunkBorders(chunk);
       this.markNeighboursDirty(chunk.chunkX, chunk.chunkZ);
+      this.onChunkLoaded?.(chunk);
     }
   }
 
@@ -232,6 +235,7 @@ export class ChunkStreamer {
         this.lightEngine.reconcileChunkBorders(managed);
         this.markNeighboursDirty(managed.chunkX, managed.chunkZ);
         this.loadingChunks.delete(k);
+        this.onChunkLoaded?.(managed);
       }
     });
   }

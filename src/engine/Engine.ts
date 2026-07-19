@@ -15,6 +15,10 @@ import { InventorySerializer } from '../inventory/InventorySerializer';
 import { HotbarHudRenderer } from '../inventory/HotbarHudRenderer';
 import { InventoryUi } from '../inventory/InventoryUi';
 import { InventoryTooltip } from '../inventory/InventoryTooltip';
+import { ChestManager } from '../chest/ChestManager';
+import { ChestController } from '../chest/ChestController';
+import { ChestUi } from '../chest/ChestUi';
+import { ChestRenderer } from '../chest/ChestRenderer';
 import { CursorHeldItemRenderer } from '../inventory/CursorHeldItemRenderer';
 import { InventoryController } from '../inventory/InventoryController';
 import { InventoryInputController } from '../inventory/InventoryInputController';
@@ -55,6 +59,7 @@ import { PrecipitationSimulator } from '../world/weather/PrecipitationSimulator'
 import { registerFallingBlockBehaviours } from '../world/behaviours/FallingBlockBehaviour';
 import { registerLeafBehaviour } from '../world/behaviours/LeafBehaviour';
 import { registerLogBehaviour } from '../world/behaviours/LogBehaviour';
+import { registerChestBehaviour } from '../world/behaviours/ChestBehaviour.ts';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
@@ -180,6 +185,10 @@ export class Engine {
   private readonly furnaceUi: FurnaceUi;
   private readonly furnaceController: FurnaceController;
   private readonly furnaceInputController: FurnaceInputController;
+  private readonly chestManager: ChestManager;
+  private readonly chestUi: ChestUi;
+  private readonly chestController: ChestController;
+  private readonly chestRenderer: ChestRenderer;
   private readonly menuInputRouter: MenuInputRouter;
   private readonly contextMenuSuppressor: ContextMenuSuppressor;
   private selectedSlot = 0;
@@ -463,6 +472,8 @@ export class Engine {
       blockRegistry,
       this.blockUpdateWorld,
     );
+
+    // After atlas and materials are ready
     this.heldItemRenderer = new FirstPersonHeldItemRenderer(this.firstPersonArmRenderer, this.inventory, blockRegistry, this.atlas, this.itemAtlas);
     this.firstPersonHeldBlockMesh.visible = false;
     this.thirdPersonHeldBlockMesh.visible = false;
@@ -527,6 +538,22 @@ export class Engine {
     registerDefaultSmeltingAndFuels(this.smeltingRegistry, this.fuelRegistry, blockRegistry, this.hotbarHudRenderer.getSlotContentRenderer()['itemIcons']);
     this.furnaceManager.deserialize(metadata.furnaces);
 
+    this.chestManager = new ChestManager(this.itemEntityManager);
+    this.chestManager.deserialize(metadata.chests);
+
+    registerChestBehaviour(this.blockBehaviourRegistry, this.chestManager);
+
+    this.chestUi = new ChestUi();
+    this.chestController = new ChestController(
+      this.chestUi,
+      this.inventory,
+      this.inventoryTooltip,
+      this.cursorHeldRenderer,
+      this.hotbarHudRenderer.getSlotContentRenderer(),
+      this.itemEntityManager,
+      this.player
+    );
+
     this.furnaceUi = new FurnaceUi();
     this.furnaceController = new FurnaceController(
       this.inventory,
@@ -549,14 +576,34 @@ export class Engine {
       this.inventoryController,
       this.craftingTableController,
       this.furnaceController,
+      this.chestController,
       this.hotbarHudRenderer.getLayout()
     );
 
     this.interactionController.setBlockInteractionHandler((targetId, _x, _y, _z) => {
+      if (targetId === BlockIds.Chest) {
+        if (!this.chestController.isOpen) {
+          const container = this.chestManager.get(_x, _y, _z);
+          if (container) {
+            // Check for solid block above
+            const blockAbove = this.blockUpdateWorld.getBlock(_x, _y + 1, _z);
+            const defAbove = blockRegistry.getById(blockAbove);
+            if (!defAbove || !defAbove.solid || defAbove.renderType !== 'opaque') {
+              if (this.inventoryController.isOpen) this.inventoryController.close();
+              if (this.craftingTableController.isOpen) this.craftingTableController.close();
+              if (this.furnaceController.isOpen) this.furnaceController.close();
+              this.chestController.openContainer(container, this.hotbarHudRenderer.getLayout().scale);
+            }
+          }
+        }
+        return true;
+      }
+
       if (targetId === BlockIds.CraftingTable) {
         if (!this.craftingTableController.isOpen) {
           if (this.inventoryController.isOpen) this.inventoryController.close();
           if (this.furnaceController.isOpen) this.furnaceController.close();
+          if (this.chestController.isOpen) this.chestController.close();
           this.craftingTableController.open(this.hotbarHudRenderer.getLayout().scale);
         }
         return true;
@@ -565,6 +612,7 @@ export class Engine {
         if (!this.furnaceController.isOpen) {
           if (this.inventoryController.isOpen) this.inventoryController.close();
           if (this.craftingTableController.isOpen) this.craftingTableController.close();
+          if (this.chestController.isOpen) this.chestController.close();
           const container = this.furnaceManager.getOrCreate(_x, _y, _z);
           this.furnaceController.openContainer(container, this.hotbarHudRenderer.getLayout().scale);
         }
@@ -574,6 +622,13 @@ export class Engine {
     });
 
     this.interactionController.breakingController.setOnBlockBrokenHandler((blockId, x, y, z) => {
+      if (blockId === BlockIds.Chest) {
+        if (this.chestController.isOpen && this.chestController.activeContainer && this.chestController.activeContainer.x === x && this.chestController.activeContainer.y === y && this.chestController.activeContainer.z === z) {
+          this.chestController.close();
+        }
+        this.chestManager.breakChest(x, y, z);
+      }
+
       if (blockId === BlockIds.Furnace || blockId === BlockIds.FurnaceBurning) {
         if (this.furnaceController.isOpen && this.furnaceController.activeContainer && this.furnaceController.activeContainer.x === x && this.furnaceController.activeContainer.y === y && this.furnaceController.activeContainer.z === z) {
           this.furnaceController.close();
@@ -624,6 +679,14 @@ export class Engine {
       this.lightEngine,
       worldSeed,
       this.chunkPersistenceQueue,
+      (chunk) => this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk)
+    );
+
+    this.chestRenderer = new ChestRenderer(
+      this.renderer.scene,
+      this.chestManager,
+      this.atlas,
+      this.chunkRenderer.getOpaqueMaterial()
     );
 
     this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
@@ -1010,13 +1073,15 @@ export class Engine {
     }
     this.worldTickScheduler.update(deltaSeconds);
     this.fallingBlockManager.update(deltaSeconds);
+    this.chestManager.update();
+    this.chestRenderer.update(deltaSeconds);
     this.furnaceManager.tick(this.blockUpdateWorld, this.smeltingRegistry, this.fuelRegistry);
     this.worldEventQueue.drainNoop();
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
 
     // 4. Update camera look
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen) {
       this.cameraController.update();
     }
 
@@ -1031,7 +1096,7 @@ export class Engine {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
-        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen) {
+        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen) {
           this.playerController.update();
         } else {
           this.player.wishVelocity.x = 0;
@@ -1179,7 +1244,7 @@ export class Engine {
     );
 
     // 10. Update interaction (raycast targeting + break/place edits)
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen) {
       this.interactionController.update(deltaSeconds);
     }
 
@@ -1194,7 +1259,7 @@ export class Engine {
     }
 
     // Transactional Q-key dropped item throw (Beta 1.7.3)
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && this.input.isKeyJustPressed('KeyQ')) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && this.input.isKeyJustPressed('KeyQ')) {
       const selectedSlotIndex = this.interactionController.getSelectedSlotIndex();
       const stack = this.inventory.getStack(selectedSlotIndex);
       if (stack !== null) {
@@ -1356,6 +1421,7 @@ export class Engine {
     this.inventoryController.updateScale(layoutScale);
     this.craftingTableController.updateScale(layoutScale);
     this.furnaceController.updateScale(layoutScale);
+    this.chestController.updateScale(layoutScale);
     if (this.inventoryController.isOpen) {
       this.inventoryController.renderAll();
     }
@@ -1364,6 +1430,9 @@ export class Engine {
     }
     if (this.furnaceController.isOpen) {
       this.furnaceController.renderAll();
+    }
+    if (this.chestController.isOpen) {
+      this.chestController.renderAll();
     }
     this.hotbarHudRenderer.render();
 
@@ -1394,6 +1463,7 @@ export class Engine {
       inventory: serialized.inventory,
       selectedHotbarSlot: serialized.selectedHotbarSlot,
       furnaces: this.furnaceManager.serialize(),
+      chests: this.chestManager.serialize(),
     };
   }
 

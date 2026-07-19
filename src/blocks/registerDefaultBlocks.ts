@@ -377,8 +377,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
       top: 'singlechest_top',
       bottom: 'singlechest_top',
       side: 'singlechest_side',
+      front: 'singlechest_front',
     },
-    renderType: 'opaque',
+    renderType: 'chest',
   });
 
   registry.register({

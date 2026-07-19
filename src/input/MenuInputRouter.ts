@@ -1,6 +1,7 @@
 import type { InventoryController } from '../inventory/InventoryController';
 import type { CraftingTableController } from '../crafting/CraftingTableController';
 import type { FurnaceController } from '../furnace/FurnaceController';
+import type { ChestController } from '../chest/ChestController';
 import type { HotbarLayout } from '../inventory/HotbarLayout';
 
 /**
@@ -14,6 +15,7 @@ export class MenuInputRouter {
     private readonly inventoryController: InventoryController,
     private readonly craftingTableController: CraftingTableController,
     private readonly furnaceController: FurnaceController,
+    private readonly chestController: ChestController,
     private readonly layout: HotbarLayout
   ) {
     if (typeof window !== 'undefined') {
@@ -29,6 +31,12 @@ export class MenuInputRouter {
       if (this.furnaceController.isOpen) {
         this.furnaceController.updateScale(this.layout.scale);
         this.furnaceController.close();
+        return;
+      }
+
+      if (this.chestController.isOpen) {
+        this.chestController.updateScale(this.layout.scale);
+        this.chestController.close();
         return;
       }
 
@@ -56,6 +64,13 @@ export class MenuInputRouter {
         this.furnaceController.close();
         return;
       }
+      if (this.chestController.isOpen) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.chestController.updateScale(this.layout.scale);
+        this.chestController.close();
+        return;
+      }
       if (this.craftingTableController.isOpen) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -79,6 +94,12 @@ export class MenuInputRouter {
           e.preventDefault();
           e.stopImmediatePropagation();
           this.furnaceController.handleNumberKey(digit);
+          return;
+        }
+        if (this.chestController.isOpen) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          this.chestController.handleNumberKey(digit);
           return;
         }
         if (this.craftingTableController.isOpen) {

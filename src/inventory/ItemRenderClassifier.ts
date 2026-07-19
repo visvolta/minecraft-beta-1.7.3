@@ -66,9 +66,13 @@ export function classifyItemRender(
     return 'empty';
   }
 
-  // Explicitly unsupported complex blocks in this phase (never render chests or spawners as fallback cubes)
-  if (def.id === BlockIds.Chest || def.id === BlockIds.Spawner) {
+  // Explicitly unsupported complex blocks in this phase (never render spawners as fallback cubes)
+  if (def.id === BlockIds.Spawner) {
     return 'unsupported';
+  }
+
+  if (def.id === BlockIds.Chest) {
+    return 'block_3d';
   }
 
   // Beta 1.7.3 precise render classification:

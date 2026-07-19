@@ -12,6 +12,18 @@ import type { Player } from '../player/Player';
  */
 export abstract class BaseContainerController {
   public isOpen = false;
+  
+  public open(): void {
+    if (this.isOpen) return;
+    this.isOpen = true;
+    this.releasePointerLockOnOpen();
+  }
+  
+  public close(): void {
+    if (!this.isOpen) return;
+    this.returnCursorStackOnClose();
+    this.isOpen = false;
+  }
   public cursorStack: ItemStack | null = null;
   protected hoveredSlotIndex = -1;
   protected dragSlots = new Set<number>();

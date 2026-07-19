@@ -7,7 +7,8 @@ export class InventoryTransferService {
     slotIndex: number,
     cursorStack: ItemStack | null
   ): { cursorStack: ItemStack | null } {
-    if (slotIndex < 0 || slotIndex >= 36) {
+    const size = inventory.getSlots().length;
+    if (slotIndex < 0 || slotIndex >= size) {
       return { cursorStack };
     }
 
@@ -52,7 +53,8 @@ export class InventoryTransferService {
     slotIndex: number,
     cursorStack: ItemStack | null
   ): { cursorStack: ItemStack | null } {
-    if (slotIndex < 0 || slotIndex >= 36) {
+    const size = inventory.getSlots().length;
+    if (slotIndex < 0 || slotIndex >= size) {
       return { cursorStack };
     }
 
@@ -110,16 +112,25 @@ export class InventoryTransferService {
   }
 
   public static shiftClickSlot(inventory: Inventory, slotIndex: number): void {
-    if (slotIndex < 0 || slotIndex >= 36) return;
+    const size = inventory.getSlots().length;
+    if (slotIndex < 0 || slotIndex >= size) return;
 
     const sourceStack = inventory.getStack(slotIndex);
     if (sourceStack === null || sourceStack.count <= 0) return;
 
     const targetSlots: number[] = [];
-    if (slotIndex >= 0 && slotIndex <= 8) {
-      for (let i = 9; i <= 35; i++) targetSlots.push(i);
+    if (size === 36) {
+      if (slotIndex >= 0 && slotIndex <= 8) {
+        for (let i = 9; i <= 35; i++) targetSlots.push(i);
+      } else {
+        for (let i = 0; i <= 8; i++) targetSlots.push(i);
+      }
     } else {
-      for (let i = 0; i <= 8; i++) targetSlots.push(i);
+      // General shift-click within a generic inventory isn't typically used alone, 
+      // but if called, just try to move it to any other empty/compatible slot.
+      for (let i = 0; i < size; i++) {
+        if (i !== slotIndex) targetSlots.push(i);
+      }
     }
 
     const maxStack = getMaxStackSize(sourceStack.identity);
@@ -169,9 +180,10 @@ export class InventoryTransferService {
   }
 
   public static numberKeySwap(inventory: Inventory, hoveredSlotIndex: number, hotbarIndex: number): void {
+    const size = inventory.getSlots().length;
     if (
       hoveredSlotIndex < 0 ||
-      hoveredSlotIndex >= 36 ||
+      hoveredSlotIndex >= size ||
       hotbarIndex < 0 ||
       hotbarIndex > 8 ||
       hoveredSlotIndex === hotbarIndex
@@ -195,7 +207,8 @@ export class InventoryTransferService {
     }
 
     for (const slotIndex of dragSlots) {
-      if (slotIndex < 0 || slotIndex >= 36) continue;
+      const size = inventory.getSlots().length;
+      if (slotIndex < 0 || slotIndex >= size) continue;
       if (cursorStack === null || cursorStack.count <= 0) break;
 
       const slotStack = inventory.getStack(slotIndex);
@@ -226,5 +239,29 @@ export class InventoryTransferService {
     }
 
     return { cursorStack };
+  }
+
+  public static shiftClickBetweenInventories(
+    sourceInv: Inventory,
+    sourceSlot: number,
+    targetInv: Inventory
+  ): void {
+    const sourceSize = sourceInv.getSlots().length;
+    if (sourceSlot < 0 || sourceSlot >= sourceSize) return;
+
+    const sourceStack = sourceInv.getStack(sourceSlot);
+    if (sourceStack === null || sourceStack.count <= 0) return;
+
+    const accepted = targetInv.insert(
+      sourceStack.identity.type,
+      sourceStack.identity.id,
+      sourceStack.count,
+      sourceStack.metadata
+    );
+
+    sourceStack.count -= accepted;
+    if (sourceStack.count <= 0) {
+      sourceInv.setStack(sourceSlot, null);
+    }
   }
 }

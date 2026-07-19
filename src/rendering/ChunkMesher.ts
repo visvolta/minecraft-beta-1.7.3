@@ -1,10 +1,9 @@
 import * as THREE from 'three';
 import type { BlockId } from '../blocks/BlockId';
 import { BlockIds } from '../blocks/BlockId';
-import type { BlockFace } from '../blocks/BlockFace';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { BlockDefinition } from '../blocks/BlockDefinition';
-import { resolveBlockTexture } from '../blocks/resolveBlockTexture';
+import { resolveBlockTexture, getSemanticFace } from '../blocks/resolveBlockTexture';
 import { resolveBlockTint } from '../blocks/resolveBlockTint';
 import { vegetationTintKind, type VegetationColorProvider } from '../world/generation/climate/VegetationColors';
 import type { TextureAtlas } from '../assets/TextureAtlas';
@@ -26,14 +25,16 @@ import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
 
-interface FaceDef {
+import { FaceDirection, type BlockFace } from '../blocks/BlockFace';
+
+export interface FaceDef {
   readonly nx: number;
   readonly ny: number;
   readonly nz: number;
   readonly dx: number;
   readonly dy: number;
   readonly dz: number;
-  readonly slot: BlockFace;
+  readonly dir: FaceDirection;
   readonly corners: readonly [Corner, Corner, Corner, Corner];
 }
 
@@ -62,7 +63,7 @@ const FACES: readonly FaceDef[] = [
     dx: 1,
     dy: 0,
     dz: 0,
-    slot: 'side',
+    dir: FaceDirection.EAST,
     corners: [
       [1, 0, 0],
       [1, 1, 0],
@@ -77,7 +78,7 @@ const FACES: readonly FaceDef[] = [
     dx: -1,
     dy: 0,
     dz: 0,
-    slot: 'side',
+    dir: FaceDirection.WEST,
     corners: [
       [0, 0, 1],
       [0, 1, 1],
@@ -92,7 +93,7 @@ const FACES: readonly FaceDef[] = [
     dx: 0,
     dy: 1,
     dz: 0,
-    slot: 'top',
+    dir: FaceDirection.TOP,
     corners: [
       [0, 1, 1],
       [1, 1, 1],
@@ -107,7 +108,7 @@ const FACES: readonly FaceDef[] = [
     dx: 0,
     dy: -1,
     dz: 0,
-    slot: 'bottom',
+    dir: FaceDirection.BOTTOM,
     corners: [
       [0, 0, 0],
       [1, 0, 0],
@@ -122,7 +123,7 @@ const FACES: readonly FaceDef[] = [
     dx: 0,
     dy: 0,
     dz: 1,
-    slot: 'side',
+    dir: FaceDirection.SOUTH,
     corners: [
       [0, 0, 1],
       [1, 0, 1],
@@ -137,7 +138,7 @@ const FACES: readonly FaceDef[] = [
     dx: 0,
     dy: 0,
     dz: -1,
-    slot: 'side',
+    dir: FaceDirection.NORTH,
     corners: [
       [0, 1, 0],
       [1, 1, 0],
@@ -815,15 +816,15 @@ export class ChunkMesher {
 
             // Snow-covered grass: Beta BlockGrass.getBlockTexture() checks
             // if block above has Material.snow → use grass_side_snowed (texture 68)
-            let textureName = resolveBlockTexture(definition, face.slot);
-            if (blockId === BlockIds.Grass && face.slot === 'side') {
+            let textureName = resolveBlockTexture(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)));
+            if (blockId === BlockIds.Grass && getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)) === 'side') {
               const above = this.getBlockAt(chunk, x, y + 1, z);
               if (above === BlockIds.Snow || above === BlockIds.SnowBlock) {
                 textureName = 'grass_side_snowed';
               }
             }
             const uvRect = this.getSafeUvRect(textureName);
-            const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+            const tint = this.resolveVegetationTint(blockId, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)), resolveBlockTint(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z))), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
 
             buffers.pushFace(
@@ -879,9 +880,9 @@ export class ChunkMesher {
               if (this.hidesLeafFace(neighbourId)) {
                 continue;
               }
-              const textureName = resolveBlockTexture(definition, face.slot);
+              const textureName = resolveBlockTexture(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)));
               const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-              const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+              const tint = this.resolveVegetationTint(blockId, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)), resolveBlockTint(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z))), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
               const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
               buffers.pushFace(face, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
             }
@@ -904,9 +905,9 @@ export class ChunkMesher {
               if (this.hidesCutoutFace(neighbourId)) {
                 continue;
               }
-              const textureName = resolveBlockTexture(definition, face.slot);
+              const textureName = resolveBlockTexture(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)));
               const uvRect = this.getSafeUvRect(textureName);
-              const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+              const tint = this.resolveVegetationTint(blockId, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)), resolveBlockTint(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z))), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
               const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
               buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
             }
@@ -933,7 +934,7 @@ export class ChunkMesher {
           } else if (renderType === 'snow') {
             // Beta BlockSnow: flat layer at height 1/8
             // Uses custom bounds: 0,0,0 to 1, 0.125, 1
-            const textureName = resolveBlockTexture(definition, 'side');
+            const textureName = resolveBlockTexture(definition, 'top');
             const uvRect = this.getSafeUvRect(textureName);
             const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const light = this.getLightComponentsAt(chunk, x, y, z);
@@ -1163,7 +1164,7 @@ export class ChunkMesher {
 
     // Top face (normal: 0, 1, 0)
     buffers.pushFace(
-      { nx: 0, ny: 1, nz: 0, dx: 0, dy: 1, dz: 0, slot: 'top',
+      { nx: 0, ny: 1, nz: 0, dx: 0, dy: 1, dz: 0, dir: FaceDirection.TOP,
         corners: [[0, H, 1], [1, H, 1], [1, H, 0], [0, H, 0]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1172,7 +1173,7 @@ export class ChunkMesher {
 
     // +X side
     buffers.pushFace(
-      { nx: 1, ny: 0, nz: 0, dx: 1, dy: 0, dz: 0, slot: 'side',
+      { nx: 1, ny: 0, nz: 0, dx: 1, dy: 0, dz: 0, dir: FaceDirection.EAST,
         corners: [[1, 0, 0], [1, H, 0], [1, H, 1], [1, 0, 1]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1181,7 +1182,7 @@ export class ChunkMesher {
 
     // -X side
     buffers.pushFace(
-      { nx: -1, ny: 0, nz: 0, dx: -1, dy: 0, dz: 0, slot: 'side',
+      { nx: -1, ny: 0, nz: 0, dx: -1, dy: 0, dz: 0, dir: FaceDirection.EAST,
         corners: [[0, 0, 1], [0, H, 1], [0, H, 0], [0, 0, 0]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1190,7 +1191,7 @@ export class ChunkMesher {
 
     // +Z side
     buffers.pushFace(
-      { nx: 0, ny: 0, nz: 1, dx: 0, dy: 0, dz: 1, slot: 'side',
+      { nx: 0, ny: 0, nz: 1, dx: 0, dy: 0, dz: 1, dir: FaceDirection.EAST,
         corners: [[0, 0, 1], [1, 0, 1], [1, H, 1], [0, H, 1]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1199,7 +1200,7 @@ export class ChunkMesher {
 
     // -Z side
     buffers.pushFace(
-      { nx: 0, ny: 0, nz: -1, dx: 0, dy: 0, dz: -1, slot: 'side',
+      { nx: 0, ny: 0, nz: -1, dx: 0, dy: 0, dz: -1, dir: FaceDirection.EAST,
         corners: [[0, H, 0], [1, H, 0], [1, 0, 0], [0, 0, 0]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1268,9 +1269,9 @@ export class ChunkMesher {
             // Cull against opaque solids (Stone, Dirt, etc.)
             if (this.hidesOpaqueFace(neighbourId)) continue;
 
-            const textureName = resolveBlockTexture(definition, face.slot);
+            const textureName = resolveBlockTexture(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)));
             const uvRect = this.getSafeUvRect(textureName);
-            const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+            const tint = this.resolveVegetationTint(blockId, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)), resolveBlockTint(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z))), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
 
             buffers.pushFace(

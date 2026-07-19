@@ -6,7 +6,7 @@ export class InventorySerializer {
   /**
    * Serializes the player's 36-slot inventory and active selected hotbar slot.
    */
-  public static serialize(inventory: Inventory, selectedSlot: number): {
+  public static serialize(inventory: Inventory, selectedSlot: number = 0): {
     inventory: (SerializedItemStack | null)[];
     selectedHotbarSlot: number;
   } {
@@ -37,7 +37,8 @@ export class InventorySerializer {
     inventory.clear();
     if (!serializedInventory || !Array.isArray(serializedInventory)) return;
 
-    for (let i = 0; i < Math.min(36, serializedInventory.length); i++) {
+    const size = inventory.getSlots().length;
+    for (let i = 0; i < Math.min(size, serializedInventory.length); i++) {
       const data = serializedInventory[i];
       if (data && data.id !== undefined && data.count > 0 && data.type !== undefined) {
         inventory.setStack(i, new ItemStack(data.id, data.type, data.count, data.metadata ?? 0));

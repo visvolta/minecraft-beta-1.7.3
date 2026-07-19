@@ -288,11 +288,10 @@ export class InventoryController extends BaseContainerController {
     this.renderAll();
   }
 
-  public open(scale: number): void {
+  public open(scale = 3): void {
     if (this.isOpen) return;
-    this.isOpen = true;
+    super.open();
     this.scale = scale;
-    this.releasePointerLockOnOpen();
     this.ui.open(scale);
     this.onCraftingGridChanged();
     this.renderAll();
@@ -300,11 +299,10 @@ export class InventoryController extends BaseContainerController {
 
   public close(): void {
     if (!this.isOpen) return;
-    this.returnCursorStackOnClose();
+    super.close();
     CraftingTransferService.closeRecovery(this.craftingGrid, this.inventory, this.itemEntityManager, this.player);
     this.resultSlotStack = null;
 
-    this.isOpen = false;
     this.hoveredSlotIndex = -1;
     this.isRightDragging = false;
     this.dragSlots.clear();

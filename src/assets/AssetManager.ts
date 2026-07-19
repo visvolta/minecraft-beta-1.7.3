@@ -21,9 +21,9 @@ export class AssetManager {
     const textureNames = new Set<string>();
 
     for (const definition of blockRegistry.values()) {
-      const { all, top, bottom, side } = definition.textures;
+      const { all, top, bottom, side, front } = definition.textures;
 
-      for (const name of [all, top, bottom, side]) {
+      for (const name of [all, top, bottom, side, front]) {
         if (name !== undefined) {
           textureNames.add(name);
         }

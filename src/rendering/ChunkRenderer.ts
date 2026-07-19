@@ -605,6 +605,10 @@ export class ChunkRenderer {
     this.translucentDepthGroup.removeFromParent();
   }
 
+  public getOpaqueMaterial(): THREE.MeshBasicMaterial {
+    return this.terrainMaterial;
+  }
+
   public getVisibleMeshCount(): number {
     return (
       this.terrainMeshes.size +

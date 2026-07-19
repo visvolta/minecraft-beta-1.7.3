@@ -15,5 +15,8 @@ export function resolveBlockTint(
   if (face === 'front') {
     return definition.tints?.front ?? definition.tints?.side ?? WHITE_TINT;
   }
-  return definition.tints?.[face] ?? WHITE_TINT;
+  if (face === 'back') {
+    return definition.tints?.side ?? WHITE_TINT;
+  }
+  return definition.tints?.[face as 'top' | 'bottom' | 'side' | 'front'] ?? WHITE_TINT;
 }

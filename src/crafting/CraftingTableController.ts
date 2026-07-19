@@ -288,7 +288,7 @@ export class CraftingTableController extends BaseContainerController {
     this.renderAll();
   }
 
-  public open(scale: number): void {
+  public open(scale = 3): void {
     if (this.isOpen) return;
     this.isOpen = true;
     this.scale = scale;
