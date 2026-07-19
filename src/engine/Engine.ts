@@ -66,6 +66,7 @@ import type { WorldMetadata } from '../persistence/metadata/WorldMetadata';
 import { PlayerModel } from '../player/PlayerModel';
 import { PlayerAnimator } from '../player/PlayerAnimator';
 import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
+import { FirstPersonHeldItemRenderer } from '../rendering/FirstPersonHeldItemRenderer.ts';
 import { FirstPersonMotionController } from '../player/FirstPersonMotionController';
 import { CameraModeController, CameraMode } from '../camera/CameraModeController';
 import * as THREE from 'three';
@@ -195,6 +196,7 @@ export class Engine {
   private readonly playerAnimator: PlayerAnimator;
   private readonly firstPersonArmRenderer: FirstPersonArmRenderer;
   private readonly firstPersonMotionController: FirstPersonMotionController;
+  private readonly heldItemRenderer: FirstPersonHeldItemRenderer;
   private readonly cameraModeController: CameraModeController;
 
   private readonly skinManager: PlayerSkinManager;
@@ -427,6 +429,9 @@ export class Engine {
       blockRegistry,
       this.blockUpdateWorld,
     );
+    this.heldItemRenderer = new FirstPersonHeldItemRenderer(this.firstPersonArmRenderer, this.inventory, blockRegistry, this.atlas, this.itemAtlas);
+    this.firstPersonHeldBlockMesh.visible = false;
+    this.thirdPersonHeldBlockMesh.visible = false;
     this.hotbarHudRenderer = new HotbarHudRenderer(
       this.atlas,
       this.itemAtlas,
@@ -685,6 +690,7 @@ export class Engine {
     this.blockHighlight.dispose();
     this.destroyOverlayRenderer.dispose();
     this.hotbarHudRenderer.dispose();
+    this.heldItemRenderer.dispose();
     this.itemEntityManager.cleanup();
     this.chunkStreamer.dispose();
     this.fallingBlockManager.dispose();
@@ -881,6 +887,9 @@ export class Engine {
       }
 
       this.firstPersonMotionController.update(camera, this.player, this.firstPersonArmRenderer, 1.0);
+      // Dedicated renderer owns held geometry and per-category first-person transforms.
+      const holdingBlock = this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
+      this.firstPersonArmRenderer.setArmMeshVisible(!holdingBlock);
     } else {
       this.playerModel.setVisible(true);
       this.firstPersonArmRenderer.setVisible(false);
@@ -1252,8 +1261,9 @@ export class Engine {
         this.thirdPersonHeldBlockMesh.material = this.itemHeldMaterial;
       }
 
-      this.firstPersonHeldBlockMesh.visible = true;
-      this.thirdPersonHeldBlockMesh.visible = true;
+      // Legacy Engine-held meshes are intentionally disabled: HeldItemRenderer owns first-person content.
+      this.firstPersonHeldBlockMesh.visible = false;
+      this.thirdPersonHeldBlockMesh.visible = false;
     }
   }
 

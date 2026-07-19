@@ -142,3 +142,12 @@ canvas {
   text-shadow: 2px 2px 0px #3f3f3f; // iconic shadow offset
   z-index: 70;
 }
+/* Stage 1 single hotbar DOM. */
+#stage1-hud { position:fixed; inset:0; pointer-events:none; z-index:20; }
+.stage1-hotbar { position:absolute; inset:0; overflow:visible; }
+.stage1-slot { position:absolute; box-sizing:content-box; background:url('/textures/gui/center_hotbarslot.png') center/100% 100% no-repeat; image-rendering:pixelated; }
+.stage1-slot:first-child { background-image:url('/textures/gui/leftedge_hotbarslot.png'); }
+.stage1-slot:nth-child(9) { background-image:url('/textures/gui/rightedge_hotbarslot.png'); }
+.stage1-slot.selected::before { content:''; position:absolute; inset:-12.5%; background:url('/textures/gui/selected_hotbarslot.png') center/100% 100% no-repeat; image-rendering:pixelated; z-index:3; }
+.stage1-icon { position:absolute; width:80%; height:80%; left:10%; top:10%; object-fit:contain; image-rendering:pixelated; z-index:2; }
+.stage1-count { position:absolute; right:4%; bottom:0; color:#fff; font:bold 12px monospace; text-shadow:1px 1px #333; z-index:4; }
