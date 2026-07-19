@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { BlockId } from '../blocks/BlockId';
-import { BlockIds } from '../blocks/BlockId';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { DigitKey } from '../input/Input';
 import type { Input } from '../input/Input';
@@ -13,29 +12,12 @@ import { Raycaster } from '../world/Raycaster';
 import { worldToChunkLocal } from '../world/worldToChunkCoords';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import { BreakingController } from './BreakingController';
+import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
+import { Inventory } from '../inventory/Inventory';
 
 /** Maximum block interaction reach, in blocks. */
 export const INTERACTION_REACH = 4.75;
 
-/**
- * Simple digit-key -> block mapping for this stage (no hotbar UI yet).
- * Slot 6 has no block yet; pressing it is a harmless no-op.
- */
-const DIGIT_KEY_BLOCKS: Record<DigitKey, BlockId | undefined> = {
-  '1': BlockIds.Stone,
-  '2': BlockIds.Grass,
-  '3': BlockIds.Dirt,
-  '4': BlockIds.Cobblestone,
-  '5': BlockIds.Bedrock,
-  '6': undefined,
-};
-
-/**
- * Drives block targeting (via the Raycaster), breaking, placing, and the
- * currently selected block. Does not render anything or own chunk/block
- * data — it only reads the BlockRegistry and edits chunks through
- * ChunkManager, matching how PlayerPhysics and ChunkMesher already work.
- */
 export class InteractionController {
   private readonly input: Input;
   private readonly camera: THREE.PerspectiveCamera;
@@ -45,10 +27,11 @@ export class InteractionController {
   private readonly raycaster: Raycaster;
   private readonly blockUpdateWorld: BlockUpdateWorld;
   public readonly breakingController: BreakingController;
+  public readonly inventory: Inventory;
 
   private readonly lookDirection = new THREE.Vector3();
 
-  private selectedBlockId: BlockId = BlockIds.Stone;
+  private selectedSlotIndex = 0; // 0 to 8 representing the selected hotbar slot
   private currentHit: RaycastHit | undefined;
 
   public constructor(
@@ -58,6 +41,8 @@ export class InteractionController {
     chunkManager: ChunkManager,
     blockRegistry: BlockRegistry,
     blockUpdateWorld: BlockUpdateWorld,
+    itemEntityManager: ItemEntityManager,
+    inventory: Inventory,
   ) {
     this.input = input;
     this.camera = camera;
@@ -65,8 +50,18 @@ export class InteractionController {
     this.chunkManager = chunkManager;
     this.blockRegistry = blockRegistry;
     this.blockUpdateWorld = blockUpdateWorld;
+    this.inventory = inventory;
     this.raycaster = new Raycaster(chunkManager, blockRegistry);
-    this.breakingController = new BreakingController(player, chunkManager, blockRegistry, blockUpdateWorld);
+    this.breakingController = new BreakingController(player, chunkManager, blockRegistry, blockUpdateWorld, itemEntityManager);
+
+    // Listen for mouse wheel to change hotbar slot index with immediate snap
+    window.addEventListener('wheel', (event) => {
+      // Only process scroll if pointer is locked (playing)
+      if (this.input.isPointerLocked()) {
+        const change = Math.sign(event.deltaY);
+        this.selectedSlotIndex = (this.selectedSlotIndex + change + 9) % 9;
+      }
+    });
   }
 
   /** Currently targeted block, if any (for BlockHighlight to render). */
@@ -74,8 +69,25 @@ export class InteractionController {
     return this.currentHit;
   }
 
+  public getSelectedSlotIndex(): number {
+    return this.selectedSlotIndex;
+  }
+
+  public setSelectedSlotIndex(slotIndex: number): void {
+    if (slotIndex >= 0 && slotIndex < 9) {
+      this.selectedSlotIndex = slotIndex;
+    }
+  }
+
+  /**
+   * Resolves the active held block ID from the selected hotbar slot in the inventory.
+   */
   public getSelectedBlockId(): BlockId {
-    return this.selectedBlockId;
+    const stack = this.inventory.getStack(this.selectedSlotIndex);
+    if (stack !== null && stack.identity.type === 'block') {
+      return stack.identity.id as BlockId;
+    }
+    return 0; // Return empty (Air) if empty or non-block
   }
 
   /**
@@ -86,7 +98,7 @@ export class InteractionController {
    * up in the same frame's rebuild pass).
    */
   public update(deltaSeconds: number): void {
-    this.updateSelectedBlock();
+    this.updateSelectedSlot();
 
     this.camera.getWorldDirection(this.lookDirection);
 
@@ -109,58 +121,64 @@ export class InteractionController {
     }
 
     if (this.input.isMouseButtonJustPressed('right')) {
-      this.placeBlock(this.currentHit);
+      const placed = this.placeBlock(this.currentHit);
+      if (placed) {
+        // Authoritative decrement of exactly 1 item upon successful placement
+        this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+      }
       this.player.swingItem();
     }
   }
 
-  private updateSelectedBlock(): void {
-    for (const key of Object.keys(DIGIT_KEY_BLOCKS) as DigitKey[]) {
-      if (!this.input.isDigitKeyJustPressed(key)) {
-        continue;
-      }
-
-      const blockId = DIGIT_KEY_BLOCKS[key];
-      if (blockId !== undefined) {
-        this.selectedBlockId = blockId;
+  private updateSelectedSlot(): void {
+    // Keys 1-9 set selectedSlotIndex 0-8 with immediate snap
+    for (let i = 0; i < 9; i++) {
+      if (this.input.isDigitKeyJustPressed((i + 1).toString() as DigitKey)) {
+        this.selectedSlotIndex = i;
       }
     }
   }
 
-  /** Places the selected block adjacent to the hit face, if the position is valid. */
-  private placeBlock(hit: RaycastHit): void {
+  /** 
+   * Places the selected block adjacent to the hit face, if the position is valid.
+   * Returns true on successful block placement, or false on any failure.
+   */
+  private placeBlock(hit: RaycastHit): boolean {
+    const selectedId = this.getSelectedBlockId();
+    if (selectedId === 0) {
+      return false; // Nothing held or non-block held
+    }
+
     const targetX = hit.blockPos.x + hit.face.x;
     const targetY = hit.blockPos.y + hit.face.y;
     const targetZ = hit.blockPos.z + hit.face.z;
 
     if (targetY < 0 || targetY >= CHUNK_SIZE_Y) {
-      return;
+      return false;
     }
 
     const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(targetX, targetZ);
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
 
     if (chunk === undefined) {
-      // Don't generate new chunks as a side effect of placing; only place
-      // into already-loaded world, consistent with the raycast itself
-      // only ever hitting loaded blocks.
-      return;
+      return false;
     }
 
     const existingBlockId = chunk.getBlock(localX, targetY, localZ);
     const existingDefinition = this.blockRegistry.getById(existingBlockId);
 
     if (existingDefinition === undefined || !existingDefinition.replaceable) {
-      return;
+      return false;
     }
 
     const targetBoxAABB = new AABB(targetX, targetY, targetZ, targetX + 1, targetY + 1, targetZ + 1);
 
     if (targetBoxAABB.intersects(this.player.getAABB())) {
-      return;
+      return false;
     }
 
-    this.setBlock(targetX, targetY, targetZ, this.selectedBlockId);
+    this.setBlock(targetX, targetY, targetZ, selectedId);
+    return true;
   }
 
   /**

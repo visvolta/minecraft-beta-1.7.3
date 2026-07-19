@@ -13,6 +13,8 @@ import { BlockUpdateWorld } from '../src/world/BlockUpdateWorld.ts';
 import { ANIMATION_ARM_SWING_LIMIT } from '../src/player/PlayerConstants.ts';
 import { BreakingController } from '../src/player/BreakingController.ts';
 import { BlockIds } from '../src/blocks/BlockId.ts';
+import { Inventory } from '../src/inventory/Inventory.ts';
+import { InventorySerializer } from '../src/inventory/InventorySerializer.ts';
 
 function assert(v: boolean, m: string) {
   if (!v) {
@@ -167,7 +169,11 @@ function testBreakingController() {
   const chunk = chunkManager.getOrCreateChunk(0, 0);
   chunk.setBlock(0, 64, 0, BlockIds.Bedrock);
 
-  const breaking = new BreakingController(player, chunkManager, blockRegistry, world);
+  const mockItemManager = {
+    spawnItem: () => {}
+  } as any;
+
+  const breaking = new BreakingController(player, chunkManager, blockRegistry, world, mockItemManager);
 
   const bedrockHit = {
     blockPos: { x: 0, y: 64, z: 0 },
@@ -208,11 +214,58 @@ function testBreakingController() {
   assert(world.getBlock(0, 64, 0) === BlockIds.Air, 'Stone broken at 150 ticks');
 }
 
+function testInventory() {
+  const inv = new Inventory();
+
+  // 1. Check default state is empty
+  assert(inv.getStack(0) === null, 'Slot 0 is empty initially');
+
+  // 2. Insert 10 Grass blocks (BlockId 2)
+  const accepted1 = inv.insert('block', BlockIds.Grass, 10, 0);
+  assert(accepted1 === 10, 'Inserted 10 grass blocks');
+  const slot0 = inv.getStack(0);
+  assert(slot0 !== null && slot0.count === 10, 'Slot 0 contains 10 grass');
+
+  // 3. Merge 20 more Grass blocks
+  const accepted2 = inv.insert('block', BlockIds.Grass, 20, 0);
+  assert(accepted2 === 20, 'Merged 20 more grass');
+  assert(inv.getStack(0)!.count === 30, 'Slot 0 merged up to 30 grass');
+
+  // 4. Fill to overflow (insert 40 more, max is 64)
+  const accepted3 = inv.insert('block', BlockIds.Grass, 40, 0);
+  assert(accepted3 === 40, 'Inserted 40 more grass (leads to overflow)');
+  assert(inv.getStack(0)!.count === 64, 'Slot 0 filled to max 64');
+  assert(inv.getStack(1) !== null && inv.getStack(1)!.count === 6, 'Slot 1 contains overflow remainder of 6');
+
+  // 5. Check Sign max stack size is 16
+  const accepted4 = inv.insert('item', 'sign', 20, 0);
+  assert(accepted4 === 20, 'Inserted 20 signs');
+  assert(inv.getStack(2)!.count === 16, 'Slot 2 filled to max sign stack size of 16');
+  assert(inv.getStack(3)!.count === 4, 'Slot 3 contains sign remainder of 4');
+
+  // 6. Decrement stack
+  inv.decrementSlot(1, 4);
+  assert(inv.getStack(1)!.count === 2, 'Slot 1 decremented by 4, count is 2');
+  inv.decrementSlot(1, 2);
+  assert(inv.getStack(1) === null, 'Slot 1 count reached 0 and slot cleared');
+
+  // 7. Serialize and Deserialize
+  const serialized = InventorySerializer.serialize(inv, 3);
+  assert(serialized.selectedHotbarSlot === 3, 'Serialized selected slot is 3');
+  assert(serialized.inventory[0]!.count === 64, 'Serialized inventory item 0 count is 64');
+
+  const inv2 = new Inventory();
+  InventorySerializer.deserialize(inv2, serialized.inventory);
+  assert(inv2.getStack(0)!.count === 64, 'Deserialized slot 0 matches 64 count');
+  assert(inv2.getStack(2)!.count === 16, 'Deserialized slot 2 matches 16 count');
+}
+
 function main() {
   testPlayerAnimator();
   testFirstPersonMotion();
   testFirstPersonArmRenderer();
   testBreakingController();
+  testInventory();
   testCameraModeController();
   console.log('Player Rendering Validation Passed.');
   process.exit(0);

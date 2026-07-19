@@ -7,6 +7,8 @@ import { AIR_BLOCK_ID } from '../world/chunkConstants';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import type { RaycastHit } from '../world/Raycaster';
 import { worldToChunkLocal } from '../world/worldToChunkCoords';
+import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
+import { resolveBlockDrops } from '../entities/items/BlockDropResolver';
 
 /**
  * Replicates Minecraft Beta 1.7.3 block breaking logic.
@@ -18,6 +20,7 @@ export class BreakingController {
   private readonly chunkManager: ChunkManager;
   private readonly blockRegistry: BlockRegistry;
   private readonly blockUpdateWorld: BlockUpdateWorld;
+  private readonly itemEntityManager: ItemEntityManager;
 
   // Active mining state
   private miningBlockPos: { x: number; y: number; z: number } | undefined;
@@ -29,11 +32,13 @@ export class BreakingController {
     chunkManager: ChunkManager,
     blockRegistry: BlockRegistry,
     blockUpdateWorld: BlockUpdateWorld,
+    itemEntityManager: ItemEntityManager,
   ) {
     this.player = player;
     this.chunkManager = chunkManager;
     this.blockRegistry = blockRegistry;
     this.blockUpdateWorld = blockUpdateWorld;
+    this.itemEntityManager = itemEntityManager;
   }
 
   public getMiningBlockPos(): { x: number; y: number; z: number } | undefined {
@@ -176,11 +181,22 @@ export class BreakingController {
       return;
     }
 
+    const blockId = this.blockUpdateWorld.getBlock(x, y, z);
+    const metadata = this.blockUpdateWorld.getBlockMetadata(x, y, z);
+
     // Replaces block with Air and triggers mesh rebuild/neighborhood updates
-    this.blockUpdateWorld.setBlock(x, y, z, AIR_BLOCK_ID, {
+    const success = this.blockUpdateWorld.setBlock(x, y, z, AIR_BLOCK_ID, {
       reason: 'player',
       notifyNeighbours: true,
       updateLighting: true,
     });
+
+    if (success) {
+      // Resolve block drops and trigger spawn centered at the block
+      const drops = resolveBlockDrops(blockId, metadata);
+      for (const drop of drops) {
+        this.itemEntityManager.spawnItem(x + 0.5, y + 0.2, z + 0.5, drop, 10);
+      }
+    }
   }
 }

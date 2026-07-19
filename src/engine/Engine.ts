@@ -7,7 +7,14 @@ import { PlayerController } from '../player/PlayerController';
 import { InteractionController } from '../player/InteractionController';
 import { PlayerPhysics } from '../physics/PlayerPhysics';
 import { BlockHighlight } from '../rendering/BlockHighlight';
-import { DestroyOverlayRenderer } from '../rendering/DestroyOverlayRenderer.ts';
+import { DestroyOverlayRenderer } from '../rendering/DestroyOverlayRenderer';
+import { ItemTextureAtlas } from '../assets/ItemTextureAtlas';
+import { ItemEntityManager } from '../entities/items/ItemEntityManager';
+import { Inventory } from '../inventory/Inventory';
+import { InventorySerializer } from '../inventory/InventorySerializer';
+import { HotbarHudRenderer } from '../inventory/HotbarHudRenderer';
+import { classifyItemRender } from '../inventory/ItemRenderClassifier';
+import { BlockItemModelBuilder } from '../inventory/BlockItemModelBuilder';
 import { ChunkRenderer, attachEntityLighting } from '../rendering/ChunkRenderer';
 import { FogController } from '../rendering/FogController';
 import { Renderer } from '../rendering/Renderer';
@@ -131,6 +138,13 @@ export class Engine {
   private readonly interactionController: InteractionController;
   private readonly blockHighlight: BlockHighlight;
   private readonly destroyOverlayRenderer: DestroyOverlayRenderer;
+  private readonly itemAtlas: ItemTextureAtlas;
+  private readonly itemEntityManager: ItemEntityManager;
+  private lastTotalTicks = 0;
+  private readonly inventory: Inventory;
+  private readonly hotbarHudRenderer: HotbarHudRenderer;
+  private selectedSlot = 0;
+  private readonly itemHeldMaterial: THREE.MeshBasicMaterial;
   private readonly atlas: TextureAtlas;
   private readonly chunkManager: ChunkManager;
   private readonly worldGenerator: BetaWorldGenerator;
@@ -188,16 +202,24 @@ export class Engine {
   private readonly heldBlockMaterial: THREE.MeshBasicMaterial;
   private readonly firstPersonHeldBlockMesh: THREE.Mesh;
   private readonly thirdPersonHeldBlockMesh: THREE.Mesh;
-  private lastSelectedBlockId: BlockId = 0;
+  private lastSelectedStackKey = '';
 
   private readonly playerModelUniforms: EntityLightingUniforms | undefined;
   private readonly firstPersonArmUniforms: EntityLightingUniforms | undefined;
   private readonly heldBlockUniforms: EntityLightingUniforms | undefined;
 
-  public constructor(blockRegistry: BlockRegistry, atlas: TextureAtlas, private readonly saveCoordinator: WorldSaveCoordinator, private readonly storage: WorldStorage, skinManager: PlayerSkinManager) {
+  public constructor(
+    blockRegistry: BlockRegistry,
+    atlas: TextureAtlas,
+    itemAtlas: ItemTextureAtlas,
+    private readonly saveCoordinator: WorldSaveCoordinator,
+    private readonly storage: WorldStorage,
+    skinManager: PlayerSkinManager
+  ) {
     const metadata = saveCoordinator.getMetadata();
     const worldSeed = BigInt(metadata.seed);
     this.atlas = atlas;
+    this.itemAtlas = itemAtlas;
     this.blockRegistry = blockRegistry;
     this.skinManager = skinManager;
     this.chunkManager = new ChunkManager();
@@ -362,6 +384,32 @@ export class Engine {
     );
     this.lightningRenderer = new LightningRenderer(this.renderer.scene);
 
+    this.inventory = new Inventory();
+    InventorySerializer.deserialize(this.inventory, metadata.inventory);
+    this.selectedSlot = metadata.selectedHotbarSlot ?? 0;
+
+    this.itemHeldMaterial = new THREE.MeshBasicMaterial({
+      map: itemAtlas.texture,
+      transparent: true,
+      side: THREE.DoubleSide,
+      alphaTest: 0.1,
+    });
+    attachEntityLighting(this.itemHeldMaterial);
+
+    this.itemEntityManager = new ItemEntityManager(
+      this.renderer.scene,
+      this.chunkManager,
+      blockRegistry,
+      this.blockUpdateWorld,
+      this.atlas,
+      this.itemAtlas,
+      this.buildHeldBlockGeometry.bind(this),
+      this.heldBlockMaterial,
+      this.itemHeldMaterial,
+      this.inventory,
+    );
+    this.lastTotalTicks = this.worldTime.getTotalTicks();
+
     this.interactionController = new InteractionController(
       this.input,
       this.renderer.camera,
@@ -369,6 +417,8 @@ export class Engine {
       this.chunkManager,
       blockRegistry,
       this.blockUpdateWorld,
+      this.itemEntityManager,
+      this.inventory,
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
     this.destroyOverlayRenderer = new DestroyOverlayRenderer(
@@ -376,6 +426,12 @@ export class Engine {
       atlas,
       blockRegistry,
       this.blockUpdateWorld,
+    );
+    this.hotbarHudRenderer = new HotbarHudRenderer(
+      this.atlas,
+      this.itemAtlas,
+      blockRegistry,
+      this.inventory,
     );
     this.fluidAnimationSystem = new FluidAnimationSystem();
     this.fireAnimationSystem = new FireAnimationSystem();
@@ -574,6 +630,8 @@ export class Engine {
         };
       },
     };
+
+    this.updateHeldItemMesh();
   }
 
   /**
@@ -626,6 +684,8 @@ export class Engine {
     this.debugOverlay.dispose();
     this.blockHighlight.dispose();
     this.destroyOverlayRenderer.dispose();
+    this.hotbarHudRenderer.dispose();
+    this.itemEntityManager.cleanup();
     this.chunkStreamer.dispose();
     this.fallingBlockManager.dispose();
     this.lightningRenderer.dispose();
@@ -750,6 +810,17 @@ export class Engine {
 
     // 3. Advance world time and world block-tick infrastructure.
     this.worldTime.update(deltaSeconds);
+
+    const prevTicks = Math.floor(this.lastTotalTicks);
+    const currentTicks = Math.floor(this.worldTime.getTotalTicks());
+    this.lastTotalTicks = this.worldTime.getTotalTicks();
+
+    const elapsedTicks = currentTicks - prevTicks;
+    if (elapsedTicks > 0) {
+      for (let i = 0; i < elapsedTicks; i++) {
+        this.itemEntityManager.tick(this.player);
+      }
+    }
     const now = performance.now();
     if (now - this.lastMetadataAutosaveMs >= METADATA_AUTOSAVE_MS) {
       this.lastMetadataAutosaveMs = now;
@@ -916,11 +987,56 @@ export class Engine {
     // 10. Update interaction (raycast targeting + break/place edits)
     this.interactionController.update(deltaSeconds);
 
-    // 10a. Update held block selection if changed
-    const currentBlockId = this.interactionController.getSelectedBlockId();
-    if (currentBlockId !== this.lastSelectedBlockId) {
-      this.lastSelectedBlockId = currentBlockId;
-      this.updateHeldBlockMesh(currentBlockId);
+    // 10a. Update held item selection and slot HUD if changed
+    const currentSlot = this.interactionController.getSelectedSlotIndex();
+    const currentStack = this.inventory.getStack(currentSlot);
+    const currentStackKey = currentStack === null ? 'empty' : `${currentStack.identity.id}_${currentStack.count}`;
+    if (this.selectedSlot !== currentSlot || this.lastSelectedStackKey !== currentStackKey) {
+      this.selectedSlot = currentSlot;
+      this.lastSelectedStackKey = currentStackKey;
+      this.updateHeldItemMesh();
+    }
+
+    // Transactional Q-key dropped item throw (Beta 1.7.3)
+    if (this.input.isKeyJustPressed('KeyQ')) {
+      const selectedSlotIndex = this.interactionController.getSelectedSlotIndex();
+      const stack = this.inventory.getStack(selectedSlotIndex);
+      if (stack !== null) {
+        // Player eye coordinates (X, Y - 0.3 + 1.62 = Y + 1.32, Z)
+        const spawnX = this.player.position.x;
+        const spawnY = this.player.position.y + 1.32;
+        const spawnZ = this.player.position.z;
+
+        // Compute exact Beta 1.7.3 launch velocities based on look pitch/yaw
+        const yaw = this.cameraController.getYaw();
+        const pitch = this.cameraController.getPitch();
+        
+        const throwStrength = 0.3;
+        let motionX = -Math.sin(yaw) * Math.cos(pitch) * throwStrength;
+        let motionZ = Math.cos(yaw) * Math.cos(pitch) * throwStrength;
+        let motionY = -Math.sin(pitch) * throwStrength + 0.1;
+
+        // Add minor randomized deviance matching original source
+        const randAngle = Math.random() * Math.PI * 2;
+        const randForce = Math.random() * 0.02;
+        motionX += Math.cos(randAngle) * randForce;
+        motionZ += Math.sin(randAngle) * randForce;
+        motionY += (Math.random() - Math.random()) * 0.1;
+
+        // Single drop representation
+        const singleDrop = {
+          type: stack.identity.type,
+          id: stack.identity.id,
+          count: 1,
+          metadata: stack.metadata,
+        };
+
+        // Spawn the thrown item with a 40-tick pickup delay (2.0s)
+        this.itemEntityManager.spawnThrownItem(spawnX, spawnY, spawnZ, singleDrop, motionX, motionY, motionZ, 40);
+
+        // Transactional: Consume exactly 1 item from the stack only after successful spawn
+        this.inventory.decrementSlot(selectedSlotIndex, 1);
+      }
     }
 
     // 10b. Query and update static player and arm lighting defensively
@@ -998,6 +1114,9 @@ export class Engine {
     const progress = this.interactionController.breakingController.getProgress();
     this.destroyOverlayRenderer.update(activeMiningPos, progress);
 
+    // Update dropped item visuals (rotation and bobbing)
+    this.itemEntityManager.updateVisuals();
+
     // 14. Update debug overlay stats. Frame timing is recorded every
     // frame (so FPS smoothing stays accurate even while the overlay is
     // hidden); the full stats snapshot (including a climate/biome
@@ -1035,13 +1154,37 @@ export class Engine {
       this.renderer.renderer.render(this.firstPersonArmRenderer.scene, camera);
     }
 
+    // Render WebGL HUD slots icons pass cleanly on top of everything
+    this.hotbarHudRenderer.update(this.selectedSlot);
+    this.hotbarHudRenderer.render();
+
     this.performanceProfiler.endRender();
     this.performanceProfiler.endFrame();
   };
   private snapshotMetadata(): WorldMetadata {
     const current = this.saveCoordinator.getMetadata();
     const weather = this.weatherController.getState();
-    return { ...current, player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime } };
+    const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);
+
+    return {
+      ...current,
+      player: {
+        x: this.player.position.x,
+        y: this.player.position.y,
+        z: this.player.position.z,
+        yaw: this.cameraController.getYaw(),
+        pitch: this.cameraController.getPitch()
+      },
+      timeTicks: this.worldTime.getTotalTicks(),
+      weather: {
+        raining: weather.raining,
+        thundering: weather.thundering,
+        rainTime: weather.rainTime,
+        thunderTime: weather.thunderTime
+      },
+      inventory: serialized.inventory,
+      selectedHotbarSlot: serialized.selectedHotbarSlot,
+    };
   }
 
   private async saveMetadata(force: boolean): Promise<void> {
@@ -1051,22 +1194,128 @@ export class Engine {
     return this.metadataSaveInFlight;
   }
 
-  private updateHeldBlockMesh(blockId: BlockId): void {
-    if (!blockId) {
+  private updateHeldItemMesh(): void {
+    const stack = this.inventory.getStack(this.selectedSlot);
+
+    if (stack === null) {
       this.firstPersonHeldBlockMesh.visible = false;
       this.thirdPersonHeldBlockMesh.visible = false;
     } else {
-      const newGeo = this.buildHeldBlockGeometry(blockId);
+      const category = classifyItemRender(stack.identity, this.blockRegistry);
+      const def = this.blockRegistry.getById(stack.identity.id as number);
 
-      this.firstPersonHeldBlockMesh.geometry.dispose();
-      this.firstPersonHeldBlockMesh.geometry = newGeo;
+      if (category === 'unsupported') {
+        const newGeo = BlockItemModelBuilder.buildDebugPlaceholder();
 
-      this.thirdPersonHeldBlockMesh.geometry.dispose();
-      this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
+        this.firstPersonHeldBlockMesh.geometry.dispose();
+        this.firstPersonHeldBlockMesh.geometry = newGeo;
+        this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
+
+        this.thirdPersonHeldBlockMesh.geometry.dispose();
+        this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
+        this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
+      } else if (category === 'block_3d' && def !== undefined) {
+        const newGeo = BlockItemModelBuilder.build3DGeometry(def, this.atlas);
+
+        this.firstPersonHeldBlockMesh.geometry.dispose();
+        this.firstPersonHeldBlockMesh.geometry = newGeo;
+        this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
+
+        this.thirdPersonHeldBlockMesh.geometry.dispose();
+        this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
+        this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
+      } else if (category === 'block_flat' && def !== undefined) {
+        const newGeo = BlockItemModelBuilder.buildFlatGeometry(def, this.atlas);
+
+        this.firstPersonHeldBlockMesh.geometry.dispose();
+        this.firstPersonHeldBlockMesh.geometry = newGeo;
+        this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
+
+        this.thirdPersonHeldBlockMesh.geometry.dispose();
+        this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
+        this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
+      } else {
+        const uvRect = this.itemAtlas.getUvRect(stack.identity.id as string);
+        const u0 = uvRect?.u0 ?? 0;
+        const v0 = uvRect?.v0 ?? 0;
+        const u1 = uvRect?.u1 ?? 1;
+        const v1 = uvRect?.v1 ?? 1;
+
+        const newGeo = this.createBillboardGeometry(u0, v0, u1, v1, uvRect === undefined);
+
+        this.firstPersonHeldBlockMesh.geometry.dispose();
+        this.firstPersonHeldBlockMesh.geometry = newGeo;
+        this.firstPersonHeldBlockMesh.material = this.itemHeldMaterial;
+
+        this.thirdPersonHeldBlockMesh.geometry.dispose();
+        this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
+        this.thirdPersonHeldBlockMesh.material = this.itemHeldMaterial;
+      }
 
       this.firstPersonHeldBlockMesh.visible = true;
       this.thirdPersonHeldBlockMesh.visible = true;
     }
+  }
+
+  private createBillboardGeometry(u0: number, v0: number, u1: number, v1: number, isMissing = false): THREE.BufferGeometry {
+    const geom = new THREE.BufferGeometry();
+    const half = 0.25; // Compact size for held item
+    
+    // 8 vertices: 4 for front quad, 4 for back quad
+    const positions = new Float32Array([
+      // Front quad
+      -half,  half,  0.001,
+       half,  half,  0.001,
+      -half, -half,  0.001,
+       half, -half,  0.001,
+
+      // Back quad (offset slightly backward)
+      -half,  half, -0.001,
+       half,  half, -0.001,
+      -half, -half, -0.001,
+       half, -half, -0.001,
+    ]);
+
+    const uvs = new Float32Array([
+      // Front face standard UVs
+      u0, v0,
+      u1, v0,
+      u0, v1,
+      u1, v1,
+
+      // Back face horizontally-flipped UVs so they render unmirrored from behind
+      u1, v0,
+      u0, v0,
+      u1, v1,
+      u0, v1,
+    ]);
+
+    const colors = new Float32Array(24);
+    const r = isMissing ? 1.0 : 1.0;
+    const g = isMissing ? 0.0 : 1.0;
+    const b = isMissing ? 1.0 : 1.0;
+    for (let i = 0; i < 8; i++) {
+      colors[i * 3 + 0] = r;
+      colors[i * 3 + 1] = g;
+      colors[i * 3 + 2] = b;
+    }
+
+    const indices = [
+      // Front face (Counter-clockwise winding)
+      0, 2, 1,
+      1, 2, 3,
+
+      // Back face (Clockwise winding from front, but counter-clockwise from back)
+      5, 6, 4,
+      7, 6, 5
+    ];
+
+    geom.setIndex(indices);
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geom.computeVertexNormals();
+    return geom;
   }
 
   private buildHeldBlockGeometry(blockId: BlockId): THREE.BufferGeometry {

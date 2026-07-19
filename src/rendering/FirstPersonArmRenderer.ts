@@ -2,7 +2,6 @@ import { Scene, Group, Mesh, BoxGeometry, MeshBasicMaterial } from 'three';
 import {
   PLAYER_MODEL_SCALE,
   FIRST_PERSON_ARM_SCALE,
-  PLAYER_MODEL_SHOULDER_OFFSET_Y,
   PLAYER_OUTER_LAYER_SCALE
 } from '../player/PlayerConstants.ts';
 import { attachEntityLighting } from './ChunkRenderer.ts';
@@ -37,16 +36,16 @@ export class FirstPersonArmRenderer {
 
     attachEntityLighting(this.material);
 
-    // Geometries
-    this.armGeo = new BoxGeometry(4 * px, 12 * px, 4 * px);
-    this.sleeveGeo = new BoxGeometry(4 * px * ols, 12 * px * ols, 4 * px * ols);
+    // Geometries - Z-aligned first-person arm (width = 4 px, height = 4 px, depth = 12 px)
+    this.armGeo = new BoxGeometry(4 * px, 4 * px, 12 * px);
+    this.sleeveGeo = new BoxGeometry(4 * px * ols, 4 * px * ols, 12 * px * ols);
 
-    // Meshes
+    // Meshes - offset by -6 * px in Z so the shoulder/pivot is at (0, 0, 0)
     this.armMesh = new Mesh(this.armGeo, this.material);
-    this.armMesh.position.set(0, PLAYER_MODEL_SHOULDER_OFFSET_Y, 0);
+    this.armMesh.position.set(0, 0, -6 * px);
 
     this.sleeveMesh = new Mesh(this.sleeveGeo, this.material);
-    this.sleeveMesh.position.set(0, PLAYER_MODEL_SHOULDER_OFFSET_Y, 0);
+    this.sleeveMesh.position.set(0, 0, -6 * px);
 
     this.armGroup.add(this.armMesh);
     this.armGroup.add(this.sleeveMesh);
@@ -85,12 +84,12 @@ export class FirstPersonArmRenderer {
 
     this.isLegacy = skinManager.getIsLegacy();
 
-    // Map Right Arm: (40, 16) - Use unmirrored mapping (matching third-person right arm reference)
-    skinManager.applyUVsToGeometry(this.armGeo, skinManager.getPartUVs(40, 16, 4, 12, 4, false));
+    // Map Right Arm: (40, 16) - Use unmirrored canonical first-person UV mapping
+    skinManager.applyCanonicalFirstPersonArmUVs(this.armGeo, skinManager.getPartUVs(40, 16, 4, 12, 4, false));
 
     if (!this.isLegacy) {
       // Modern skin: map Right Sleeve: (40, 32)
-      skinManager.applyUVsToGeometry(this.sleeveGeo, skinManager.getPartUVs(40, 32, 4, 12, 4, false));
+      skinManager.applyCanonicalFirstPersonArmUVs(this.sleeveGeo, skinManager.getPartUVs(40, 32, 4, 12, 4, false));
     }
 
     this.updateMeshVisibilities();

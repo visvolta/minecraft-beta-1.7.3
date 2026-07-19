@@ -1,4 +1,12 @@
 export const WORLD_METADATA_VERSION = 1;
+
+export interface SerializedItemStack {
+  readonly id: number | string;
+  readonly count: number;
+  readonly metadata: number;
+  readonly type: 'block' | 'item';
+}
+
 export interface WorldMetadata {
   readonly formatVersion: number;
   readonly worldId: string;
@@ -11,6 +19,8 @@ export interface WorldMetadata {
   readonly weather: { readonly raining: boolean; readonly thundering: boolean; readonly rainTime: number; readonly thunderTime: number };
   readonly autosave: { readonly enabled: boolean; readonly intervalSeconds: number };
   readonly lastPlayedMs: number;
+  readonly inventory?: (SerializedItemStack | null)[];
+  readonly selectedHotbarSlot?: number;
 }
 export function validateWorldMetadata(value: unknown): WorldMetadata {
   if (typeof value !== 'object' || value === null) throw new Error('World metadata must be an object');

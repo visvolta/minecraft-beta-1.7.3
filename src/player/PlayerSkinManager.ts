@@ -273,6 +273,57 @@ export class PlayerSkinManager {
   }
 
   /**
+   * Applies UV mapping to a canonical first-person arm (Z-aligned: 4x4x12 pixels).
+   * Maps hand to the -Z front face, shoulder to the +Z back face, and aligns sides cleanly.
+   */
+  public applyCanonicalFirstPersonArmUVs(geometry: THREE.BufferGeometry, uvs: PartUVs): void {
+    const uvAttribute = geometry.getAttribute('uv');
+    if (!uvAttribute) {
+      throw new Error('Geometry does not have a UV attribute to map.');
+    }
+
+    const array = uvAttribute.array as Float32Array;
+
+    // Face 0: Right (+X)
+    array[0]  = uvs.right.u0;  array[1]  = uvs.right.v0;
+    array[2]  = uvs.right.u1;  array[3]  = uvs.right.v0;
+    array[4]  = uvs.right.u0;  array[5]  = uvs.right.v1;
+    array[6]  = uvs.right.u1;  array[7]  = uvs.right.v1;
+
+    // Face 1: Left (-X)
+    array[8]  = uvs.left.u1;   array[9]  = uvs.left.v0;
+    array[10] = uvs.left.u0;   array[11] = uvs.left.v0;
+    array[12] = uvs.left.u1;   array[13] = uvs.left.v1;
+    array[14] = uvs.left.u0;   array[15] = uvs.left.v1;
+
+    // Face 2: Top (+Y) - maps to uvs.front in the canonical Z-aligned first-person arm
+    array[16] = uvs.front.u0;  array[17] = uvs.front.v1;
+    array[18] = uvs.front.u1;  array[19] = uvs.front.v1;
+    array[20] = uvs.front.u0;  array[21] = uvs.front.v0;
+    array[22] = uvs.front.u1;  array[23] = uvs.front.v0;
+
+    // Face 3: Bottom (-Y) - maps to uvs.back
+    array[24] = uvs.back.u0;   array[25] = uvs.back.v0;
+    array[26] = uvs.back.u1;   array[27] = uvs.back.v0;
+    array[28] = uvs.back.u0;   array[29] = uvs.back.v1;
+    array[30] = uvs.back.u1;   array[31] = uvs.back.v1;
+
+    // Face 4: Back (+Z) - maps to uvs.top (shoulder end)
+    array[32] = uvs.top.u0;    array[33] = uvs.top.v1;
+    array[34] = uvs.top.u1;    array[35] = uvs.top.v1;
+    array[36] = uvs.top.u0;    array[37] = uvs.top.v0;
+    array[38] = uvs.top.u1;    array[39] = uvs.top.v0;
+
+    // Face 5: Front (-Z) - maps to uvs.bottom (hand end)
+    array[40] = uvs.bottom.u0; array[41] = uvs.bottom.v0;
+    array[42] = uvs.bottom.u1; array[43] = uvs.bottom.v0;
+    array[44] = uvs.bottom.u0; array[45] = uvs.bottom.v1;
+    array[46] = uvs.bottom.u1; array[47] = uvs.bottom.v1;
+
+    uvAttribute.needsUpdate = true;
+  }
+
+  /**
    * Generates a face-labeled visual UV debug canvas texture to inspect orientations.
    */
   private generateDebugSkinTexture(): THREE.Texture {
