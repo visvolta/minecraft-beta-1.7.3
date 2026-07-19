@@ -20,6 +20,8 @@
     "validate:persistence-integration": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePersistenceIntegration.js",
     "validate:player-spawn": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePlayerSpawn.js",
     "validate:player-rendering": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePlayerRendering.js",
+    "validate:inventory": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateInventory.js",
+    "validate:crafting": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateCrafting.js",
     "validate:nbt": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateNbt.js"
   },
   "dependencies": {

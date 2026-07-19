@@ -10,7 +10,7 @@ export class BlockItemModelBuilder {
     const geometry = new THREE.BoxGeometry(1, 1, 1); // +X,-X,+Y,-Y,+Z,-Z; 4 vertices each
     const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
     const colors = new Float32Array(24 * 3);
-    const faces: Array<'side'|'top'|'bottom'> = ['side','side','top','bottom','side','side'];
+    const faces: Array<'side'|'top'|'bottom'|'front'> = ['side','side','top','bottom','front','side'];
     for (let face=0; face<6; face++) {
       const slot=faces[face]!; const name=resolveBlockTexture(def,slot); const rect=name?atlas.getUvRect(name):undefined; const tint=resolveBlockTint(def,slot);
       const u0=rect?.u0??0, v0=rect?.v0??0, u1=rect?.u1??1, v1=rect?.v1??1; const base=face*4;

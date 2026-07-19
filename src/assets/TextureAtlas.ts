@@ -9,7 +9,7 @@ export const ATLAS_TILE_SIZE = 16;
  * Kept tiny relative to a tile so it has no visible effect with nearest
  * filtering, while still being safe if filtering ever changes.
  */
-const UV_EDGE_INSET = 0.01;
+const UV_EDGE_INSET = 0.005;
 
 /** UV rectangle (0–1 atlas space) for one texture's tile. */
 export interface AtlasUvRect {
@@ -112,7 +112,7 @@ export class TextureAtlas {
       const pixelX = column * ATLAS_TILE_SIZE;
       const pixelY = row * ATLAS_TILE_SIZE;
 
-      context.drawImage(image, pixelX, pixelY);
+      context.drawImage(image, 0, 0, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE, pixelX, pixelY, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE);
 
       // Build the debug atlas tile as solid white with the source alpha
       // preserved exactly (no recoloured asset file on disk; debug-only,
@@ -120,7 +120,7 @@ export class TextureAtlas {
       debugContext.fillStyle = '#ffffff';
       debugContext.fillRect(pixelX, pixelY, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE);
       debugContext.globalCompositeOperation = 'destination-in';
-      debugContext.drawImage(image, pixelX, pixelY);
+      debugContext.drawImage(image, 0, 0, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE, pixelX, pixelY, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE);
       debugContext.globalCompositeOperation = 'source-over';
 
       const atlasWidth = canvas.width;

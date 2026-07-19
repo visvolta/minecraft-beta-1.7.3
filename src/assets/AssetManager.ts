@@ -40,6 +40,9 @@ export class AssetManager {
       textureNames.add(`destroy_stage_${i}`);
     }
 
+    // Authoritative missing-texture fallback region in atlas (`not the first atlas region`).
+    textureNames.add('missing_texture');
+
     const images = await loadBlockTextureImages(textureNames);
     return TextureAtlas.build(images);
   }

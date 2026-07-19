@@ -90,8 +90,19 @@ export const BlockIds = {
   RedstoneBlock: 152,
   RedstoneLampOff: 123,
   RedstoneLampOn: 124,
+  /** Beta 1.7.3 rails. */
+  Rail: 66,
+  PoweredRail: 27,
+  DetectorRail: 28,
   /** Beta 1.7.3 wooden planks. */
   Planks: 5,
+  /** Beta 1.7.3 crafting table / workbench. */
+  CraftingTable: 58,
+  Workbench: 58,
+  /** Beta 1.7.3 furnace (unlit). */
+  Furnace: 61,
+  /** Beta 1.7.3 lit furnace (burning). */
+  FurnaceBurning: 62,
   /** Beta 1.7.3 wooden fence. Non-full block. */
   Fence: 85,
   /** Beta 1.7.3 wooden stairs. Non-full block. */

@@ -531,7 +531,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     lightEmission: 15,
   });
 
-  const registerSimple = (id: number, name: string, displayName: string, textures: { all?: string; top?: string; bottom?: string; side?: string }, options: { solid: boolean; transparent: boolean; replaceable: boolean; renderType: 'opaque' | 'cutout' | 'cross' | 'cactus' | 'snow' | 'ice'; blocksWeather?: boolean; lightOpacity?: number; lightEmission?: number }): void => {
+  const registerSimple = (id: number, name: string, displayName: string, textures: { all?: string; top?: string; bottom?: string; side?: string; front?: string }, options: { solid: boolean; transparent: boolean; replaceable: boolean; renderType: 'opaque' | 'cutout' | 'cross' | 'cactus' | 'snow' | 'ice'; blocksWeather?: boolean; lightOpacity?: number; lightEmission?: number }): void => {
     registry.register({ id, name, displayName, textures, ...options });
   };
 
@@ -598,6 +598,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.Lever, 'lever', 'Lever', { all: 'lever' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.StonePressurePlate, 'stone_pressure_plate', 'Stone Pressure Plate', { all: 'stone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.WoodDoor, 'wood_door', 'Wood Door', { all: 'door_wood_lower' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
+  registerSimple(BlockIds.Rail, 'rail', 'Rail', { all: 'rail_normal' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
+  registerSimple(BlockIds.PoweredRail, 'powered_rail', 'Powered Rail', { all: 'rail_golden' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
+  registerSimple(BlockIds.DetectorRail, 'detector_rail', 'Detector Rail', { all: 'rail_detector' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.RedstoneTorch, 'redstone_torch', 'Redstone Torch', { all: 'redstone_torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', lightEmission: 7 });
   registerSimple(BlockIds.RedstoneBlock, 'redstone_block', 'Redstone Block', { all: 'redstone_block' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.RedstoneLampOff, 'redstone_lamp_off', 'Redstone Lamp', { all: 'redstone_lamp_off' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
@@ -606,6 +609,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   // Fire-related blocks for Stage 2/3 fire system.
   // Full opaque cubes that participate in flammability:
   registerSimple(BlockIds.Planks, 'planks', 'Oak Wood Planks', { all: 'planks_oak' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.CraftingTable, 'crafting_table', 'Crafting Table', { top: 'crafting_table_top', bottom: 'planks_oak', side: 'crafting_table_side', front: 'crafting_table_front' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.Furnace, 'furnace', 'Furnace', { top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front_off' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.FurnaceBurning, 'lit_furnace', 'Furnace', { top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front_on' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: 13 });
   registerSimple(BlockIds.Bookshelf, 'bookshelf', 'Bookshelf', { top: 'planks_oak', bottom: 'planks_oak', side: 'bookshelf' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Wool, 'wool', 'White Wool', { all: 'wool_colored_white' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.TNT, 'tnt', 'TNT', { top: 'tnt_top', bottom: 'tnt_bottom', side: 'tnt_side' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
@@ -681,10 +687,16 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Lever]: 0.5,
     [BlockIds.StonePressurePlate]: 0.5,
     [BlockIds.WoodDoor]: 3.0,
+    [BlockIds.Rail]: 0.7,
+    [BlockIds.PoweredRail]: 0.7,
+    [BlockIds.DetectorRail]: 0.7,
     [BlockIds.RedstoneBlock]: 5.0,
     [BlockIds.RedstoneLampOff]: 0.3,
     [BlockIds.RedstoneLampOn]: 0.3,
     [BlockIds.Planks]: 2.0,
+    [BlockIds.CraftingTable]: 2.5,
+    [BlockIds.Furnace]: 3.5,
+    [BlockIds.FurnaceBurning]: 3.5,
     [BlockIds.Bookshelf]: 1.5,
     [BlockIds.Wool]: 0.8,
     [BlockIds.TNT]: 0.0,
@@ -706,6 +718,8 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.RedstoneOre]: false,
     [BlockIds.DiamondOre]: false,
     [BlockIds.LapisOre]: false,
+    [BlockIds.Furnace]: false,
+    [BlockIds.FurnaceBurning]: false,
     [BlockIds.Spawner]: false,
     [BlockIds.Snow]: false,
     [BlockIds.SnowBlock]: false,

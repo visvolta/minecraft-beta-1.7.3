@@ -12,5 +12,8 @@ export function resolveBlockTint(
   definition: BlockDefinition,
   face: BlockFace,
 ): TintColor {
+  if (face === 'front') {
+    return definition.tints?.front ?? definition.tints?.side ?? WHITE_TINT;
+  }
   return definition.tints?.[face] ?? WHITE_TINT;
 }

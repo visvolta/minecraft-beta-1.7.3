@@ -183,50 +183,13 @@ export class ItemEntityManager {
     console.log(
       `[PICKUP DEBUG] Collected: ${displayName} (ID: ${id}) | Quantity: ${count} | Metadata: ${metadata}`
     );
-
-    // Create fading visual toast on the HUD
-    this.createDomToast(displayName, count);
-  }
-
-  private createDomToast(name: string, count: number): void {
-    let container = document.getElementById('pickup-toast-container');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'pickup-toast-container';
-      container.style.position = 'absolute';
-      container.style.bottom = '100px';
-      container.style.right = '20px';
-      container.style.display = 'flex';
-      container.style.flexDirection = 'column';
-      container.style.gap = '8px';
-      container.style.zIndex = '1000';
-      document.body.appendChild(container);
-    }
-
-    const toast = document.createElement('div');
-    toast.style.background = 'rgba(0, 0, 0, 0.85)';
-    toast.style.color = '#79C05A'; // Classic green text
-    toast.style.border = '2px solid #555';
-    toast.style.padding = '8px 16px';
-    toast.style.fontFamily = 'monospace';
-    toast.style.fontSize = '14px';
-    toast.style.borderRadius = '4px';
-    toast.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
-    toast.style.pointerEvents = 'none';
-    toast.innerHTML = `+${count} ${name}`;
-
-    container.appendChild(toast);
-
-    setTimeout(() => {
-      toast.style.transition = 'opacity 0.5s ease';
-      toast.style.opacity = '0';
-      setTimeout(() => {
-        toast.remove();
-      }, 500);
-    }, 2500);
   }
 
   public cleanup(): void {
+    if (typeof document !== 'undefined') {
+      const container = document.getElementById('pickup-toast-container');
+      if (container) container.remove();
+    }
     for (const item of this.items) {
       item.cleanup();
     }

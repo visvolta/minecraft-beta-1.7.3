@@ -335,6 +335,42 @@ class MeshBuffers {
     this.indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
   }
 
+  public pushLadder(
+    x: number,
+    y: number,
+    z: number,
+    metadata: number,
+    uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
+    tint: readonly [number, number, number],
+    light: LightSample
+  ): void {
+    const u0 = uvRect ? uvRect.u0 : 0;
+    const v0 = uvRect ? uvRect.v0 : 0;
+    const u1 = uvRect ? uvRect.u1 : 0;
+    const v1 = uvRect ? uvRect.v1 : 0;
+
+    let nx = 0, nz = 1;
+    let v: [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]];
+
+    if (metadata === 2) {
+      nz = 1;
+      v = [[x + 1, y, z + 0.05], [x + 1, y + 1, z + 0.05], [x, y + 1, z + 0.05], [x, y, z + 0.05]];
+    } else if (metadata === 3 || metadata === 0 || metadata === 1) {
+      nz = -1;
+      v = [[x, y, z + 0.95], [x, y + 1, z + 0.95], [x + 1, y + 1, z + 0.95], [x + 1, y, z + 0.95]];
+    } else if (metadata === 4) {
+      nx = 1; nz = 0;
+      v = [[x + 0.05, y, z], [x + 0.05, y + 1, z], [x + 0.05, y + 1, z + 1], [x + 0.05, y, z + 1]];
+    } else {
+      nx = -1; nz = 0;
+      v = [[x + 0.95, y, z + 1], [x + 0.95, y + 1, z + 1], [x + 0.95, y + 1, z], [x + 0.95, y, z]];
+    }
+
+    this.pushQuad(v, [nx, 0, nz], uvRect, tint, light, 1, FluidTextureKind.WaterStill, [u0, v1, u1, v1, u1, v0, u0, v0]);
+    const vBack = [v[3]!, v[2]!, v[1]!, v[0]!] as const;
+    this.pushQuad(vBack, [-nx, 0, -nz], uvRect, tint, light, 1, FluidTextureKind.WaterStill, [u0, v0, u1, v0, u1, v1, u0, v1]);
+  }
+
   public pushCactusFace(
     faceIndex: number,
     x: number,
@@ -786,7 +822,7 @@ export class ChunkMesher {
                 textureName = 'grass_side_snowed';
               }
             }
-            const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+            const uvRect = this.getSafeUvRect(textureName);
             const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
 
@@ -808,6 +844,16 @@ export class ChunkMesher {
     }
 
     return buffers.toGeometry();
+  }
+
+  private getSafeUvRect(textureName: string | undefined): { u0: number; v0: number; u1: number; v1: number } | undefined {
+    if (textureName === undefined) return undefined;
+    let rect = this.atlas.getUvRect(textureName);
+    if (rect === undefined) {
+      console.warn(`[ChunkMesher] Unresolved texture key: "${textureName}". Using missing_texture fallback.`);
+      rect = this.atlas.getUvRect('missing_texture');
+    }
+    return rect;
   }
 
   public buildCutouts(chunk: Chunk): THREE.BufferGeometry {
@@ -840,20 +886,33 @@ export class ChunkMesher {
               buffers.pushFace(face, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
             }
           } else if (renderType === 'cutout') {
+            if (blockId === BlockIds.Ladder) {
+              const textureName = resolveBlockTexture(definition, 'side') ?? 'ladder';
+              let uvRect = this.atlas.getUvRect(textureName);
+              if (uvRect === undefined) {
+                console.warn(`[ChunkMesher] Unresolved ladder texture key: "${textureName}". Using missing_texture fallback.`);
+                uvRect = this.atlas.getUvRect('missing_texture');
+              }
+              const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+              const light = this.getLightComponentsAt(chunk, x, y, z);
+              const metadata = chunk.getBlockMetadata(x, y, z);
+              buffers.pushLadder(x, y, z, metadata, uvRect, tint, light);
+              continue;
+            }
             for (const face of FACES) {
               const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
               if (this.hidesCutoutFace(neighbourId)) {
                 continue;
               }
               const textureName = resolveBlockTexture(definition, face.slot);
-              const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+              const uvRect = this.getSafeUvRect(textureName);
               const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
               const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
               buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
             }
           } else if (renderType === 'cross' && blockId !== BlockIds.Fire) {
             const textureName = resolveBlockTexture(definition, 'side');
-            const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+            const uvRect = this.getSafeUvRect(textureName);
             const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const light = this.getLightComponentsAt(chunk, x, y, z);
             buffers.pushCross(x, y, z, uvRect, tint, light);
@@ -866,7 +925,7 @@ export class ChunkMesher {
               }
               const slot = i === 2 ? 'top' : (i === 3 ? 'bottom' : 'side');
               const textureName = resolveBlockTexture(definition, slot);
-              const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+              const uvRect = this.getSafeUvRect(textureName);
               const tint = resolveBlockTint(definition, slot);
               const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
               buffers.pushCactusFace(i, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
@@ -875,7 +934,7 @@ export class ChunkMesher {
             // Beta BlockSnow: flat layer at height 1/8
             // Uses custom bounds: 0,0,0 to 1, 0.125, 1
             const textureName = resolveBlockTexture(definition, 'side');
-            const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+            const uvRect = this.getSafeUvRect(textureName);
             const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const light = this.getLightComponentsAt(chunk, x, y, z);
             this.pushSnowBlock(buffers, x, y, z, uvRect, tint, light);
@@ -1210,7 +1269,7 @@ export class ChunkMesher {
             if (this.hidesOpaqueFace(neighbourId)) continue;
 
             const textureName = resolveBlockTexture(definition, face.slot);
-            const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+            const uvRect = this.getSafeUvRect(textureName);
             const tint = this.resolveVegetationTint(blockId, face.slot, resolveBlockTint(definition, face.slot), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
 
@@ -1286,7 +1345,7 @@ export class ChunkMesher {
     definition: BlockDefinition,
   ): void {
     const textureName = resolveBlockTexture(definition, 'side');
-    const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+    const uvRect = this.getSafeUvRect(textureName);
     const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
     // Each visible fluid face samples the cell on the other side of
     // that face. In particular, open-sky water must use the light above

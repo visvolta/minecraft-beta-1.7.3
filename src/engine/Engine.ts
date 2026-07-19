@@ -13,6 +13,26 @@ import { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import { Inventory } from '../inventory/Inventory';
 import { InventorySerializer } from '../inventory/InventorySerializer';
 import { HotbarHudRenderer } from '../inventory/HotbarHudRenderer';
+import { InventoryUi } from '../inventory/InventoryUi';
+import { InventoryTooltip } from '../inventory/InventoryTooltip';
+import { CursorHeldItemRenderer } from '../inventory/CursorHeldItemRenderer';
+import { InventoryController } from '../inventory/InventoryController';
+import { InventoryInputController } from '../inventory/InventoryInputController';
+import { RecipeRegistry } from '../crafting/RecipeRegistry';
+import { registerDefaultRecipes } from '../crafting/registerDefaultRecipes';
+import { CraftingTableUi } from '../crafting/CraftingTableUi';
+import { CraftingTableController } from '../crafting/CraftingTableController';
+import { CraftingTableInputController } from '../crafting/CraftingTableInputController';
+import { MenuInputRouter } from '../input/MenuInputRouter';
+import { ContextMenuSuppressor } from '../input/ContextMenuSuppressor';
+import { FurnaceManager } from '../furnace/FurnaceManager';
+import { SmeltingRegistry } from '../furnace/SmeltingRegistry';
+import { FuelRegistry } from '../furnace/FuelRegistry';
+import { registerDefaultSmeltingAndFuels } from '../furnace/registerDefaultSmeltingAndFuels';
+import { FurnaceUi } from '../furnace/FurnaceUi';
+import { FurnaceController } from '../furnace/FurnaceController';
+import { FurnaceInputController } from '../furnace/FurnaceInputController';
+import { BlockIds } from '../blocks/BlockId';
 import { classifyItemRender } from '../inventory/ItemRenderClassifier';
 import { BlockItemModelBuilder } from '../inventory/BlockItemModelBuilder';
 import { ChunkRenderer, attachEntityLighting } from '../rendering/ChunkRenderer';
@@ -88,7 +108,8 @@ import {
   THIRD_PERSON_HELD_BLOCK_PITCH,
   THIRD_PERSON_HELD_BLOCK_YAW,
   THIRD_PERSON_HELD_BLOCK_ROLL,
-  THIRD_PERSON_HELD_BLOCK_SCALE
+  THIRD_PERSON_HELD_BLOCK_SCALE,
+  FIRST_PERSON_CAMERA_OFFSET_Y
 } from '../player/PlayerConstants';
 
 interface EntityLightingUniforms {
@@ -144,6 +165,23 @@ export class Engine {
   private lastTotalTicks = 0;
   private readonly inventory: Inventory;
   private readonly hotbarHudRenderer: HotbarHudRenderer;
+  private readonly inventoryUi: InventoryUi;
+  private readonly inventoryTooltip: InventoryTooltip;
+  private readonly cursorHeldRenderer: CursorHeldItemRenderer;
+  private readonly inventoryController: InventoryController;
+  private readonly inventoryInputController: InventoryInputController;
+  private readonly recipeRegistry: RecipeRegistry;
+  private readonly craftingTableUi: CraftingTableUi;
+  private readonly craftingTableController: CraftingTableController;
+  private readonly craftingTableInputController: CraftingTableInputController;
+  private readonly furnaceManager: FurnaceManager;
+  private readonly smeltingRegistry: SmeltingRegistry;
+  private readonly fuelRegistry: FuelRegistry;
+  private readonly furnaceUi: FurnaceUi;
+  private readonly furnaceController: FurnaceController;
+  private readonly furnaceInputController: FurnaceInputController;
+  private readonly menuInputRouter: MenuInputRouter;
+  private readonly contextMenuSuppressor: ContextMenuSuppressor;
   private selectedSlot = 0;
   private readonly itemHeldMaterial: THREE.MeshBasicMaterial;
   private readonly atlas: TextureAtlas;
@@ -207,8 +245,6 @@ export class Engine {
   private lastSelectedStackKey = '';
 
   private readonly playerModelUniforms: EntityLightingUniforms | undefined;
-  private readonly firstPersonArmUniforms: EntityLightingUniforms | undefined;
-  private readonly heldBlockUniforms: EntityLightingUniforms | undefined;
 
   public constructor(
     blockRegistry: BlockRegistry,
@@ -272,8 +308,6 @@ export class Engine {
     attachEntityLighting(this.heldBlockMaterial);
 
     this.playerModelUniforms = this.playerModel.material.userData.dynamicLightingUniforms as EntityLightingUniforms | undefined;
-    this.firstPersonArmUniforms = this.firstPersonArmRenderer.material.userData.dynamicLightingUniforms as EntityLightingUniforms | undefined;
-    this.heldBlockUniforms = this.heldBlockMaterial.userData.dynamicLightingUniforms as EntityLightingUniforms | undefined;
 
     // Dummy initial geometries
     this.firstPersonHeldBlockMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.heldBlockMaterial);
@@ -393,7 +427,7 @@ export class Engine {
     this.itemHeldMaterial = new THREE.MeshBasicMaterial({
       map: itemAtlas.texture,
       transparent: true,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide,
       alphaTest: 0.1,
     });
     attachEntityLighting(this.itemHeldMaterial);
@@ -438,6 +472,139 @@ export class Engine {
       blockRegistry,
       this.inventory,
     );
+    this.inventoryUi = new InventoryUi();
+    this.inventoryTooltip = new InventoryTooltip();
+    this.cursorHeldRenderer = new CursorHeldItemRenderer();
+    this.recipeRegistry = new RecipeRegistry();
+    registerDefaultRecipes(this.recipeRegistry, blockRegistry, this.hotbarHudRenderer.getSlotContentRenderer()['itemIcons']);
+
+    this.inventoryController = new InventoryController(
+      this.inventory,
+      this.inventoryUi,
+      this.inventoryTooltip,
+      this.cursorHeldRenderer,
+      this.hotbarHudRenderer.getSlotContentRenderer(),
+      this.itemEntityManager,
+      this.player,
+      this.recipeRegistry
+    );
+    const displayNameResolver = (stack: { identity: { type: string; id: string | number } }) => {
+      if (stack.identity.type === 'block') {
+        const def = blockRegistry.getById(stack.identity.id);
+        if (def && def.displayName) return def.displayName;
+      }
+      return String(stack.identity.id)
+        .split('_')
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+    };
+    this.inventoryController.setDisplayNameResolver(displayNameResolver as any);
+    this.inventoryInputController = new InventoryInputController(
+      this.inventoryController,
+      this.hotbarHudRenderer.getLayout()
+    );
+
+    this.craftingTableUi = new CraftingTableUi();
+    this.craftingTableController = new CraftingTableController(
+      this.inventory,
+      this.craftingTableUi,
+      this.inventoryTooltip,
+      this.cursorHeldRenderer,
+      this.hotbarHudRenderer.getSlotContentRenderer(),
+      this.itemEntityManager,
+      this.player,
+      this.recipeRegistry
+    );
+    this.craftingTableController.setDisplayNameResolver(displayNameResolver as any);
+    this.craftingTableInputController = new CraftingTableInputController(
+      this.craftingTableController,
+      this.hotbarHudRenderer.getLayout()
+    );
+
+    this.furnaceManager = new FurnaceManager();
+    this.smeltingRegistry = new SmeltingRegistry();
+    this.fuelRegistry = new FuelRegistry();
+    registerDefaultSmeltingAndFuels(this.smeltingRegistry, this.fuelRegistry, blockRegistry, this.hotbarHudRenderer.getSlotContentRenderer()['itemIcons']);
+    this.furnaceManager.deserialize(metadata.furnaces);
+
+    this.furnaceUi = new FurnaceUi();
+    this.furnaceController = new FurnaceController(
+      this.inventory,
+      this.furnaceUi,
+      this.inventoryTooltip,
+      this.cursorHeldRenderer,
+      this.hotbarHudRenderer.getSlotContentRenderer(),
+      this.itemEntityManager,
+      this.player,
+      this.smeltingRegistry,
+      this.fuelRegistry
+    );
+    this.furnaceController.setDisplayNameResolver(displayNameResolver as any);
+    this.furnaceInputController = new FurnaceInputController(
+      this.furnaceController,
+      this.hotbarHudRenderer.getLayout()
+    );
+
+    this.menuInputRouter = new MenuInputRouter(
+      this.inventoryController,
+      this.craftingTableController,
+      this.furnaceController,
+      this.hotbarHudRenderer.getLayout()
+    );
+
+    this.interactionController.setBlockInteractionHandler((targetId, _x, _y, _z) => {
+      if (targetId === BlockIds.CraftingTable) {
+        if (!this.craftingTableController.isOpen) {
+          if (this.inventoryController.isOpen) this.inventoryController.close();
+          if (this.furnaceController.isOpen) this.furnaceController.close();
+          this.craftingTableController.open(this.hotbarHudRenderer.getLayout().scale);
+        }
+        return true;
+      }
+      if (targetId === BlockIds.Furnace || targetId === BlockIds.FurnaceBurning) {
+        if (!this.furnaceController.isOpen) {
+          if (this.inventoryController.isOpen) this.inventoryController.close();
+          if (this.craftingTableController.isOpen) this.craftingTableController.close();
+          const container = this.furnaceManager.getOrCreate(_x, _y, _z);
+          this.furnaceController.openContainer(container, this.hotbarHudRenderer.getLayout().scale);
+        }
+        return true;
+      }
+      return false;
+    });
+
+    this.interactionController.breakingController.setOnBlockBrokenHandler((blockId, x, y, z) => {
+      if (blockId === BlockIds.Furnace || blockId === BlockIds.FurnaceBurning) {
+        if (this.furnaceController.isOpen && this.furnaceController.activeContainer && this.furnaceController.activeContainer.x === x && this.furnaceController.activeContainer.y === y && this.furnaceController.activeContainer.z === z) {
+          this.furnaceController.close();
+        }
+        const c = this.furnaceManager.remove(x, y, z);
+        if (c) {
+          const items = [c.inputSlot, c.fuelSlot, c.outputSlot];
+          for (const s of items) {
+            if (s !== null && s.count > 0) {
+              const eyeY = this.player.position.y + 1.62;
+              this.itemEntityManager.spawnThrownItem(
+                x + 0.5,
+                eyeY - 0.3,
+                z + 0.5,
+                {
+                  type: s.identity.type,
+                  id: s.identity.id,
+                  count: s.count,
+                  metadata: s.metadata,
+                },
+                0, 0.2, 0,
+                40
+              );
+            }
+          }
+          c.clear();
+        }
+      }
+    });
+
+    this.contextMenuSuppressor = new ContextMenuSuppressor();
     this.fluidAnimationSystem = new FluidAnimationSystem();
     this.fireAnimationSystem = new FireAnimationSystem();
 
@@ -690,6 +857,15 @@ export class Engine {
     this.blockHighlight.dispose();
     this.destroyOverlayRenderer.dispose();
     this.hotbarHudRenderer.dispose();
+    this.inventoryInputController.dispose();
+    this.inventoryController.dispose();
+    this.craftingTableInputController.dispose();
+    this.furnaceInputController.dispose();
+    this.menuInputRouter.dispose();
+    this.craftingTableController.dispose();
+    this.furnaceController.dispose();
+    this.furnaceManager.clear();
+    this.contextMenuSuppressor.dispose();
     this.heldItemRenderer.dispose();
     this.itemEntityManager.cleanup();
     this.chunkStreamer.dispose();
@@ -834,12 +1010,15 @@ export class Engine {
     }
     this.worldTickScheduler.update(deltaSeconds);
     this.fallingBlockManager.update(deltaSeconds);
+    this.furnaceManager.tick(this.blockUpdateWorld, this.smeltingRegistry, this.fuelRegistry);
     this.worldEventQueue.drainNoop();
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
 
     // 4. Update camera look
-    this.cameraController.update();
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen) {
+      this.cameraController.update();
+    }
 
     // 5-6. Movement + physics: no-clip bypasses PlayerController's wish
     // velocity entirely and moves the player directly, skipping
@@ -852,7 +1031,12 @@ export class Engine {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
-        this.playerController.update();
+        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen) {
+          this.playerController.update();
+        } else {
+          this.player.wishVelocity.x = 0;
+          this.player.wishVelocity.z = 0;
+        }
         this.playerPhysics.update(this.player, deltaSeconds);
       } else {
         // Pause physics if the containing chunk is not yet loaded
@@ -874,25 +1058,26 @@ export class Engine {
 
     // 7a. Update Player Model and Visibility Rules
     if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
-      this.playerModel.setVisible(false);
+      this.playerModel.setVisible(true);
+      this.playerModel.setFirstPersonMode(true);
       this.firstPersonArmRenderer.setVisible(true);
 
-      const isHoldingBlock = this.interactionController.getSelectedBlockId() !== 0;
-      if (isHoldingBlock) {
-        // Hide the bare arm, but keep the armGroup visible so held block is rendered
-        this.firstPersonArmRenderer.setArmMeshVisible(false);
-      } else {
-        // Show the bare arm
-        this.firstPersonArmRenderer.setArmMeshVisible(true);
-      }
-
       this.firstPersonMotionController.update(camera, this.player, this.firstPersonArmRenderer, 1.0);
-      // Dedicated renderer owns held geometry and per-category first-person transforms.
-      const holdingBlock = this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
-      this.firstPersonArmRenderer.setArmMeshVisible(!holdingBlock);
+      const hasHeldContent = this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
+      this.firstPersonArmRenderer.setArmMeshVisible(!hasHeldContent);
+
+      this.playerAnimator.update(
+        this.player,
+        this.playerModel,
+        this.cameraController.getYaw(),
+        this.cameraController.getPitch(),
+        1.0
+      );
     } else {
       this.playerModel.setVisible(true);
+      this.playerModel.setFirstPersonMode(false);
       this.firstPersonArmRenderer.setVisible(false);
+      this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
 
       this.playerAnimator.update(
         this.player,
@@ -994,7 +1179,9 @@ export class Engine {
     );
 
     // 10. Update interaction (raycast targeting + break/place edits)
-    this.interactionController.update(deltaSeconds);
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen) {
+      this.interactionController.update(deltaSeconds);
+    }
 
     // 10a. Update held item selection and slot HUD if changed
     const currentSlot = this.interactionController.getSelectedSlotIndex();
@@ -1007,7 +1194,7 @@ export class Engine {
     }
 
     // Transactional Q-key dropped item throw (Beta 1.7.3)
-    if (this.input.isKeyJustPressed('KeyQ')) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && this.input.isKeyJustPressed('KeyQ')) {
       const selectedSlotIndex = this.interactionController.getSelectedSlotIndex();
       const stack = this.inventory.getStack(selectedSlotIndex);
       if (stack !== null) {
@@ -1050,19 +1237,19 @@ export class Engine {
 
     // 10b. Query and update static player and arm lighting defensively
     const px = Math.floor(this.player.position.x);
-    const py = Math.floor(this.player.position.y);
+    const pey = Math.floor(this.player.position.y + FIRST_PERSON_CAMERA_OFFSET_Y); // Sample lighting at eye/body level
     const pz = Math.floor(this.player.position.z);
-    const skyLight = this.blockUpdateWorld.getSkylight(px, py, pz);
-    const blockLight = this.blockUpdateWorld.getBlocklight(px, py, pz);
+    const skyLight = this.blockUpdateWorld.getSkylight(px, pey, pz);
+    const blockLight = this.blockUpdateWorld.getBlocklight(px, pey, pz);
 
-    const uniformSets = [this.playerModelUniforms, this.firstPersonArmUniforms, this.heldBlockUniforms];
-    for (const uniforms of uniformSets) {
-      if (uniforms && uniforms.uStaticSkyLight && uniforms.uStaticBlockLight) {
-        uniforms.uStaticSkyLight.value = skyLight;
-        uniforms.uStaticBlockLight.value = blockLight;
-        uniforms.uSkylightSubtracted.value = atmos.effectiveSkylightSubtracted;
-        uniforms.uSunBrightnessFactor.value = atmos.sunBrightnessFactor;
-      }
+    this.firstPersonArmRenderer.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
+    this.heldItemRenderer.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
+
+    if (this.playerModelUniforms && this.playerModelUniforms.uStaticSkyLight && this.playerModelUniforms.uStaticBlockLight) {
+      this.playerModelUniforms.uStaticSkyLight.value = skyLight;
+      this.playerModelUniforms.uStaticBlockLight.value = blockLight;
+      this.playerModelUniforms.uSkylightSubtracted.value = atmos.effectiveSkylightSubtracted;
+      this.playerModelUniforms.uSunBrightnessFactor.value = atmos.sunBrightnessFactor;
     }
 
     // 11. Rebuild dirty chunk meshes (budgeted, terrain + water together);
@@ -1165,6 +1352,19 @@ export class Engine {
 
     // Render WebGL HUD slots icons pass cleanly on top of everything
     this.hotbarHudRenderer.update(this.selectedSlot);
+    const layoutScale = this.hotbarHudRenderer.getLayout().scale;
+    this.inventoryController.updateScale(layoutScale);
+    this.craftingTableController.updateScale(layoutScale);
+    this.furnaceController.updateScale(layoutScale);
+    if (this.inventoryController.isOpen) {
+      this.inventoryController.renderAll();
+    }
+    if (this.craftingTableController.isOpen) {
+      this.craftingTableController.renderAll();
+    }
+    if (this.furnaceController.isOpen) {
+      this.furnaceController.renderAll();
+    }
     this.hotbarHudRenderer.render();
 
     this.performanceProfiler.endRender();
@@ -1193,6 +1393,7 @@ export class Engine {
       },
       inventory: serialized.inventory,
       selectedHotbarSlot: serialized.selectedHotbarSlot,
+      furnaces: this.furnaceManager.serialize(),
     };
   }
 

@@ -7,10 +7,11 @@ import type { ItemTextureAtlas } from '../../assets/ItemTextureAtlas';
 import { worldToChunkLocal } from '../../world/worldToChunkCoords';
 import { BlockIds } from '../../blocks/BlockId';
 import type { Drop } from './BlockDropResolver';
-import { classifyItemRender } from '../../inventory/ItemRenderClassifier';
+import { classifyItemRender, isBlock3dCategory, isFlatItemCategory, isToolCategory } from '../../inventory/ItemRenderClassifier';
 import { BlockItemModelBuilder } from '../../inventory/BlockItemModelBuilder';
 import { resolveBlockTexture } from '../../blocks/resolveBlockTexture';
 import { resolveBlockTint } from '../../blocks/resolveBlockTint';
+import { ItemIconResolver } from '../../inventory/ItemIconResolver';
 
 const COLLISION_EPSILON = 0.001;
 const ITEM_SIZE = 0.25;
@@ -35,6 +36,7 @@ export class DroppedItemEntity {
   private readonly itemAtlas: ItemTextureAtlas;
   private readonly heldBlockMaterial: THREE.Material;
   private readonly itemHeldMaterial: THREE.Material;
+  private readonly icons = new ItemIconResolver();
 
   public constructor(
     scene: THREE.Scene,
@@ -102,76 +104,81 @@ export class DroppedItemEntity {
     else if (count > 1) copyCount = 2;
 
     for (let i = 0; i < copyCount; i++) {
-      let mesh: THREE.Mesh;
+      let mesh: THREE.Mesh | undefined;
 
-      if (category === 'unsupported') {
-        // Un-supported / fallback debug placeholder
+      if (category === 'unsupported' || category === 'empty') {
         const geometry = BlockItemModelBuilder.buildDebugPlaceholder();
         mesh = new THREE.Mesh(geometry, this.heldBlockMaterial);
-      } else if (category === 'block_3d' && def !== undefined) {
-        // Block drop: mini 3D block mesh (scaled by 0.25) built via BlockItemModelBuilder
+      } else if (isBlock3dCategory(category) && def !== undefined) {
         const geometry = BlockItemModelBuilder.build3DGeometry(def, this.atlas);
         mesh = new THREE.Mesh(geometry, this.heldBlockMaterial);
         mesh.scale.set(0.25, 0.25, 0.25);
-      } else if (category === 'block_flat' && def !== undefined) {
-        // Flat block-texture drop: quads mapped to block atlas with cutout and tints
-        const texName = resolveBlockTexture(def, 'side') || 'stone';
-        const uvRect = this.atlas.getUvRect(texName);
+      } else if ((isFlatItemCategory(category) || isToolCategory(category)) && this.drop.type === 'block' && def !== undefined) {
+        const texName = resolveBlockTexture(def, 'side') || resolveBlockTexture(def, 'top') || 'stone';
+        let uvRect = this.atlas.getUvRect(texName);
         const tint = resolveBlockTint(def, 'side');
+        let useItemAtlas = false;
 
         if (uvRect === undefined) {
-          console.warn(
-            `[DroppedItemEntity] Missing block texture: "${texName}". Using magenta placeholder.`
-          );
+          const itemPath = this.icons.resolve(String(this.drop.id));
+          const nameMatch = itemPath.match(/\/textures\/items\/([^/]+)\.png$/);
+          if (nameMatch && nameMatch[1]) {
+            uvRect = this.itemAtlas.getUvRect(nameMatch[1]);
+            useItemAtlas = uvRect !== undefined;
+          }
         }
 
-        const u0 = uvRect ? uvRect.u0 : 0;
-        const v0 = uvRect ? uvRect.v0 : 0;
-        const u1 = uvRect ? uvRect.u1 : 1;
-        const v1 = uvRect ? uvRect.v1 : 1;
+        if (uvRect === undefined) {
+          console.warn(`[DroppedItemEntity] Missing block texture: "${texName}". Using debug placeholder.`);
+          const geometry = BlockItemModelBuilder.buildDebugPlaceholder();
+          mesh = new THREE.Mesh(geometry, this.heldBlockMaterial);
+        } else {
+          const u0 = uvRect.u0, v0 = uvRect.v0, u1 = uvRect.u1, v1 = uvRect.v1;
+          const geometry = this.createOpposedQuadsGeometry(u0, v0, u1, v1, tint[0], tint[1], tint[2], false);
+          mesh = new THREE.Mesh(geometry, useItemAtlas ? this.itemHeldMaterial : this.heldBlockMaterial);
+        }
+      } else if (isFlatItemCategory(category) || isToolCategory(category)) {
+        // Flat item or tool drop: quads mapped to ItemTextureAtlas or BlockAtlas fallback
+        let itemKey = String(this.drop.id);
+        let uvRect = this.itemAtlas.getUvRect(itemKey);
+        let useBlockAtlas = false;
 
-        // Uses two explicitly opposed quads to ensure readable unmirrored back face
-        const geometry = this.createOpposedQuadsGeometry(
-          u0, v0, u1, v1,
-          tint[0], tint[1], tint[2],
-          uvRect === undefined
-        );
-        mesh = new THREE.Mesh(geometry, this.heldBlockMaterial);
+        if (uvRect === undefined) {
+          const resolvedPath = this.icons.resolve(itemKey);
+          const itemMatch = resolvedPath.match(/\/textures\/items\/([^/]+)\.png$/);
+          const blockMatch = resolvedPath.match(/\/textures\/blocks\/([^/]+)\.png$/);
+          if (itemMatch && itemMatch[1]) {
+            uvRect = this.itemAtlas.getUvRect(itemMatch[1]);
+          } else if (blockMatch && blockMatch[1]) {
+            uvRect = this.atlas.getUvRect(blockMatch[1]);
+            useBlockAtlas = uvRect !== undefined;
+          }
+        }
+
+        if (uvRect === undefined) {
+          console.warn(`[DroppedItemEntity] Missing item texture: "${this.drop.id}". Using debug placeholder.`);
+          const geometry = BlockItemModelBuilder.buildDebugPlaceholder();
+          mesh = new THREE.Mesh(geometry, this.itemHeldMaterial);
+        } else {
+          const u0 = uvRect.u0, v0 = uvRect.v0, u1 = uvRect.u1, v1 = uvRect.v1;
+          const geometry = this.createOpposedQuadsGeometry(u0, v0, u1, v1, 1.0, 1.0, 1.0, false);
+          mesh = new THREE.Mesh(geometry, useBlockAtlas ? this.heldBlockMaterial : this.itemHeldMaterial);
+        }
       } else {
-        // Flat item drop: quads mapped to ItemTextureAtlas
-        const uvRect = this.itemAtlas.getUvRect(this.drop.id as string);
+        const geometry = BlockItemModelBuilder.buildDebugPlaceholder();
+        mesh = new THREE.Mesh(geometry, this.heldBlockMaterial);
+      }
 
-        // Asset lookup safety check
-        if (uvRect === undefined) {
-          console.warn(
-            `[DroppedItemEntity] Missing item texture: "${this.drop.id}". Using magenta placeholder.`
+      if (mesh) {
+        if (i > 0) {
+          mesh.position.set(
+            (Math.random() * 2 - 1) * 0.15,
+            (Math.random() * 2 - 1) * 0.15,
+            (Math.random() * 2 - 1) * 0.15
           );
         }
-
-        const u0 = uvRect ? uvRect.u0 : 0;
-        const v0 = uvRect ? uvRect.v0 : 0;
-        const u1 = uvRect ? uvRect.u1 : 1;
-        const v1 = uvRect ? uvRect.v1 : 1;
-
-        // Uses two explicitly opposed quads to ensure readable unmirrored back face
-        const geometry = this.createOpposedQuadsGeometry(
-          u0, v0, u1, v1,
-          1.0, 1.0, 1.0,
-          uvRect === undefined
-        );
-        mesh = new THREE.Mesh(geometry, this.itemHeldMaterial);
+        this.group.add(mesh);
       }
-
-      // Add a small offset for additional visual copies
-      if (i > 0) {
-        mesh.position.set(
-          (Math.random() * 2 - 1) * 0.15,
-          (Math.random() * 2 - 1) * 0.15,
-          (Math.random() * 2 - 1) * 0.15
-        );
-      }
-
-      this.group.add(mesh);
     }
   }
 

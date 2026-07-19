@@ -128,6 +128,24 @@ export class PlayerModel {
     this.root.visible = visible;
   }
 
+  public setFirstPersonMode(firstPerson: boolean): void {
+    if (firstPerson) {
+      this.headGroup.visible = false;
+      this.rightArmGroup.visible = false;
+      this.bodyGroup.visible = false;
+      this.leftArmGroup.visible = false;
+      this.leftLegGroup.visible = false;
+      this.rightLegGroup.visible = false;
+    } else {
+      this.headGroup.visible = true;
+      this.rightArmGroup.visible = true;
+      this.bodyGroup.visible = true;
+      this.leftArmGroup.visible = true;
+      this.leftLegGroup.visible = true;
+      this.rightLegGroup.visible = true;
+    }
+  }
+
   public updateTransforms(x: number, y: number, z: number, bodyYaw: number, headYaw: number, headPitch: number): void {
     this.root.position.set(x, y, z);
     this.root.rotation.y = bodyYaw;

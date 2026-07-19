@@ -4,7 +4,7 @@
 export const PLAYER_MODEL_SCALE = 1 / 16;
 
 /** Shoulder offset Y relative to the arm mesh center. Centers the pivot exactly at the neck height. */
-export const PLAYER_MODEL_SHOULDER_OFFSET_Y = -5 * PLAYER_MODEL_SCALE;
+export const PLAYER_MODEL_SHOULDER_OFFSET_Y = -6 * PLAYER_MODEL_SCALE;
 
 // First-person arm transform constants (Default resting pose)
 export const FIRST_PERSON_ARM_X = 0.65;
@@ -15,6 +15,11 @@ export const FIRST_PERSON_ARM_YAW = -Math.PI / 16;
 export const FIRST_PERSON_ARM_ROLL = Math.PI / 32;
 export const FIRST_PERSON_ARM_SCALE = .75;
 
+// First-person local camera offset relative to player body position
+export const FIRST_PERSON_CAMERA_OFFSET_X = 0.0;
+export const FIRST_PERSON_CAMERA_OFFSET_Y = 1.62;
+export const FIRST_PERSON_CAMERA_OFFSET_Z = 0.0;
+
 // Third-person camera constants
 export const THIRD_PERSON_DISTANCE = 4.0;
 
@@ -22,6 +27,34 @@ export const THIRD_PERSON_DISTANCE = 4.0;
 export const THIRD_PERSON_TARGET_OFFSET_Y = 0.0;
 
 // --- Held Block and Outer Layer Tuning Constants ---
+// Category 1: 3D held blocks (`block3d`)
+export const HELD_BLOCK_POSITION_X = 0.28;
+export const HELD_BLOCK_POSITION_Y = -0.04;
+export const HELD_BLOCK_POSITION_Z = -0.40;
+export const HELD_BLOCK_ROTATION_X = 0.45;
+export const HELD_BLOCK_ROTATION_Y = 0.80;
+export const HELD_BLOCK_ROTATION_Z = 0.10;
+export const HELD_BLOCK_SCALE = 0.62;
+
+// Category 2: Flat held items (`flatItem`)
+export const HELD_FLAT_POSITION_X = .3;
+export const HELD_FLAT_POSITION_Y = .1;
+export const HELD_FLAT_POSITION_Z = -0.0;
+export const HELD_FLAT_ROTATION_X = 0.10;
+export const HELD_FLAT_ROTATION_Y = -0.30;
+export const HELD_FLAT_ROTATION_Z = 3;
+export const HELD_FLAT_SCALE = 0.65;
+
+// Category 3: Held tools (`tool`)
+export const HELD_TOOL_POSITION_X = 0.3;
+export const HELD_TOOL_POSITION_Y = 0.10;
+export const HELD_TOOL_POSITION_Z = 0.0;
+export const HELD_TOOL_ROTATION_X = -0.6;
+export const HELD_TOOL_ROTATION_Y = 1.6;
+export const HELD_TOOL_ROTATION_Z = 4.5;
+export const HELD_TOOL_SCALE = 0.60;
+
+// Legacy held block tuning constants (retained for compatibility)
 export const FIRST_PERSON_HELD_BLOCK_X = 0.3;
 export const FIRST_PERSON_HELD_BLOCK_Y = 2 * PLAYER_MODEL_SCALE;
 export const FIRST_PERSON_HELD_BLOCK_Z = -6 * PLAYER_MODEL_SCALE;
@@ -43,8 +76,8 @@ export const PLAYER_OUTER_LAYER_SCALE = 1.05;
 // --- Animation Tuning Constants ---
 
 export const ANIMATION_WALK_SWING_FREQUENCY = 0.586;
-export const ANIMATION_ARM_SWING_LIMIT = 2.0;
-export const ANIMATION_LEG_SWING_LIMIT = 1.4;
+export const ANIMATION_ARM_SWING_LIMIT = .6;
+export const ANIMATION_LEG_SWING_LIMIT = .6;
 export const ANIMATION_MOVEMENT_SPEED_SCALING = 0.3; // Dampens swing amplitude relative to walk speed
 export const ANIMATION_RETURN_TO_NEUTRAL_SPEED = 10.0; // Interpolation speed when stopped
 
@@ -57,8 +90,8 @@ export const ANIMATION_IDLE_ARM_Z_AMPLITUDE = 0.05;
 export const ANIMATION_IDLE_ARM_X_FREQUENCY = 1.34;
 export const ANIMATION_IDLE_ARM_X_AMPLITUDE = 0.05;
 
-export const ANIMATION_AIRBORNE_ARM_ROTATION = 0.0;
-export const ANIMATION_AIRBORNE_LEG_ROTATION = 0.0;
+export const ANIMATION_AIRBORNE_ARM_ROTATION = -0.2;
+export const ANIMATION_AIRBORNE_LEG_ROTATION = -0.2;
 
 // View Bobbing (Camera)
 export const CAMERA_VIEW_BOB_HORIZONTAL_AMPLITUDE = 0.01;

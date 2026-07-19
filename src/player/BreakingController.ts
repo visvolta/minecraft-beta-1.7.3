@@ -9,6 +9,7 @@ import type { RaycastHit } from '../world/Raycaster';
 import { worldToChunkLocal } from '../world/worldToChunkCoords';
 import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import { resolveBlockDrops } from '../entities/items/BlockDropResolver';
+import { FIRST_PERSON_CAMERA_OFFSET_Y } from './PlayerConstants.ts';
 
 /**
  * Replicates Minecraft Beta 1.7.3 block breaking logic.
@@ -26,6 +27,11 @@ export class BreakingController {
   private miningBlockPos: { x: number; y: number; z: number } | undefined;
   private progress = 0.0; // From 0.0 to 1.0
   private blockHitWait = 0.0; // Cooldown in ticks (cooldown is 5 ticks in Beta 1.7.3)
+  private onBlockBrokenHandler?: (blockId: number, x: number, y: number, z: number) => void;
+
+  public setOnBlockBrokenHandler(handler: (blockId: number, x: number, y: number, z: number) => void): void {
+    this.onBlockBrokenHandler = handler;
+  }
 
   public constructor(
     player: Player,
@@ -164,7 +170,7 @@ export class BreakingController {
   private isPlayerUnderwater(): boolean {
     const px = Math.floor(this.player.position.x);
     const py = Math.floor(this.player.position.y);
-    const pey = Math.floor(this.player.position.y + 1.62); // Eye level in Beta 1.7.3
+    const pey = Math.floor(this.player.position.y + FIRST_PERSON_CAMERA_OFFSET_Y); // Eye level in Beta 1.7.3
     const pz = Math.floor(this.player.position.z);
 
     const feetBlock = this.blockUpdateWorld.getBlock(px, py, pz);
@@ -192,6 +198,9 @@ export class BreakingController {
     });
 
     if (success) {
+      if (this.onBlockBrokenHandler) {
+        this.onBlockBrokenHandler(blockId, x, y, z);
+      }
       // Resolve block drops and trigger spawn centered at the block
       const drops = resolveBlockDrops(blockId, metadata);
       for (const drop of drops) {

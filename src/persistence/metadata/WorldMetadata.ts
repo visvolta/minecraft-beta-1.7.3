@@ -1,3 +1,5 @@
+import type { SerializedFurnace } from '../../furnace/FurnaceManager';
+
 export const WORLD_METADATA_VERSION = 1;
 
 export interface SerializedItemStack {
@@ -21,6 +23,7 @@ export interface WorldMetadata {
   readonly lastPlayedMs: number;
   readonly inventory?: (SerializedItemStack | null)[];
   readonly selectedHotbarSlot?: number;
+  readonly furnaces?: SerializedFurnace[];
 }
 export function validateWorldMetadata(value: unknown): WorldMetadata {
   if (typeof value !== 'object' || value === null) throw new Error('World metadata must be an object');

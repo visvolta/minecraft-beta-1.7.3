@@ -260,6 +260,29 @@ function testInventory() {
   assert(inv2.getStack(2)!.count === 16, 'Deserialized slot 2 matches 16 count');
 }
 
+function testStage1PresentationFixes() {
+  // 1. First-person hand visibility by held state
+  const fpArm = new FirstPersonArmRenderer();
+  fpArm.setArmMeshVisible(false);
+  assert(fpArm.armMesh.visible === false, 'First-person hand hidden when holding items/blocks');
+  fpArm.setArmMeshVisible(true);
+  assert(fpArm.armMesh.visible === true, 'First-person hand shown when slot is empty');
+
+  // 2. First-person lighting updates
+  fpArm.updateLighting(14, 8, 2, 0.9);
+  const u = fpArm.material.userData.dynamicLightingUniforms as any;
+  assert(u && u.uStaticSkyLight.value === 14 && u.uStaticBlockLight.value === 8, 'First-person lighting uniforms updated dynamically');
+
+  // 3. First-person player-part visibility
+  const playerModel = new PlayerModel();
+  playerModel.setFirstPersonMode(true);
+  assert(playerModel.headGroup.visible === false, 'Head hidden in first person');
+  assert(playerModel.rightArmGroup.visible === false, 'Right arm hidden in first person');
+  assert(playerModel.bodyGroup.visible === true && playerModel.leftArmGroup.visible === true && playerModel.leftLegGroup.visible === true && playerModel.rightLegGroup.visible === true, 'Torso, left arm, and legs visible in first person');
+  playerModel.setFirstPersonMode(false);
+  assert(playerModel.headGroup.visible === true && playerModel.rightArmGroup.visible === true, 'All body parts restored in third person');
+}
+
 function main() {
   testPlayerAnimator();
   testFirstPersonMotion();
@@ -267,6 +290,7 @@ function main() {
   testBreakingController();
   testInventory();
   testCameraModeController();
+  testStage1PresentationFixes();
   console.log('Player Rendering Validation Passed.');
   process.exit(0);
 }

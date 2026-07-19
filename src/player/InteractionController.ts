@@ -33,6 +33,11 @@ export class InteractionController {
 
   private selectedSlotIndex = 0; // 0 to 8 representing the selected hotbar slot
   private currentHit: RaycastHit | undefined;
+  private blockInteractionHandler?: (blockId: number, x: number, y: number, z: number) => boolean;
+
+  public setBlockInteractionHandler(handler: (blockId: number, x: number, y: number, z: number) => boolean): void {
+    this.blockInteractionHandler = handler;
+  }
 
   public constructor(
     input: Input,
@@ -121,6 +126,13 @@ export class InteractionController {
     }
 
     if (this.input.isMouseButtonJustPressed('right')) {
+      const { x, y, z } = this.currentHit.blockPos;
+      const targetId = this.blockUpdateWorld.getBlock(x, y, z);
+      if (this.blockInteractionHandler && this.blockInteractionHandler(targetId, x, y, z)) {
+        this.player.swingItem();
+        return;
+      }
+
       const placed = this.placeBlock(this.currentHit);
       if (placed) {
         // Authoritative decrement of exactly 1 item upon successful placement

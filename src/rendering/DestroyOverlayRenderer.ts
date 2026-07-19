@@ -85,7 +85,7 @@ const FACES: readonly FaceDef[] = [
 ];
 
 /**
- * Re-creates the exact corner-to-texture-UV mapping from ChunkMesher
+ * Re-creates exact corner-to-texture-UV mapping from ChunkMesher
  * to guarantee that the cracks always orient and align perfectly with
  * the base block textures.
  */
@@ -130,9 +130,6 @@ export class DestroyOverlayRenderer {
     this.blockRegistry = blockRegistry;
     this.blockUpdateWorld = blockUpdateWorld;
 
-    // Pre-initialize geometry with position and uv attributes of size 0
-    // This forces Three.js to compile the basic material's WebGL program with USE_UV
-    // enabled right from the very first frame, permanently eliminating the 1-frame fire_layer_0 flash.
     this.geometry = new THREE.BufferGeometry();
     this.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
     this.geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(0), 2));
@@ -140,15 +137,19 @@ export class DestroyOverlayRenderer {
     this.material = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       transparent: true,
-      blending: THREE.MultiplyBlending, // Multiply blending matches Beta 1.7.3 crack rendering overlay
-      premultipliedAlpha: true, // Silences WebGLState MultiplyBlending warning
+      blending: THREE.MultiplyBlending,
+      premultipliedAlpha: true,
       depthWrite: false,
       alphaTest: 0.01,
+      polygonOffset: true,
+      polygonOffsetFactor: -1.0,
+      polygonOffsetUnits: -4.0,
     });
 
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.name = 'destroyOverlay';
     this.mesh.visible = false;
+    this.mesh.renderOrder = 5; // Cleanly render crack overlay above standard block faces
     this.scene.add(this.mesh);
   }
 
@@ -169,33 +170,46 @@ export class DestroyOverlayRenderer {
     const stage = Math.min(9, Math.max(0, Math.floor(progress * 10.0)));
     const blockPosKey = `${blockPos.x},${blockPos.y},${blockPos.z}`;
 
-    // If block position or stage changes, rebuild the geometry
     if (this.lastBlockPosKey !== blockPosKey || this.lastStage !== stage) {
-      this.rebuildGeometry(blockPos, stage);
+      const success = this.rebuildGeometry(blockPos, stage);
       this.lastBlockPosKey = blockPosKey;
       this.lastStage = stage;
+      if (!success) {
+        this.mesh.visible = false;
+        return;
+      }
     }
 
-    // Explicitly set mesh position to the targeted block (local coordinates in geometry)
+    if (!this.mesh.geometry || !this.mesh.geometry.getAttribute('position') || this.mesh.geometry.getAttribute('position').count === 0) {
+      this.mesh.visible = false;
+      return;
+    }
+
     this.mesh.position.set(blockPos.x, blockPos.y, blockPos.z);
     this.mesh.visible = true;
   }
 
-  private rebuildGeometry(blockPos: { x: number; y: number; z: number }, stage: number): void {
-    // Cleanly dispose of old geometry to prevent memory leaks in Three.js
-    this.geometry.dispose();
+  private rebuildGeometry(blockPos: { x: number; y: number; z: number }, stage: number): boolean {
+    const blockId = this.blockUpdateWorld.getBlock(blockPos.x, blockPos.y, blockPos.z);
+    if (blockId === BlockIds.Air) {
+      this.geometry.dispose();
+      const emptyGeo = new THREE.BufferGeometry();
+      this.mesh.geometry = emptyGeo;
+      this.geometry = emptyGeo;
+      return false;
+    }
 
-    // Create a new BufferGeometry instance atomically to prevent stale caching/single-frame flashes
-    const newGeometry = new THREE.BufferGeometry();
-
-    const uvRect = this.atlas.getUvRect(`destroy_stage_${stage}`);
+    let uvRect = this.atlas.getUvRect(`destroy_stage_${stage}`);
     if (uvRect === undefined) {
-      newGeometry.setIndex(null);
-      newGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
-      newGeometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(0), 2));
-      this.mesh.geometry = newGeometry;
-      this.geometry = newGeometry;
-      return;
+      console.error(`[DestroyOverlayRenderer] Unresolved destroy texture: destroy_stage_${stage}. Using missing_texture fallback.`);
+      uvRect = this.atlas.getUvRect('missing_texture');
+      if (uvRect === undefined) {
+        this.geometry.dispose();
+        const emptyGeo = new THREE.BufferGeometry();
+        this.mesh.geometry = emptyGeo;
+        this.geometry = emptyGeo;
+        return false;
+      }
     }
 
     const { u0, v0, u1, v1 } = uvRect;
@@ -205,15 +219,12 @@ export class DestroyOverlayRenderer {
     const indices: number[] = [];
     let vertexCount = 0;
 
-    // Resolve active targeted block ID and its renderType to support custom geometries
-    const blockId = this.blockUpdateWorld.getBlock(blockPos.x, blockPos.y, blockPos.z);
     const blockDef = this.blockRegistry.getById(blockId);
     const renderType = blockDef?.renderType;
 
     for (let faceIndex = 0; faceIndex < 6; faceIndex++) {
       const face = FACES[faceIndex]!;
 
-      // Check if face is visible (i.e. neighbor block is transparent, non-solid, or air)
       const nx = blockPos.x + face.dx;
       const ny = blockPos.y + face.dy;
       const nz = blockPos.z + face.dz;
@@ -221,16 +232,19 @@ export class DestroyOverlayRenderer {
       let isFaceVisible = false;
       const isNeighborChunkLoaded = this.blockUpdateWorld.isLoaded(nx, nz);
 
-      // Expose face only to Air blocks, and hide boundary faces when neighbor chunk is unloaded
       if (isNeighborChunkLoaded) {
         const neighborId = this.blockUpdateWorld.getBlock(nx, ny, nz);
         if (neighborId === BlockIds.Air) {
           isFaceVisible = true;
+        } else {
+          const neighborDef = this.blockRegistry.getById(neighborId);
+          if (!neighborDef || !neighborDef.solid || neighborDef.transparent || neighborDef.isLiquid) {
+            isFaceVisible = true;
+          }
         }
       }
 
       if (isFaceVisible) {
-        // Emit 4 vertices for the face in local coordinates
         for (let i = 0; i < 4; i++) {
           const corner = face.corners[i]!;
           
@@ -238,7 +252,6 @@ export class DestroyOverlayRenderer {
           let cy = corner[1];
           let cz = corner[2];
 
-          // Support custom overlay shapes for non-full cubes (cactus, snow, etc.)
           if (renderType === 'snow') {
             if (cy === 1.0) cy = 0.125;
           } else if (renderType === 'cactus') {
@@ -257,14 +270,12 @@ export class DestroyOverlayRenderer {
 
           positions.push(px, py, pz);
 
-          // Consistent UV orientation: replicate localCornerToTextureUv from ChunkMesher
           const [localU, localV] = localCornerToTextureUv(face, corner);
           const u = u0 + (u1 - u0) * localU;
           const v = v0 + (v1 - v0) * localV;
           uvs.push(u, v);
         }
 
-        // Add indices for two triangles
         indices.push(
           vertexCount + 0, vertexCount + 1, vertexCount + 2,
           vertexCount + 0, vertexCount + 2, vertexCount + 3
@@ -274,6 +285,16 @@ export class DestroyOverlayRenderer {
       }
     }
 
+    if (positions.length === 0) {
+      this.geometry.dispose();
+      const emptyGeo = new THREE.BufferGeometry();
+      this.mesh.geometry = emptyGeo;
+      this.geometry = emptyGeo;
+      return false;
+    }
+
+    this.geometry.dispose();
+    const newGeometry = new THREE.BufferGeometry();
     newGeometry.setIndex(indices);
     newGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     newGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
@@ -282,9 +303,9 @@ export class DestroyOverlayRenderer {
     newGeometry.computeBoundingBox();
     newGeometry.computeBoundingSphere();
 
-    // Re-assign to mesh and update our reference atomically
     this.mesh.geometry = newGeometry;
     this.geometry = newGeometry;
+    return true;
   }
 
   public dispose(): void {

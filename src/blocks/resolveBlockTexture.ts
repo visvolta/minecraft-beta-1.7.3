@@ -10,5 +10,8 @@ export function resolveBlockTexture(
   definition: BlockDefinition,
   face: BlockFace,
 ): string | undefined {
+  if (face === 'front') {
+    return definition.textures.front ?? definition.textures.side ?? definition.textures.all;
+  }
   return definition.textures[face] ?? definition.textures.all;
 }

@@ -3,7 +3,8 @@ import {
   ANIMATION_SWING_DURATION_SECONDS,
   ANIMATION_MOVEMENT_SPEED_SCALING,
   ANIMATION_RETURN_TO_NEUTRAL_SPEED,
-  ANIMATION_WALK_SWING_FREQUENCY
+  ANIMATION_WALK_SWING_FREQUENCY,
+  FIRST_PERSON_CAMERA_OFFSET_Y
 } from './PlayerConstants.ts';
 
 /** Player hitbox width and depth (blocks). */
@@ -13,7 +14,7 @@ export const PLAYER_WIDTH = 0.6;
 export const PLAYER_HEIGHT = 1.8;
 
 /** Camera height above the player's feet (blocks). */
-export const PLAYER_EYE_HEIGHT = 1.62;
+export const PLAYER_EYE_HEIGHT = FIRST_PERSON_CAMERA_OFFSET_Y;
 
 /**
  * Player position, velocity, and grounded state.

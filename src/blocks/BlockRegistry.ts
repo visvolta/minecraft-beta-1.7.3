@@ -26,8 +26,11 @@ export class BlockRegistry {
     this.byName.set(definition.name, definition);
   }
 
-  public getById(id: BlockId): BlockDefinition | undefined {
-    return this.byId.get(id);
+  public getById(id: BlockId | string): BlockDefinition | undefined {
+    if (typeof id === 'number') return this.byId.get(id);
+    const num = Number(id);
+    if (!Number.isNaN(num) && this.byId.has(num)) return this.byId.get(num);
+    return this.byName.get(id);
   }
 
   public getByName(name: string): BlockDefinition | undefined {

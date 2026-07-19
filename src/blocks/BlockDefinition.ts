@@ -9,6 +9,7 @@ export interface BlockTextures {
   top?: string;
   bottom?: string;
   side?: string;
+  front?: string;
 }
 
 /** Normalized RGB tint multiplier, each channel in [0, 1]. */
@@ -26,6 +27,7 @@ export interface BlockTints {
   top?: TintColor;
   bottom?: TintColor;
   side?: TintColor;
+  front?: TintColor;
 }
 
 export type BlockRenderType = 'opaque' | 'cutout' | 'leaves' | 'cross' | 'cactus' | 'fluid' | 'snow' | 'ice';
