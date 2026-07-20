@@ -117,3 +117,9 @@ export const ANIMATION_SWING_YAW = 0 * Math.PI / 180.0;
 export const ANIMATION_SWING_ROLL = 5 * Math.PI / 180.0;
 
 export const ANIMATION_PLACEMENT_SWING_STRENGTH = 1;
+
+// ---- Melee combat (Stage 7C) ----
+/** Beta entity-targeting reach: capped at 3.0 blocks (and at the block-hit distance). */
+export const MELEE_REACH = 3.0;
+/** Base bare-hand player melee damage (Beta fist = 1 half-heart). Centralized, no weapon bonuses. */
+export const PLAYER_MELEE_DAMAGE = 1;

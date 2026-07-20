@@ -16,6 +16,11 @@ import { DroppedItemEntity } from '../src/entities/items/DroppedItemEntity.ts';
 import { FallingBlockEntity } from '../src/entities/FallingBlockEntity.ts';
 import { PigEntity } from '../src/entities/living/PigEntity.ts';
 import { Pathfinder } from '../src/entities/nav/Pathfinder.ts';
+import { DamageSource } from '../src/entities/damage/DamageSource.ts';
+import { CountingParticleSink } from '../src/entities/particles/EntityParticleSink.ts';
+import { selectMeleeTarget } from '../src/player/MeleeTargeting.ts';
+import { MELEE_REACH } from '../src/player/PlayerConstants.ts';
+import { PigModel } from '../src/entities/living/PigModel.ts';
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -29,6 +34,7 @@ interface World {
   entities: EntityManager;
   physics: EntityPhysics;
   pathfinder: Pathfinder;
+  particles: CountingParticleSink;
 }
 
 function buildWorld(chunkRadius = 2): World {
@@ -50,6 +56,7 @@ function buildWorld(chunkRadius = 2): World {
   const material = new THREE.MeshBasicMaterial();
   const registry = createDefaultEntityTypeRegistry();
   registerEntityTypes(registry);
+  const particles = new CountingParticleSink();
   const entities = new EntityManager({
     blockRegistry: blocks,
     behaviourRegistry: behaviours,
@@ -62,11 +69,12 @@ function buildWorld(chunkRadius = 2): World {
     itemHeldMaterial: material,
     typeRegistry: registry,
     rng: new JavaRandom(987654321n),
+    particles,
   });
 
   const physics = new EntityPhysics(blocks, behaviours, world);
   const pathfinder = new Pathfinder(blocks, behaviours, world);
-  return { blocks, behaviours, world, chunks, entities, physics, pathfinder };
+  return { blocks, behaviours, world, chunks, entities, physics, pathfinder, particles };
 }
 
 /** Lays a solid stone floor at y=10 across all loaded chunks. */
@@ -260,17 +268,21 @@ class TestBody implements PhysicsMovable {
   const pig = new PigEntity(w.entities.context, 0.5, 12, 0.5);
   assert(pig.health === 10 && pig.maxHealth === 10, 'pig starts at full health');
 
-  assert(pig.attackEntityFrom(4) === true, 'first hit lands');
+  assert(pig.attackEntityFrom(DamageSource.generic(), 4) === true, 'first hit lands');
   assert(pig.health === 6, 'health reduced by damage');
   assert(pig.hurtResistantTime > 0, 'invulnerability window active after hit');
 
-  // A second hit during the invulnerability window is ignored.
-  assert(pig.attackEntityFrom(4) === false, 'hit during invulnerability is ignored');
+  // A second, equal hit during the invulnerability window is rejected.
+  assert(pig.attackEntityFrom(DamageSource.generic(), 4) === false, 'equal hit during invulnerability is ignored');
   assert(pig.health === 6, 'health unchanged during invulnerability');
+
+  // A stronger hit during the window applies only the excess (Beta repeated-hit protection).
+  assert(pig.attackEntityFrom(DamageSource.generic(), 7) === true, 'stronger hit during invulnerability applies excess');
+  assert(pig.health === 3, 'only the excess damage (7-4=3) was applied');
 
   // Damage that drops to zero triggers death handling.
   pig.hurtResistantTime = 0;
-  pig.attackEntityFrom(99);
+  pig.attackEntityFrom(DamageSource.generic(), 99);
   assert(pig.health === 0, 'lethal damage drops health to zero');
   assert(!pig.isAlive(), 'pig is no longer alive at zero health');
 }
@@ -372,6 +384,426 @@ class TestBody implements PhysicsMovable {
   w.entities.tick();
   for (let i = 0; i < 30; i++) w.entities.tick();
   assert(item.onGround, 'dropped item settles on the ground via shared physics');
+}
+
+// ============================================================
+// Stage 7B helpers
+// ============================================================
+function layGrassFloor(w: World, y = 10): void {
+  for (let x = -40; x <= 40; x++) {
+    for (let z = -40; z <= 40; z++) {
+      w.world.setBlock(x, y, z, BlockIds.Grass, { notifyNeighbours: false, updateLighting: false });
+    }
+  }
+}
+
+function countPork(entities: EntityManager): number {
+  let count = 0;
+  entities.forEachActive((entity) => {
+    if (entity instanceof DroppedItemEntity && entity.drop.id === 'porkchop_raw') {
+      count += entity.drop.count;
+    }
+  });
+  return count;
+}
+
+// ============================================================
+// 7B: Beta-like gradual movement and terminal walk speed
+// ============================================================
+{
+  const w = buildWorld(3);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick(); // settle onto the ground
+
+  pig.navigation.moveTo(pig, { x: 15.5, y: 11, z: 0.5 });
+  w.entities.tick(); // first movement tick from rest
+  const speedAfterOne = Math.hypot(pig.velocity.x, pig.velocity.z);
+  assert(speedAfterOne < 0.05, `movement accelerates gradually, not instantly (got ${speedAfterOne})`);
+
+  for (let i = 0; i < 60; i++) w.entities.tick();
+  const terminal = Math.hypot(pig.velocity.x, pig.velocity.z);
+  assert(terminal > 0.04 && terminal < 0.13, `Beta-like terminal walk speed (got ${terminal})`);
+}
+
+// ============================================================
+// 7B: smooth (clamped) body turn + head independent of body
+// ============================================================
+{
+  const w = buildWorld(3);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+
+  // Moving toward +X: heading jumps to ~-90°, but the body must turn only a
+  // clamped amount per tick (smooth), never snapping to the heading.
+  pig.yaw = 0;
+  pig.renderYawOffset = 0;
+  pig.navigation.moveTo(pig, { x: 15.5, y: 11, z: 0.5 });
+  w.entities.tick();
+  assert(Math.abs(pig.renderYawOffset) <= 10.001, `body turn is clamped per tick (got ${pig.renderYawOffset})`);
+  assert(Math.abs(pig.renderYawOffset) < Math.abs(pig.yaw), 'body lags behind the heading (does not snap)');
+}
+{
+  const w = buildWorld(3);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+
+  // Idle: turn the head far from the heading; the body must NOT chase the head
+  // (it eases toward the heading, which is unchanged), proving independence.
+  pig.yaw = 0;
+  pig.renderYawOffset = 0;
+  pig.headYaw = 80;
+  w.entities.tick();
+  assert(Math.abs(pig.renderYawOffset) < 5, 'body does not snap to an independently-turned head');
+}
+
+// ============================================================
+// 7B: entity↔entity pushing (Beta applyEntityCollision)
+// ============================================================
+{
+  const w = buildWorld();
+  layGrassFloor(w, 10);
+  const a = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  const b = new PigEntity(w.entities.context, 0.9, 11, 0.5);
+  a.applyEntityCollision(b);
+  assert(a.velocity.x < 0 && b.velocity.x > 0, 'applyEntityCollision pushes overlapping entities apart');
+  assert(Math.abs(a.velocity.x + b.velocity.x) < 1e-9, 'push impulse is equal and opposite (symmetric)');
+  assert(a.velocity.y === 0 && b.velocity.y === 0, 'push is horizontal-only (no launching)');
+}
+{
+  // Manager-level: overlapping pigs separate over time.
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const a = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  const b = new PigEntity(w.entities.context, 0.8, 11, 0.5);
+  w.entities.add(a);
+  w.entities.add(b);
+  const initial = Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z);
+  for (let i = 0; i < 12; i++) w.entities.tick();
+  const after = Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z);
+  assert(after > initial, 'overlapping pigs separate via mob↔mob pushing');
+}
+
+// ============================================================
+// 7B: player pushes a pig (impulse applied via player.velocity)
+// ============================================================
+{
+  const w = buildWorld();
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+
+  const player = {
+    position: { x: 0.95, y: 11, z: 0.5 },
+    velocity: { x: 0, y: 0, z: 0 },
+    getAABB: () => new AABB(0.95 - 0.3, 11, 0.5 - 0.3, 0.95 + 0.3, 11 + 1.8, 0.5 + 0.3),
+  };
+  const pigVxBefore = pig.velocity.x;
+  w.entities.collideWithPlayer(player);
+  assert(pig.velocity.x < pigVxBefore, 'player pushes the pig away (pig velocity nudged -X)');
+  assert(player.velocity.x > 0, 'player receives the opposite impulse through its velocity');
+  assert(player.position.x === 0.95, 'player is not repositioned directly (only velocity changed)');
+}
+
+// ============================================================
+// 7B: no clipping through terrain when pushed into a wall
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  // A wide wall at x=3 the pig cannot go around within the test window.
+  for (let y = 11; y < 20; y++) {
+    for (let z = -8; z <= 8; z++) {
+      w.world.setBlock(3, y, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
+    }
+  }
+  const pig = new PigEntity(w.entities.context, 2.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+  for (let i = 0; i < 60; i++) {
+    pig.velocity.x = 0.5; // keep shoving toward the wall
+    w.entities.tick();
+  }
+  assert(pig.position.x < 3.0, `pushed pig must not clip through the wall (x=${pig.position.x})`);
+}
+
+// ============================================================
+// 7B: pork drop hook yields a valid 1–3 stack on death
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  let totalDropped = 0;
+  let trials = 0;
+  for (let t = 0; t < 20; t++) {
+    const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+    w.entities.add(pig);
+    w.entities.tick();
+    pig.hurtResistantTime = 0;
+    pig.attackEntityFrom(DamageSource.generic(), 99); // lethal
+    for (let i = 0; i < 40; i++) w.entities.tick(); // run out the death linger + drop
+    const dropped = countPork(w.entities);
+    if (dropped > 0) {
+      totalDropped += dropped;
+      trials += 1;
+      assert(dropped >= 1 && dropped <= 3, `pork drop count must be 1–3 (got ${dropped})`);
+    }
+    // Clean up dropped items for the next trial.
+    w.entities.forEachActive((e) => { if (e instanceof DroppedItemEntity) e.markRemoved(); });
+    w.entities.tick();
+  }
+  assert(trials > 0 && totalDropped > 0, 'death produced pork drops');
+}
+
+// ============================================================
+// 7B: navigation still routes up a 1-block step (stepHeight reduced to 0.5,
+// pathfinder max step-up decoupled to 1)
+// ============================================================
+{
+  const w = buildWorld(3);
+  // Lower floor (top y=11) for x<3, raised floor (top y=12) for x>=3.
+  for (let x = -16; x < 3; x++) {
+    for (let z = -3; z <= 3; z++) {
+      w.world.setBlock(x, 10, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
+    }
+  }
+  for (let x = 3; x <= 16; x++) {
+    for (let z = -3; z <= 3; z++) {
+      w.world.setBlock(x, 10, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
+      w.world.setBlock(x, 11, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
+    }
+  }
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  assert(pig.stepHeight === 0.5, 'pig step height reduced to Beta 0.5');
+  const found = pig.navigation.moveTo(pig, { x: 8.5, y: 12, z: 0.5 });
+  assert(found, 'navigation routes a path up a 1-block step despite physics stepHeight 0.5');
+
+  // End-to-end: the pig actually climbs onto the upper floor.
+  w.entities.add(pig);
+  w.entities.tick();
+  pig.navigation.moveTo(pig, { x: 8.5, y: 12, z: 0.5 });
+  for (let i = 0; i < 240; i++) w.entities.tick();
+  assert(pig.position.y >= 11.5, `pig climbs the 1-block step (feet y=${pig.position.y})`);
+}
+
+// ============================================================
+// 7C: melee target selection — nearest valid entity within reach
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const near = new PigEntity(w.entities.context, 1.5, 11, 0.5);
+  const far = new PigEntity(w.entities.context, 2.5, 11, 0.5);
+  w.entities.add(near);
+  w.entities.add(far);
+  w.entities.tick();
+
+  const eye = { x: 0, y: 11.45, z: 0.5 };
+  const look = { x: 1, y: 0, z: 0 };
+  const candidates = [near, far];
+  const hit = selectMeleeTarget(eye, look, MELEE_REACH, candidates);
+  assert(hit !== undefined && hit.entity === near, 'nearest pig is selected');
+}
+
+// ============================================================
+// 7C: attack blocked by terrain (reach capped at block-hit distance)
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const behind = new PigEntity(w.entities.context, 4.0, 11, 0.5);
+  w.entities.add(behind);
+  w.entities.tick();
+
+  const eye = { x: 0, y: 11.45, z: 0.5 };
+  const look = { x: 1, y: 0, z: 0 };
+  // A wall at x=2 means the block-hit distance is ~2.0, so melee reach is
+  // capped to 2.0 and the pig at x=4 (beyond it) cannot be targeted.
+  const cappedReach = Math.min(MELEE_REACH, 2.0);
+  const hit = selectMeleeTarget(eye, look, cappedReach, [behind]);
+  assert(hit === undefined, 'pig behind a wall (beyond capped reach) is not targetable');
+  // Sanity: a dead pig is never a valid target.
+  behind.attackEntityFrom(DamageSource.generic(), 99);
+  const alive = [behind].filter((e) => e.canBeCollidedWith());
+  assert(alive.length === 0, 'dead pig is not collidable/targetable');
+}
+
+// ============================================================
+// 7C: directional knockback + zero-distance safety
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+
+  // Attacker to the -X side → pig knocked toward +X (away), with a vertical pop.
+  const attacker = { position: { x: -2, y: 11, z: 0.5 } };
+  pig.attackEntityFrom(DamageSource.player(attacker), 1);
+  assert(pig.velocity.x > 0, 'knockback pushes the pig away from the attacker (+X)');
+  assert(pig.velocity.y > 0 && pig.velocity.y <= 0.4 + 1e-6, 'knockback adds a capped vertical pop');
+
+  // Zero-distance knockback: no NaN, no horizontal launch, still safe.
+  const pig2 = new PigEntity(w.entities.context, 5.5, 11, 0.5);
+  pig2.knockBack(pig2.position.x, pig2.position.z);
+  assert(Number.isFinite(pig2.velocity.x) && Number.isFinite(pig2.velocity.z), 'zero-distance knockback is finite');
+  assert(Math.abs(pig2.velocity.x) < 1e-6 && Math.abs(pig2.velocity.z) < 1e-6, 'zero-distance knockback has no horizontal launch');
+}
+
+// ============================================================
+// 7C: hurt timer + red flash reset (no permanent tint, no new material)
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+  pig.attackEntityFrom(DamageSource.generic(), 1);
+  assert(pig.hurtTime === 10 && pig.maxHurtTime === 10, 'hurt timer set on a full hit');
+  w.entities.tick();
+  assert(pig.hurtTime === 9, 'hurt timer decrements each tick');
+
+  // Red flash lerps existing material colour and fully resets at amount 0.
+  const fresh = new PigModel();
+  const flashed = new PigModel();
+  flashed.setHurtFlash(1);
+  flashed.setHurtFlash(0);
+  assert(flashed.bodyMaterial.color.equals(fresh.bodyMaterial.color), 'hurt flash resets to base colour (no permanent tint)');
+  fresh.dispose();
+  flashed.dispose();
+}
+
+// ============================================================
+// 7C: panic — priority override, flee, and clean expiry
+// ============================================================
+{
+  const w = buildWorld(3);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+
+  const attacker = { position: { x: -3, y: 11, z: 0.5 } };
+  pig.attackEntityFrom(DamageSource.player(attacker), 1);
+  assert(pig.recentlyHurt === true, 'a full hit sets the panic trigger');
+
+  w.entities.tick(); // PanicTask starts, consuming the trigger
+  assert(pig.recentlyHurt === false, 'panic consumes the trigger');
+  assert(pig.moveSpeed > 0.7, 'panic boosts movement speed');
+
+  for (let i = 0; i < 80; i++) w.entities.tick(); // run out the panic duration
+  assert(Math.abs(pig.moveSpeed - 0.7) < 1e-6, 'movement speed restored after panic expires');
+  assert(pig.isAlive(), 'pig survives a single non-lethal hit and recovers');
+}
+
+// ============================================================
+// 7C: exactly-once drops, death particles, and cleanup
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+  const deathParticlesBefore = w.particles.deathCount;
+
+  pig.hurtResistantTime = 0;
+  pig.attackEntityFrom(DamageSource.generic(), 99); // lethal
+  w.entities.tick();
+
+  const dropsOnce = countPork(w.entities);
+  const activeAfterKill = w.entities.activeCount; // dead pig (lingering) + its drop entity
+  assert(dropsOnce >= 1 && dropsOnce <= 3, 'lethal hit drops 1–3 pork exactly once');
+  assert(w.particles.deathCount === deathParticlesBefore + 1, 'death particles fired exactly once');
+
+  for (let i = 0; i < 40; i++) w.entities.tick(); // death linger + beyond
+  assert(countPork(w.entities) === dropsOnce, 'no duplicate drops after death');
+  assert(w.particles.deathCount === deathParticlesBefore + 1, 'death particles not re-fired');
+  assert(pig.removed, 'pig removed after the death linger');
+  assert(w.entities.activeCount === activeAfterKill - 1, 'pig removed exactly once; its drop entity remains');
+}
+
+// ============================================================
+// 7C: repeated rapid hits respect invulnerability (no over-damage)
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+
+  // Ten immediate fist hits (damage 1): only the first lands during the window.
+  let hits = 0;
+  for (let i = 0; i < 10; i++) {
+    if (pig.attackEntityFrom(DamageSource.generic(), 1)) hits += 1;
+  }
+  assert(hits === 1, 'rapid equal hits are gated by invulnerability frames');
+  assert(pig.health === 9, 'only one point of damage taken from rapid equal hits');
+}
+
+// ============================================================
+// 7C: fall-damage death drops loot once
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 40, 0.5); // high above the floor
+  w.entities.add(pig);
+  for (let i = 0; i < 120; i++) w.entities.tick();
+  assert(pig.health <= 0, 'a long fall kills the pig via fall damage');
+  const drops = countPork(w.entities);
+  assert(drops >= 1 && drops <= 3, 'fall death dropped loot once');
+}
+
+// ============================================================
+// 7C: save/load + chunk-streaming safety (transient state cleared, no double loot)
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+
+  // Live pig: health persists; transient combat state is cleared on load.
+  const live = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  live.health = 7;
+  live.hurtTime = 5;
+  live.recentlyHurt = true;
+  live.lastDamageSource = DamageSource.generic();
+  const loadedLive = PigEntity.deserialize(w.entities.context, live.writeToNbt());
+  assert(loadedLive !== undefined, 'live pig deserialises');
+  assert(loadedLive!.health === 7, 'health persists across save/load');
+  assert(loadedLive!.hurtTime === 0, 'hurt timer is transient (cleared on load)');
+  assert(loadedLive!.recentlyHurt === false, 'panic trigger is transient (cleared on load)');
+  assert(loadedLive!.lastDamageSource === undefined, 'attacker/damage source is transient (cleared on load)');
+
+  // Dead pig saved mid-death: on load it resumes dying WITHOUT re-dropping loot.
+  const dying = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(dying);
+  w.entities.tick();
+  dying.hurtResistantTime = 0;
+  dying.attackEntityFrom(DamageSource.generic(), 99); // drops loot now
+  w.entities.tick(); // mid-death (deathTime advances)
+  const savedDead = dying.writeToNbt();
+
+  // Isolate: clear the world of the original pig and its drops.
+  w.entities.forEachActive((e) => e.markRemoved());
+  w.entities.tick();
+  assert(countPork(w.entities) === 0, 'world cleared before reload test');
+
+  const loadedDead = PigEntity.deserialize(w.entities.context, savedDead);
+  assert(loadedDead !== undefined && loadedDead.health === 0, 'dead pig reloads dead');
+  w.entities.add(loadedDead!);
+  for (let i = 0; i < 40; i++) w.entities.tick(); // continues death → removal
+  assert(countPork(w.entities) === 0, 'a pig loaded mid-death does not drop loot twice');
+  assert(loadedDead!.removed, 'a loaded dead pig is removed after its linger');
 }
 
 console.log('Entity system validation passed.');

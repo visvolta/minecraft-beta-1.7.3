@@ -1,11 +1,12 @@
-import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
+import type { EntityWorldContext } from '../core/EntityContext';
 import { EntityTypeIds } from '../core/EntityType';
 import type { NbtCompound, NbtTag } from '../../persistence/nbt/Nbt';
 import { AnimalEntity } from './AnimalEntity';
 import { PigModel } from './PigModel';
 import { WanderTask } from '../ai/tasks/WanderTask';
 import { IdleLookTask } from '../ai/tasks/IdleLookTask';
-import { DroppedItemEntity } from '../items/DroppedItemEntity';
+import { PanicTask } from '../ai/tasks/PanicTask';
+import type { Drop } from '../items/BlockDropResolver';
 
 /**
  * A pig — the Stage-1 validation mob (Beta `EntityPig`).
@@ -28,10 +29,14 @@ export class PigEntity extends AnimalEntity {
     super(ctx);
     this.setSize(0.9, 0.9);
     this.setPosition(x, y, z);
-    this.moveSpeed = 0.25;
+    // Beta default land mob moveSpeed (0.7); with the Beta moveFlying model
+    // this yields a slow, gradual amble (~0.08 blocks/tick terminal).
+    this.moveSpeed = 0.7;
     this.maxHealth = 10;
     this.health = 10;
 
+    // Panic (priority 20) overrides wandering (10) and idle-looking (5).
+    this.aiController.addTask(new PanicTask());
     this.aiController.addTask(new WanderTask());
     this.aiController.addTask(new IdleLookTask());
 
@@ -57,8 +62,15 @@ export class PigEntity extends AnimalEntity {
     }
     const legYaw = this.prevLegYaw + (this.legYaw - this.prevLegYaw) * alpha;
     const bodyYaw = this.prevRenderYawOffset + (this.renderYawOffset - this.prevRenderYawOffset) * alpha;
-    const headYaw = this.previousYaw + (this.yaw - this.previousYaw) * alpha;
+    const headYaw = this.prevHeadYaw + (this.headYaw - this.prevHeadYaw) * alpha;
     model.updatePose(legYaw, this.legSwing, bodyYaw, headYaw - bodyYaw);
+
+    // Hurt flash: fades over the hurt timer while alive; off while dead.
+    const flash = !this.isDead() && this.maxHurtTime > 0 ? this.hurtTime / this.maxHurtTime : 0;
+    model.setHurtFlash(flash);
+
+    // Death collapse over the ~20-tick linger.
+    model.setDeathProgress(this.isDead() ? Math.min(this.deathTime / 20, 1) : 0);
   }
 
   protected override disposeRender(): void {
@@ -75,13 +87,12 @@ export class PigEntity extends AnimalEntity {
 
   // ---- Loot --------------------------------------------------------------
 
-  protected override dropLoot(ctx: EntityTickContext): void {
-    // Beta pigs drop raw pork (0–2); here 1–3 to keep the validation drop
-    // reliably observable. Cooked-when-on-fire is deferred.
+  protected override getDropItems(): Drop[] {
+    // Beta pigs drop raw pork; kept at 1–3 (Stage 7B decision). Cooked-when-on
+    // -fire is deferred. The base dropLoot() spawns these via the shared item
+    // system, exactly once.
     const count = 1 + this.nextInt(3);
-    const drop = { type: 'item' as const, id: 'porkchop_raw', count, metadata: 0 };
-    const item = new DroppedItemEntity(ctx.world, drop, this.position.x, this.position.y + 0.3, this.position.z, 10);
-    ctx.world.manager.add(item);
+    return [{ type: 'item', id: 'porkchop_raw', count, metadata: 0 }];
   }
 
   // ---- Serialisation (type-specific) -------------------------------------

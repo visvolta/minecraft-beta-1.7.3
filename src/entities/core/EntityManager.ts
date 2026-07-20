@@ -4,7 +4,7 @@ import type { NbtCompound } from '../../persistence/nbt/Nbt';
 import { EntityIdAllocator, chunkKey, chunkCoordsOf } from './EntityId';
 import { EntityPhysics } from './EntityPhysics';
 import type { EntityTypeRegistry } from './EntityType';
-import type { Entity } from './Entity';
+import { entityPushImpulse, type Entity } from './Entity';
 import type { EntityTickContext, EntityWorldContext } from './EntityContext';
 
 /**
@@ -14,6 +14,20 @@ import type { EntityTickContext, EntityWorldContext } from './EntityContext';
 export type EntityManagerOptions = Omit<EntityWorldContext, 'manager' | 'physics'> & {
   readonly typeRegistry: EntityTypeRegistry;
 };
+
+/** Beta expands an entity's box by 0.2 to find push candidates. */
+const ENTITY_COLLISION_EXPAND = 0.2;
+
+/**
+ * The minimal surface the manager needs to push the player. `Player` satisfies
+ * this structurally; the manager only reads position/AABB and writes velocity,
+ * so the player's own physics still integrates motion and resolves terrain.
+ */
+export interface PushableBody {
+  readonly position: { x: number; y: number; z: number };
+  readonly velocity: { x: number; y: number; z: number };
+  getAABB(): AABB;
+}
 
 /**
  * Central owner of all world entities.
@@ -67,6 +81,7 @@ export class EntityManager {
       manager: this,
       physics: this.physics,
       rng: options.rng,
+      particles: options.particles,
     };
 
     this.chunkManager.addRemoveListener((chunk) => this.onChunkRemoved(chunk));
@@ -121,7 +136,54 @@ export class EntityManager {
       }
     }
 
+    // Resolve entity↔entity pushing after everyone has moved this tick.
+    this.resolveEntityCollisions();
+
     this.flushRemoves();
+  }
+
+  /**
+   * Pushes overlapping pushable entities apart (Beta `applyEntityCollision`),
+   * using chunk-first queries. Each pair is processed once (by id order).
+   */
+  private resolveEntityCollisions(): void {
+    for (const entity of this.entities.values()) {
+      if (entity.removed || !entity.canBePushed()) {
+        continue;
+      }
+      const box = entity.getAABB().expand(ENTITY_COLLISION_EXPAND, 0, ENTITY_COLLISION_EXPAND);
+      const nearby = this.getEntitiesInAABB(box);
+      for (const other of nearby) {
+        if (other === entity || other.id <= entity.id) {
+          continue;
+        }
+        if (other.removed || !other.canBePushed()) {
+          continue;
+        }
+        entity.applyEntityCollision(other);
+      }
+    }
+  }
+
+  /**
+   * Pushes pushable entities away from the player and applies the equal and
+   * opposite impulse to the player's velocity. The player's own physics (run
+   * later by the Engine) integrates that velocity and resolves terrain, so
+   * this never repositions the player or bypasses collision.
+   */
+  public collideWithPlayer(player: PushableBody): void {
+    const box = player.getAABB().expand(ENTITY_COLLISION_EXPAND, 0, ENTITY_COLLISION_EXPAND);
+    const nearby = this.getEntitiesInAABB(box);
+    for (const entity of nearby) {
+      if (entity.removed || !entity.canBePushed()) {
+        continue;
+      }
+      const impulse = entityPushImpulse(entity.position, player.position, entity.entityCollisionReduction);
+      entity.velocity.x -= impulse.x;
+      entity.velocity.z -= impulse.z;
+      player.velocity.x += impulse.x;
+      player.velocity.z += impulse.z;
+    }
   }
 
   /** Per-frame interpolation path. Delegates to each entity's own visuals. */

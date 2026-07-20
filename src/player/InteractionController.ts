@@ -15,6 +15,11 @@ import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import { BreakingController } from './BreakingController';
 import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import { Inventory } from '../inventory/Inventory';
+import type { EntityManager } from '../entities/core/EntityManager';
+import { LivingEntity } from '../entities/living/LivingEntity';
+import { DamageSource } from '../entities/damage/DamageSource';
+import { selectMeleeTarget } from './MeleeTargeting';
+import { MELEE_REACH, PLAYER_MELEE_DAMAGE } from './PlayerConstants';
 
 /** Maximum block interaction reach, in blocks. */
 export const INTERACTION_REACH = 4.75;
@@ -34,6 +39,8 @@ export class InteractionController {
 
   private selectedSlotIndex = 0; // 0 to 8 representing the selected hotbar slot
   private currentHit: RaycastHit | undefined;
+  /** Nearest valid living entity under the crosshair this frame (for melee + debug). */
+  private targetedEntity: LivingEntity | undefined;
   private blockInteractionHandler?: (blockId: number, x: number, y: number, z: number) => boolean;
 
   public setBlockInteractionHandler(handler: (blockId: number, x: number, y: number, z: number) => boolean): void {
@@ -56,6 +63,7 @@ export class InteractionController {
     itemEntityManager: ItemEntityManager,
     inventory: Inventory,
     private readonly behaviourRegistry: BlockBehaviourRegistry,
+    private readonly entityManager: EntityManager,
   ) {
     this.input = input;
     this.camera = camera;
@@ -80,6 +88,50 @@ export class InteractionController {
   /** Currently targeted block, if any (for BlockHighlight to render). */
   public getCurrentHit(): RaycastHit | undefined {
     return this.currentHit;
+  }
+
+  /** Nearest valid living entity under the crosshair this frame (for debug tooling). */
+  public getTargetedEntity(): LivingEntity | undefined {
+    return this.targetedEntity;
+  }
+
+  /**
+   * Finds the nearest valid melee target using the existing raycast architecture:
+   * candidates come from a chunk-first AABB query over the swept look ray, then
+   * {@link selectMeleeTarget} picks the closest one within reach. Reach is capped
+   * at the block-hit distance (obstruction) and at the Beta 3.0-block melee reach.
+   */
+  private findMeleeTarget(): LivingEntity | undefined {
+    const eyeX = this.camera.position.x;
+    const eyeY = this.camera.position.y;
+    const eyeZ = this.camera.position.z;
+    const lx = this.lookDirection.x;
+    const ly = this.lookDirection.y;
+    const lz = this.lookDirection.z;
+
+    const blockDistance = this.currentHit?.distance ?? MELEE_REACH;
+    const reach = Math.min(MELEE_REACH, blockDistance);
+
+    const endX = eyeX + lx * reach;
+    const endY = eyeY + ly * reach;
+    const endZ = eyeZ + lz * reach;
+    const sweepBox = new AABB(
+      Math.min(eyeX, endX), Math.min(eyeY, endY), Math.min(eyeZ, endZ),
+      Math.max(eyeX, endX), Math.max(eyeY, endY), Math.max(eyeZ, endZ),
+    ).expand(1.0, 1.0, 1.0);
+
+    const candidates = this.entityManager.getEntitiesInAABB(
+      sweepBox,
+      (entity): entity is LivingEntity => entity instanceof LivingEntity && entity.canBeCollidedWith(),
+    );
+
+    const target = selectMeleeTarget({ x: eyeX, y: eyeY, z: eyeZ }, { x: lx, y: ly, z: lz }, reach, candidates);
+    return target?.entity;
+  }
+
+  /** Applies a player melee hit through the shared living-entity damage flow. */
+  private attackTargetedEntity(entity: LivingEntity): void {
+    entity.attackEntityFrom(DamageSource.player(this.player), PLAYER_MELEE_DAMAGE);
   }
 
   public getSelectedSlotIndex(): number {
@@ -127,8 +179,21 @@ export class InteractionController {
       INTERACTION_REACH,
     );
 
+    // Target the nearest valid living entity under the crosshair (melee reach,
+    // capped at the block-hit distance so attacks can't pass through walls).
+    this.targetedEntity = this.findMeleeTarget();
+
     const isLeftClickHeld = this.input.isMouseButtonPressed('left');
-    this.breakingController.update(this.currentHit, isLeftClickHeld, deltaSeconds);
+    // Block breaking yields to a targeted entity (don't break the block behind it).
+    this.breakingController.update(this.currentHit, isLeftClickHeld && this.targetedEntity === undefined, deltaSeconds);
+
+    // Melee attack triggers on the left-click edge: one hit per press, which the
+    // target's invulnerability frames then gate against rapid re-clicks.
+    if (this.input.isMouseButtonJustPressed('left') && this.targetedEntity !== undefined) {
+      this.player.swingItem();
+      this.attackTargetedEntity(this.targetedEntity);
+      return;
+    }
 
     if (this.currentHit === undefined) {
       if (this.input.isMouseButtonJustPressed('left')) {

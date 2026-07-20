@@ -1,5 +1,5 @@
 import type { AiTask } from '../AiTask';
-import { ControlFlags } from '../AiTask';
+import { ControlFlags } from '../AiTask.ts';
 import type { LivingEntity } from '../../living/LivingEntity';
 
 function wrapDegrees(degrees: number): number {
@@ -37,7 +37,8 @@ export class IdleLookTask implements AiTask {
       this.pickNewLook(entity);
     }
     this.lookTicks -= 1;
-    entity.yaw += wrapDegrees(this.targetYaw - entity.yaw) * 0.2;
+    // Turn the head only; the body keeps facing the movement heading.
+    entity.headYaw += wrapDegrees(this.targetYaw - entity.headYaw) * 0.2;
   }
 
   public stop(_entity: LivingEntity): void {
@@ -45,7 +46,7 @@ export class IdleLookTask implements AiTask {
   }
 
   private pickNewLook(entity: LivingEntity): void {
-    this.targetYaw = entity.yaw + (entity.nextInt(60) - 30);
+    this.targetYaw = entity.headYaw + (entity.nextInt(60) - 30);
     this.lookTicks = 20 + entity.nextInt(20);
   }
 }

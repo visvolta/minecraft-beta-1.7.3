@@ -21,6 +21,7 @@ import { createDefaultEntityTypeRegistry } from '../entities/core/EntityType';
 import { registerEntityTypes } from '../entities/registerEntityTypes';
 import { JavaRandom } from '../world/generation/random/JavaRandom';
 import { PigEntity } from '../entities/living/PigEntity';
+import { SimpleEntityParticleSink } from '../entities/particles/EntityParticleSink';
 import { Inventory } from '../inventory/Inventory';
 import { InventorySerializer } from '../inventory/InventorySerializer';
 import { HotbarHudRenderer } from '../inventory/HotbarHudRenderer';
@@ -183,6 +184,7 @@ export class Engine {
   private readonly itemAtlas: ItemTextureAtlas;
   private readonly itemEntityManager: ItemEntityManager;
   private readonly entityManager: EntityManager;
+  private readonly entityParticles: SimpleEntityParticleSink;
   private lastTotalTicks = 0;
   private readonly inventory: Inventory;
   private readonly hotbarHudRenderer: HotbarHudRenderer;
@@ -350,6 +352,7 @@ export class Engine {
     // systems (falling blocks, items) can be wired against it.
     const entityTypeRegistry = createDefaultEntityTypeRegistry();
     registerEntityTypes(entityTypeRegistry);
+    this.entityParticles = new SimpleEntityParticleSink(this.renderer.scene);
     this.entityManager = new EntityManager({
       blockRegistry,
       behaviourRegistry: this.blockBehaviourRegistry,
@@ -362,6 +365,7 @@ export class Engine {
       itemHeldMaterial: this.itemHeldMaterial,
       typeRegistry: entityTypeRegistry,
       rng: new JavaRandom(worldSeed),
+      particles: this.entityParticles,
     });
 
     // Persist each chunk's owned entities on save and restore them on load.
@@ -511,6 +515,7 @@ export class Engine {
       this.itemEntityManager,
       this.inventory,
       this.blockBehaviourRegistry,
+      this.entityManager,
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
     this.destroyOverlayRenderer = new DestroyOverlayRenderer(
@@ -820,6 +825,7 @@ export class Engine {
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
       validateMeshWorkers: () => validationHarness.validateMeshWorker(),
       spawnPig: () => this.spawnDebugPig(),
+      getTargetedEntity: () => this.interactionController.getTargetedEntity(),
       getEntityMetrics: () => ({
         active: this.entityManager.activeCount,
         parked: this.entityManager.parkedCount,
@@ -1029,6 +1035,7 @@ export class Engine {
     this.contextMenuSuppressor.dispose();
     this.heldItemRenderer.dispose();
     this.entityManager.dispose();
+    this.entityParticles.dispose();
     this.chunkStreamer.dispose();
     this.fallingBlockManager.dispose();
     this.lightningRenderer.dispose();
@@ -1174,8 +1181,11 @@ export class Engine {
     if (elapsedTicks > 0) {
       for (let i = 0; i < elapsedTicks; i++) {
         // Single authoritative 20 Hz simulation clock: the Engine advances all
-        // entities, then the item-pickup pass (which needs the player).
+        // entities, resolves player↔mob pushing (through the player's velocity,
+        // so the player's own physics still resolves terrain), then runs the
+        // item-pickup pass (which needs the player).
         this.entityManager.tick();
+        this.entityManager.collideWithPlayer(this.player);
         this.itemEntityManager.tickPickups(this.player);
       }
     }
@@ -1507,6 +1517,7 @@ export class Engine {
     // using the authoritative world clock's fractional tick as alpha.
     const totalTicksForAlpha = this.worldTime.getTotalTicks();
     this.entityManager.render(totalTicksForAlpha - Math.floor(totalTicksForAlpha));
+    this.entityParticles.update(deltaSeconds);
 
     // 14. Update debug overlay stats. Frame timing is recorded every
     // frame (so FPS smoothing stays accurate even while the overlay is

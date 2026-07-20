@@ -59,6 +59,9 @@ export abstract class Entity {
   /** Set when the entity should be removed; the manager cleans up exactly once. */
   public removed = false;
 
+  /** Beta `entityCollisionReduction`: fraction [0,1] of push impulses ignored. */
+  public entityCollisionReduction = 0;
+
   /** Ticks this entity has existed (Beta `ticksExisted`). */
   public age = 0;
   /** Accumulated fall distance in blocks since last touching ground. */
@@ -172,6 +175,37 @@ export abstract class Entity {
 
   public markRemoved(): void {
     this.removed = true;
+  }
+
+  /**
+   * Whether other entities can push this one (Beta `canBePushed`). Default
+   * false; living entities override to true. Items/falling blocks are not
+   * pushed.
+   */
+  public canBePushed(): boolean {
+    return false;
+  }
+
+  /**
+   * Whether this entity can be targeted/interacted with by a raycast (Beta
+   * `canBeCollidedWith`). Default false; living entities override while alive.
+   */
+  public canBeCollidedWith(): boolean {
+    return false;
+  }
+
+  /**
+   * Beta `applyEntityCollision`: a small, symmetric, horizontal-only push that
+   * separates this entity from `other`. No vertical impulse, so entities are
+   * never launched; terrain collision on the next physics step keeps pushes
+   * from clipping through blocks.
+   */
+  public applyEntityCollision(other: Entity): void {
+    const impulse = entityPushImpulse(this.position, other.position, this.entityCollisionReduction);
+    this.velocity.x -= impulse.x;
+    this.velocity.z -= impulse.z;
+    other.velocity.x += impulse.x;
+    other.velocity.z += impulse.z;
   }
 
   /**
@@ -298,4 +332,34 @@ export abstract class Entity {
     this.readBaseNbt(data);
     this.readEntityNbt(data);
   }
+}
+
+/**
+ * Computes the horizontal push impulse (Beta `applyEntityCollision` math) that
+ * separates a body at `from` from a body at `to`. Returns the impulse to apply
+ * to the body at `to` (the body at `from` receives the negation). The magnitude
+ * scales by `1/√maxAxisDistance` capped at 1, times 0.05, times
+ * `(1 - reduction)`. Returns a zero impulse when the bodies are essentially
+ * coincident on both axes (Beta guards against a zero divisor).
+ */
+export function entityPushImpulse(
+  from: { x: number; z: number },
+  to: { x: number; z: number },
+  reduction: number,
+): { x: number; z: number } {
+  let dx = to.x - from.x;
+  let dz = to.z - from.z;
+  let maxAxis = Math.max(Math.abs(dx), Math.abs(dz));
+  if (maxAxis < 0.01) {
+    return { x: 0, z: 0 };
+  }
+  maxAxis = Math.sqrt(maxAxis);
+  dx /= maxAxis;
+  dz /= maxAxis;
+  let factor = 1.0 / maxAxis;
+  if (factor > 1.0) {
+    factor = 1.0;
+  }
+  const scale = factor * 0.05 * (1 - reduction);
+  return { x: dx * scale, z: dz * scale };
 }

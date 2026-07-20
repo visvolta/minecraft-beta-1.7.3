@@ -28,7 +28,9 @@ function testPlayerAnimator() {
   const model = new PlayerModel();
   const animator = new PlayerAnimator();
 
-  // 4. Stopping returns all limbs to neutral without snapping.
+  // 4. Stopping returns all limbs to neutral without snapping. A standing
+  // player is grounded (otherwise the airborne arm pose legitimately applies).
+  player.grounded = true;
   animator.update(player, model, 0, 0, 1.0);
   assert(Math.abs(model.leftArmGroup.rotation.x) < 0.1, 'Standing returns to near neutral arm');
 

@@ -1,13 +1,19 @@
-import { BoxGeometry, Group, Mesh, MeshBasicMaterial } from 'three';
+import { BoxGeometry, Color, Group, Mesh, MeshBasicMaterial } from 'three';
 import { attachEntityLighting } from '../../rendering/ChunkRenderer';
 
 /** Model space: 16 pixels per block, y up, origin at the entity's feet. */
 const PX = 1 / 16;
 const PINK = 0xefa6a0;
 const SNOUT_PINK = 0xd98a86;
+/** Target colour for the hurt flash (reused; no per-frame allocation). */
+const HURT_FLASH_RED = new Color(1, 0, 0);
 
 function deg2rad(degrees: number): number {
   return (degrees * Math.PI) / 180;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }
 
 /**
@@ -32,6 +38,8 @@ export class PigModel {
 
   private readonly material: MeshBasicMaterial;
   private readonly snoutMaterial: MeshBasicMaterial;
+  private readonly baseBodyColor: Color;
+  private readonly baseSnoutColor: Color;
   private readonly geometries: BoxGeometry[] = [];
 
   public constructor() {
@@ -39,6 +47,10 @@ export class PigModel {
     attachEntityLighting(this.material);
     this.snoutMaterial = new MeshBasicMaterial({ color: SNOUT_PINK });
     attachEntityLighting(this.snoutMaterial);
+    // Capture the true (colour-managed) base colours so the hurt flash can
+    // restore them exactly when it fades.
+    this.baseBodyColor = this.material.color.clone();
+    this.baseSnoutColor = this.snoutMaterial.color.clone();
 
     // Body: chunky torso above the legs.
     const bodyMesh = this.box(8, 8, 14, this.material);
@@ -91,6 +103,32 @@ export class PigModel {
     this.backRightLeg.rotation.x = swing;
     this.frontRightLeg.rotation.x = -swing;
     this.backLeftLeg.rotation.x = -swing;
+  }
+
+  /**
+   * Tints the model toward red for the hurt flash. `amount` is 0 (base colour,
+   * no flash) to 1 (full red). Mutates the existing materials' colour only — no
+   * new material is created and the base colour is fully restored at amount 0.
+   */
+  public setHurtFlash(amount: number): void {
+    const a = clamp01(amount);
+    // Lerp in place from the stored base colour toward red (no allocation),
+    // restoring the exact base colour at amount 0.
+    this.material.color.copy(this.baseBodyColor).lerp(HURT_FLASH_RED, a);
+    this.snoutMaterial.color.copy(this.baseSnoutColor).lerp(HURT_FLASH_RED, a);
+  }
+
+  /**
+   * Death collapse: rolls the body onto its side as `progress` goes 0 → 1.
+   * Applied on an independent axis so it composes with the body-yaw rotation.
+   */
+  public setDeathProgress(progress: number): void {
+    this.bodyYawGroup.rotation.z = clamp01(progress) * (Math.PI / 2);
+  }
+
+  /** The shared body material (exposed so the hurt flash can be inspected). */
+  public get bodyMaterial(): MeshBasicMaterial {
+    return this.material;
   }
 
   public dispose(): void {

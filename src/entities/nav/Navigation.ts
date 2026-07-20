@@ -36,6 +36,12 @@ export class Navigation {
     private readonly pathfinder: Pathfinder,
     private readonly maxFall = 3,
     private readonly maxSearchDistance = 16,
+    /**
+     * Maximum block height the *pathfinder* may route up. Decoupled from the
+     * entity's physics `stepHeight` (0.5): the pathfinder still plans 1-block
+     * step-ups, which the entity completes with a jump.
+     */
+    private readonly pathMaxStepUp = 1,
   ) {}
 
   /** Computes and sets a path to `target` (feet position). */
@@ -49,7 +55,7 @@ export class Navigation {
       {
         width: host.width,
         height: host.height,
-        stepHeight: host.stepHeight,
+        stepHeight: this.pathMaxStepUp,
         maxFall: this.maxFall,
         maxDistance: this.maxSearchDistance,
       },

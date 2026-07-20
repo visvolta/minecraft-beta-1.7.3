@@ -8,6 +8,7 @@ import type { ItemTextureAtlas } from '../../assets/ItemTextureAtlas';
 import type { JavaRandom } from '../../world/generation/random/JavaRandom';
 import type { EntityManager } from './EntityManager';
 import type { EntityPhysics } from './EntityPhysics';
+import type { EntityParticleSink } from '../particles/EntityParticleSink';
 
 /**
  * Long-lived service context handed to entities and entity factories.
@@ -37,6 +38,8 @@ export interface EntityWorldContext {
   readonly physics: EntityPhysics;
   /** World-owned deterministic RNG for Beta-style random decisions. */
   readonly rng: JavaRandom;
+  /** Optional decoupled particle sink for hurt/death effects (headless-safe). */
+  readonly particles?: EntityParticleSink | undefined;
 }
 
 /**
