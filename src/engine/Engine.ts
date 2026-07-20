@@ -366,6 +366,7 @@ export class Engine {
       typeRegistry: entityTypeRegistry,
       rng: new JavaRandom(worldSeed),
       particles: this.entityParticles,
+      weather: { isRaining: () => this.weatherController.getState().raining },
     });
 
     // Persist each chunk's owned entities on save and restore them on load.

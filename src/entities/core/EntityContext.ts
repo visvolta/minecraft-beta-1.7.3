@@ -40,6 +40,8 @@ export interface EntityWorldContext {
   readonly rng: JavaRandom;
   /** Optional decoupled particle sink for hurt/death effects (headless-safe). */
   readonly particles?: EntityParticleSink | undefined;
+  /** Optional decoupled weather query (for rain extinguishing). */
+  readonly weather?: { isRaining(): boolean } | undefined;
 }
 
 /**

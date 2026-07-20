@@ -20,6 +20,7 @@ import { DamageSource } from '../src/entities/damage/DamageSource.ts';
 import { CountingParticleSink } from '../src/entities/particles/EntityParticleSink.ts';
 import { selectMeleeTarget } from '../src/player/MeleeTargeting.ts';
 import { MELEE_REACH } from '../src/player/PlayerConstants.ts';
+import { VOID_MIN_Y } from '../src/world/chunkConstants.ts';
 import { PigModel } from '../src/entities/living/PigModel.ts';
 
 function assert(condition: boolean, message: string): void {
@@ -804,6 +805,205 @@ function countPork(entities: EntityManager): number {
   for (let i = 0; i < 40; i++) w.entities.tick(); // continues death → removal
   assert(countPork(w.entities) === 0, 'a pig loaded mid-death does not drop loot twice');
   assert(loadedDead!.removed, 'a loaded dead pig is removed after its linger');
+}
+
+// ============================================================
+// 7D: fire — timer, periodic (not every-tick) damage, refresh via max
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+
+  pig.fire = 100;
+  w.entities.tick(); // fire=100 (%20==0) → 1 fire damage, timer → 99
+  assert(pig.health === 9, 'fire deals damage on a %20 tick');
+  assert(pig.fire === 99, 'fire timer decrements each tick');
+  for (let i = 0; i < 4; i++) w.entities.tick(); // ticks with fire%20 != 0
+  assert(pig.health === 9, 'fire damage is periodic, not every tick');
+
+  // Timer refresh uses max (never accumulates).
+  const p2 = new PigEntity(w.entities.context, 5.5, 11, 0.5);
+  p2.fire = 0;
+  p2.setOnFire(50);
+  assert(p2.fire === 50, 'setOnFire sets the timer');
+  p2.setOnFire(30);
+  assert(p2.fire === 50, 'setOnFire never lowers/accumulates (max)');
+  p2.setOnFire(120);
+  assert(p2.fire === 120, 'setOnFire refreshes to a higher value');
+}
+
+// ============================================================
+// 7D: contact with a fire block ignites the pig
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  // A supported fire block at the pig's feet cell.
+  w.world.setBlock(0, 11, 0, BlockIds.Fire, { notifyNeighbours: false, updateLighting: false });
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  assert(pig.fire === 0, 'pig not burning before contact');
+  w.entities.tick();
+  assert(pig.fire > 0, 'contact with fire ignites the pig');
+  assert(pig.isBurning(), 'isBurning reflects the fire timer');
+}
+
+// ============================================================
+// 7D: lava — immediate damage + ignition, deadlier than fire
+// ============================================================
+{
+  const w = buildWorld(3);
+  layGrassFloor(w, 10);
+  // A deep, wide lava pool.
+  for (let x = -3; x <= 3; x++) {
+    for (let z = -3; z <= 3; z++) {
+      for (let y = 11; y <= 14; y++) {
+        w.world.setBlock(x, y, z, BlockIds.LavaStill, { notifyNeighbours: false, updateLighting: false });
+      }
+    }
+  }
+  const lavaPig = new PigEntity(w.entities.context, 0.5, 12, 0.5);
+  w.entities.add(lavaPig);
+  w.entities.tick();
+  assert(lavaPig.health < 10, 'lava deals immediate contact damage');
+  assert(lavaPig.fire > 0, 'lava ignites the pig');
+
+  // Lava is significantly more dangerous than standing in fire.
+  const firePig = new PigEntity(w.entities.context, 8.5, 11, 0.5);
+  w.entities.add(firePig);
+  w.entities.tick();
+  firePig.fire = 100;
+  for (let i = 0; i < 5; i++) w.entities.tick();
+  for (let i = 0; i < 4; i++) w.entities.tick(); // same 5 ticks for lavaPig total
+  assert(lavaPig.health < firePig.health, 'lava is deadlier than fire');
+}
+
+// ============================================================
+// 7D: water extinguishes burning immediately
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  for (let y = 11; y <= 14; y++) {
+    w.world.setBlock(0, y, 0, BlockIds.WaterStill, { notifyNeighbours: false, updateLighting: false });
+  }
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  pig.setOnFire(200);
+  w.entities.add(pig);
+  assert(pig.fire > 0, 'pig burning before entering water');
+  w.entities.tick();
+  assert(pig.fire === 0, 'entering water extinguishes fire immediately');
+  assert(pig.inWater, 'pig detects being in water');
+}
+
+// ============================================================
+// 7D: drowning — air depletes, drown at zero, surfacing restores air
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  for (let y = 11; y <= 16; y++) {
+    w.world.setBlock(0, y, 0, BlockIds.WaterStill, { notifyNeighbours: false, updateLighting: false });
+  }
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+  assert(pig.isUnderwater(), 'pig is underwater (eye submerged)');
+  const startAir = pig.air;
+  w.entities.tick();
+  assert(pig.air === startAir - 1, 'air depletes while submerged');
+
+  // Force air near the drowning threshold; drowning damage fires at air == -20.
+  pig.air = -19;
+  pig.hurtResistantTime = 0;
+  const healthBefore = pig.health;
+  w.entities.tick(); // air -19 → -20 → reset 0 + drown damage
+  assert(pig.air === 0, 'air resets to 0 after a drowning tick');
+  assert(pig.health < healthBefore, 'drowning deals damage once air underflows');
+
+  // Surfacing restores air to max.
+  pig.setPosition(5.5, 11, 5.5); // out of the water column
+  w.entities.tick();
+  assert(pig.air === pig.maxAir, 'surfacing restores air to maximum');
+}
+
+// ============================================================
+// 7D: suffocation inside an opaque block; no false positive on a slab
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  // Enclose the pig in opaque stone so its eye region is inside solid blocks.
+  for (let x = -1; x <= 1; x++) {
+    for (let z = -1; z <= 1; z++) {
+      for (let y = 11; y <= 13; y++) {
+        w.world.setBlock(x, y, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
+      }
+    }
+  }
+  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+  assert(pig.health < 10, 'suffocation damages a pig trapped inside opaque blocks');
+
+  // A slab at the eye level must NOT cause suffocation (not an opaque full cube).
+  const w2 = buildWorld(2);
+  layGrassFloor(w2, 10);
+  w2.world.setBlock(0, 11, 0, BlockIds.Slab, { notifyNeighbours: false, updateLighting: false });
+  const slabPig = new PigEntity(w2.entities.context, 0.5, 11, 0.5);
+  w2.entities.add(slabPig);
+  w2.entities.tick();
+  assert(slabPig.health === 10, 'a slab does not cause suffocation (no false positive)');
+}
+
+// ============================================================
+// 7D: void — repeated invulnerability-bypassing damage, death, cleanup, drops
+// ============================================================
+{
+  const w = buildWorld(2);
+  const pig = new PigEntity(w.entities.context, 0.5, VOID_MIN_Y - 6, 0.5);
+  w.entities.add(pig);
+  w.entities.tick();
+  assert(pig.health < 10, 'void damage applies below the world minimum');
+  for (let i = 0; i < 6; i++) w.entities.tick();
+  assert(pig.health <= 0, 'repeated void damage kills the pig');
+  const drops = countPork(w.entities);
+  assert(drops >= 1 && drops <= 3, 'void death still drops loot once');
+  for (let i = 0; i < 40; i++) w.entities.tick();
+  assert(pig.removed, 'void-killed pig is cleaned up after the death linger');
+}
+
+// ============================================================
+// 7D: hazard panic — lava damage triggers panic; burning persists across save/load
+// ============================================================
+{
+  const w = buildWorld(3);
+  layGrassFloor(w, 10);
+  for (let x = -3; x <= 3; x++) {
+    for (let z = -3; z <= 3; z++) {
+      w.world.setBlock(x, 11, z, BlockIds.LavaStill, { notifyNeighbours: false, updateLighting: false });
+      w.world.setBlock(x, 12, z, BlockIds.LavaStill, { notifyNeighbours: false, updateLighting: false });
+    }
+  }
+  const pig = new PigEntity(w.entities.context, 0.5, 12, 0.5);
+  w.entities.add(pig);
+  w.entities.tick(); // lava damage → recentlyHurt
+  assert(pig.recentlyHurt, 'lava damage sets the panic trigger');
+  w.entities.tick(); // panic starts, consuming the trigger
+  assert(pig.moveSpeed > 0.7, 'hazard damage triggers panic (speed boost)');
+
+  // Burning + air persist across save/load (long-lived environmental state).
+  const p2 = new PigEntity(w.entities.context, 8.5, 11, 0.5);
+  p2.setOnFire(150);
+  p2.air = 120;
+  const loaded = PigEntity.deserialize(w.entities.context, p2.writeToNbt());
+  assert(loaded !== undefined, 'burning pig deserialises');
+  assert(loaded!.fire === 150, 'fire timer persists across save/load');
+  assert(loaded!.air === 120, 'air supply persists across save/load');
+  assert(loaded!.inWater === false && loaded!.inLava === false, 'transient medium state is cleared on load');
 }
 
 console.log('Entity system validation passed.');

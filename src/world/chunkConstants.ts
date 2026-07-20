@@ -8,3 +8,10 @@ export const CHUNK_VOLUME = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
 
 /** Default / empty block ID (Air). */
 export const AIR_BLOCK_ID = 0;
+
+/**
+ * Minimum world Y. Living entities below this height take repeated void
+ * damage (Beta kills below -64). Shared so the value is configured in one
+ * place rather than hardcoded at the use site.
+ */
+export const VOID_MIN_Y = -64;

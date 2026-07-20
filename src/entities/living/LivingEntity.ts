@@ -9,6 +9,15 @@ import { DamageSource } from '../damage/DamageSource';
 import type { ParticleOrigin } from '../particles/EntityParticleSink';
 import { DroppedItemEntity } from '../items/DroppedItemEntity';
 import type { Drop } from '../items/BlockDropResolver';
+import { VOID_MIN_Y } from '../../world/chunkConstants';
+import {
+  isWaterInAABB,
+  isLavaInAABB,
+  isFireInAABB,
+  isEyeInWater,
+  isInsideOpaqueBlock,
+  isExposedToSky,
+} from './HazardDetection';
 
 /** Beta living-entity gravity (blocks/tick²), heavier than items (0.04). */
 const LIVING_GRAVITY = 0.08;
@@ -33,6 +42,32 @@ const DEFAULT_SLIPPERINESS = 0.6;
 const ICE_SLIPPERINESS = 0.98;
 /** Maximum degrees the body may turn toward the heading per tick (smooth turn). */
 const MAX_BODY_TURN_PER_TICK = 10;
+
+// ---- Environmental hazard constants (Beta) ----
+/** Fire damage interval: burn damage lands every N ticks while burning. */
+const FIRE_DAMAGE_INTERVAL = 20;
+/** Damage per fire tick. */
+const FIRE_DAMAGE = 1;
+/** Burning duration set by standing in fire (ticks). */
+const FIRE_CONTACT_TICKS = 120;
+/** Immediate lava contact damage (Beta `setOnFireFromLava` = 4). */
+const LAVA_DAMAGE = 4;
+/** Burning duration set by lava (ticks; Beta = 600). */
+const LAVA_FIRE_TICKS = 600;
+/** Maximum air supply (ticks; Beta = 300 ≈ 15s). */
+const MAX_AIR = 300;
+/** Drowning damage when air underflows (Beta = 2). */
+const DROWN_DAMAGE = 2;
+/** Suffocation damage per tick inside an opaque block (Beta = 1). */
+const SUFFOCATE_DAMAGE = 1;
+/** Repeated void damage per tick below the world minimum (bypasses invuln). */
+const VOID_DAMAGE = 4;
+/** Swim acceleration factor in water/lava (Beta moveFlying 0.02). */
+const SWIM_MOVE_FACTOR = 0.02;
+/** Reduced gravity while in a fluid (Beta 0.02). */
+const FLUID_GRAVITY = 0.02;
+/** Upward swim impulse per tick while jump/swim intent is held in a fluid. */
+const SWIM_UP_IMPULSE = 0.1;
 
 function wrapDegrees(degrees: number): number {
   let d = degrees % 360;
@@ -97,6 +132,18 @@ export abstract class LivingEntity extends Entity {
   /** Beta repeated-hit protection: the last raw damage amount seen. */
   private lastDamageAmount = 0;
 
+  // ---- Environmental state ----
+  /** Remaining burn timer in ticks (>0 = burning). Persisted. */
+  public fire = 0;
+  /** Current air supply in ticks. Persisted. */
+  public air = MAX_AIR;
+  /** Maximum air supply. */
+  public readonly maxAir = MAX_AIR;
+  /** Whether the body is currently in water (transient; recomputed each tick). */
+  public inWater = false;
+  /** Whether the body is currently in lava (transient; recomputed each tick). */
+  public inLava = false;
+
   public readonly navigation: Navigation;
   public readonly aiController: AiController;
 
@@ -155,12 +202,62 @@ export abstract class LivingEntity extends Entity {
     if (this.hurtResistantTime > 0) this.hurtResistantTime -= 1;
     if (this.attackTime > 0) this.attackTime -= 1;
 
-    // AI sets intent; navigation follows any active path; then integrate motion.
+    // Detect environment first (water/lava/fire contact, ignition, rain/water
+    // extinguishing) so movement can branch on inWater/inLava.
+    this.detectEnvironment(ctx);
+
+    // AI sets intent (including hazard panic/swim intent); navigation follows;
+    // then integrate motion.
     this.aiController.update(this);
     this.navigation.update(this);
     this.moveLiving(ctx, this.moveStrafing, this.moveForward);
     this.isJumping = false;
+
+    // Apply environmental damage (burning, lava, suffocation, drowning, void).
+    this.applyEnvironmentDamage(ctx);
+
     this.updateLivingAnimation();
+  }
+
+  /**
+   * Movement dispatch (Beta `moveEntityWithHeading`): branches on the current
+   * medium. Water/lava use a buoyant, high-drag swim model; land uses the
+   * slipperiness-based walk model. The shared `moveFlying` + physics mover are
+   * reused throughout (no separate movement architecture).
+   */
+  protected moveLiving(ctx: EntityTickContext, strafe: number, forward: number): void {
+    if (this.inWater) {
+      this.moveInFluid(ctx, strafe, forward, 0.8);
+    } else if (this.inLava) {
+      this.moveInFluid(ctx, strafe, forward, 0.5);
+    } else {
+      this.moveOnLand(ctx, strafe, forward);
+    }
+  }
+
+  /**
+   * Beta fluid movement: slow `moveFlying` swim acceleration, reduced gravity,
+   * high drag, and buoyancy when blocked horizontally. Jump/swim intent (set by
+   * the AI, never auto-set here) adds an upward impulse so a mob can surface.
+   */
+  private moveInFluid(ctx: EntityTickContext, strafe: number, forward: number, drag: number): void {
+    this.moveFlying(strafe * this.moveSpeed, forward * this.moveSpeed, SWIM_MOVE_FACTOR);
+    if (this.isJumping) {
+      this.velocity.y += SWIM_UP_IMPULSE;
+    }
+    this.velocity.y -= FLUID_GRAVITY;
+
+    ctx.world.physics.move(this);
+
+    // Buoyancy: rise when pressed against a wall underwater (Beta).
+    if (this.isCollidedHorizontally) {
+      this.velocity.y = Math.max(this.velocity.y, 0.3);
+    }
+
+    this.velocity.x *= drag;
+    this.velocity.y *= drag;
+    this.velocity.z *= drag;
+    this.fallDistance = 0; // no fall damage in a fluid
   }
 
   /**
@@ -169,7 +266,7 @@ export abstract class LivingEntity extends Entity {
    * start/stop and a Beta-like terminal walk speed. Gravity, jump and
    * fall-damage bookkeeping retained.
    */
-  protected moveLiving(ctx: EntityTickContext, strafe: number, forward: number): void {
+  private moveOnLand(ctx: EntityTickContext, strafe: number, forward: number): void {
     this.velocity.y -= LIVING_GRAVITY;
     if (this.velocity.y < TERMINAL_VELOCITY) {
       this.velocity.y = TERMINAL_VELOCITY;
@@ -231,6 +328,153 @@ export abstract class LivingEntity extends Entity {
     const cos = Math.cos(yawRad);
     this.velocity.x += s * cos - f * sin;
     this.velocity.z += f * cos + s * sin;
+  }
+
+  // ---- Environmental hazards (shared) ------------------------------------
+
+  /** Refreshes the burn timer: `fire = max(current, new)` (Beta; never adds). */
+  public setOnFire(ticks: number): void {
+    this.fire = Math.max(this.fire, ticks);
+  }
+
+  /** Immediately stops burning. */
+  public extinguish(): void {
+    this.fire = 0;
+  }
+
+  public isBurning(): boolean {
+    return this.fire > 0;
+  }
+
+  /** Whether the breathing point (eye) is submerged in water. */
+  public isUnderwater(): boolean {
+    const eyeY = this.position.y + this.getEyeHeight();
+    return isEyeInWater(this.ctx.blockUpdateWorld, this.position.x, eyeY, this.position.z);
+  }
+
+  /** Whether the entity can breathe right now (eye not submerged). */
+  public canBreathe(): boolean {
+    return !this.isUnderwater();
+  }
+
+  /**
+   * Detects the current medium and handles contact ignition/extinguishing.
+   * Runs before movement so `inWater`/`inLava` are available to it. Detection
+   * is delegated to the stateless {@link HazardDetection} helpers; all timers
+   * and state are owned here.
+   */
+  protected detectEnvironment(ctx: EntityTickContext): void {
+    const world = ctx.world.blockUpdateWorld;
+    const aabb = this.getAABB();
+
+    const wasInWater = this.inWater;
+    this.inWater = isWaterInAABB(world, aabb);
+    this.inLava = isLavaInAABB(world, aabb);
+
+    if (this.inWater) {
+      if (!wasInWater) {
+        this.onEnterWater();
+      }
+      this.fallDistance = 0;
+      this.extinguish(); // water extinguishes fire
+    } else if (wasInWater) {
+      this.onLeaveWater();
+    }
+
+    // Lava ignites immediately (contact damage is applied in applyEnvironmentDamage).
+    if (this.inLava) {
+      this.onEnterLava();
+      this.setOnFire(LAVA_FIRE_TICKS);
+    } else if (isFireInAABB(world, aabb)) {
+      // Standing in a fire block ignites (shorter duration than lava).
+      this.onEnterFire();
+      this.setOnFire(FIRE_CONTACT_TICKS);
+    }
+
+    // Rain extinguishes burning when exposed to the sky.
+    if (this.fire > 0 && ctx.world.weather?.isRaining()) {
+      const eyeY = this.position.y + this.getEyeHeight();
+      if (isExposedToSky(ctx.world.chunkManager, this.position.x, eyeY, this.position.z)) {
+        this.extinguish();
+      }
+    }
+  }
+
+  /**
+   * Applies periodic environmental damage through the shared damage pipeline:
+   * lava contact, burning, suffocation, drowning and void. All are gated by the
+   * existing invulnerability frames except void, which bypasses them to
+   * guarantee removal. Lava is checked before burning so its heavier contact
+   * hit lands first (Beta `setOnFireFromLava`).
+   */
+  protected applyEnvironmentDamage(ctx: EntityTickContext): void {
+    const world = ctx.world.blockUpdateWorld;
+
+    // Lava: immediate contact damage (in addition to ignition).
+    if (this.inLava) {
+      this.attackEntityFrom(DamageSource.lava(), LAVA_DAMAGE);
+    }
+
+    // Burning: periodic fire damage while the timer runs.
+    if (this.fire > 0) {
+      if (this.fire % FIRE_DAMAGE_INTERVAL === 0) {
+        this.attackEntityFrom(DamageSource.fire(), FIRE_DAMAGE);
+      }
+      this.fire -= 1;
+    }
+
+    // Suffocation: eye region inside an opaque full cube.
+    if (this.isAlive()) {
+      const eyeY = this.position.y + this.getEyeHeight();
+      if (isInsideOpaqueBlock(world, ctx.world.blockRegistry, this.position.x, eyeY, this.position.z, this.width)) {
+        this.onSuffocate();
+        this.attackEntityFrom(DamageSource.suffocate(), SUFFOCATE_DAMAGE);
+      }
+    }
+
+    // Air / drowning (breathing point is the eye, not the feet).
+    if (this.isAlive() && this.isUnderwater()) {
+      this.air -= 1;
+      if (this.air === -20) {
+        this.air = 0;
+        this.onDrown();
+        this.attackEntityFrom(DamageSource.drown(), DROWN_DAMAGE);
+      }
+      this.extinguish(); // being submerged extinguishes fire
+    } else {
+      this.air = this.maxAir; // regenerate while breathing
+    }
+
+    // Void: repeated, invulnerability-bypassing damage below the world minimum.
+    if (this.position.y < VOID_MIN_Y) {
+      this.attackEntityFrom(DamageSource.outOfWorld(), VOID_DAMAGE);
+    }
+  }
+
+  // ---- Environmental hooks (particles/behaviour may extend) --------------
+
+  protected onEnterWater(): void {
+    // Splash feedback hook (no audio/particle framework yet).
+  }
+
+  protected onLeaveWater(): void {
+    // Hook.
+  }
+
+  protected onEnterFire(): void {
+    // Hook.
+  }
+
+  protected onEnterLava(): void {
+    // Hook.
+  }
+
+  protected onDrown(): void {
+    this.spawnHurtParticles();
+  }
+
+  protected onSuffocate(): void {
+    // Hook.
   }
 
   private updateLivingAnimation(): void {
@@ -473,6 +717,9 @@ export abstract class LivingEntity extends Entity {
   protected writeLivingNbt(map: Map<string, NbtTag>): void {
     map.set('Health', nbt.short(this.health));
     map.set('DeathTime', nbt.short(this.deathTime));
+    // Long-lived environmental state.
+    map.set('Fire', nbt.short(this.fire));
+    map.set('Air', nbt.short(this.air));
   }
 
   protected readLivingNbt(data: NbtCompound): void {
@@ -485,6 +732,14 @@ export abstract class LivingEntity extends Entity {
     if (deathTime?.type === 'short' || deathTime?.type === 'int') {
       this.deathTime = deathTime.value;
     }
+    const fire = map.get('Fire');
+    if (fire?.type === 'short' || fire?.type === 'int') {
+      this.fire = fire.value;
+    }
+    const air = map.get('Air');
+    if (air?.type === 'short' || air?.type === 'int') {
+      this.air = air.value;
+    }
     // Clear transient combat state on load.
     this.hurtTime = 0;
     this.maxHurtTime = 0;
@@ -494,6 +749,9 @@ export abstract class LivingEntity extends Entity {
     this.recentlyHurt = false;
     this.lastDamageSource = undefined;
     this.lastAttackerPosition = undefined;
+    // Clear transient environmental state (recomputed each tick).
+    this.inWater = false;
+    this.inLava = false;
     // A loaded dead entity already dropped its loot before being saved.
     this.lootDropped = this.health <= 0;
   }

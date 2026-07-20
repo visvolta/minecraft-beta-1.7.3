@@ -48,6 +48,11 @@ export class PanicTask implements AiTask {
 
   public tick(entity: LivingEntity): void {
     this.panicTicks -= 1;
+    // While submerged (e.g. drowning), the escape intent includes swimming up
+    // toward the surface. Movement only acts on this jump/swim intent.
+    if (entity.isUnderwater()) {
+      entity.isJumping = true;
+    }
     // Re-pick only when the current path is gone (reached or stuck). Navigation's
     // internal recalculation cooldown throttles this so it never runs every tick.
     if (!entity.navigation.hasPath()) {

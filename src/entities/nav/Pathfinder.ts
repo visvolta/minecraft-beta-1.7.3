@@ -5,6 +5,7 @@ import type { BlockUpdateWorld } from '../../world/BlockUpdateWorld';
 import { CHUNK_SIZE_Y } from '../../world/chunkConstants';
 import { PathPoint } from './PathPoint';
 import { PathEntity } from './PathEntity';
+import { isLavaBlock, isFireBlock } from '../living/HazardDetection';
 
 /**
  * A binary min-heap of path nodes ordered by estimated total cost
@@ -290,6 +291,10 @@ export class Pathfinder {
     if (!this.cellSolid(x, y - 1, z)) {
       return false;
     }
+    // Avoid lava/fire at the feet or ground; water remains traversable.
+    if (this.isHazard(x, y, z) || this.isHazard(x, y - 1, z)) {
+      return false;
+    }
     // Body cells (feet up to head) must be clear.
     const headCells = Math.max(1, Math.ceil(opts.height));
     for (let i = 0; i < headCells; i++) {
@@ -298,6 +303,15 @@ export class Pathfinder {
       }
     }
     return true;
+  }
+
+  /** Whether a cell holds an environmental hazard paths should avoid (lava/fire). */
+  private isHazard(x: number, y: number, z: number): boolean {
+    if (y < 0 || y >= CHUNK_SIZE_Y) {
+      return false;
+    }
+    const id = this.world.getBlock(x, y, z);
+    return isLavaBlock(id) || isFireBlock(id);
   }
 
   /** True if the block at `(x, y, z)` presents any collision geometry. */
