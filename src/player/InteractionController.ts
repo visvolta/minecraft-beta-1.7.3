@@ -1,5 +1,6 @@
+import { BlockBehaviourRegistry } from '../world/BlockBehaviour';
 import * as THREE from 'three';
-import type { BlockId } from '../blocks/BlockId';
+import { BlockIds, type BlockId } from '../blocks/BlockId';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { DigitKey } from '../input/Input';
 import type { Input } from '../input/Input';
@@ -48,6 +49,7 @@ export class InteractionController {
     blockUpdateWorld: BlockUpdateWorld,
     itemEntityManager: ItemEntityManager,
     inventory: Inventory,
+    private readonly behaviourRegistry: BlockBehaviourRegistry,
   ) {
     this.input = input;
     this.camera = camera;
@@ -189,6 +191,13 @@ export class InteractionController {
       return false;
     }
 
+    const behaviour = this.behaviourRegistry.get(selectedId);
+    if (behaviour.canPlaceBlockAt) {
+      if (!behaviour.canPlaceBlockAt({ world: this.blockUpdateWorld, gameTick: 0 } as any, targetX, targetY, targetZ)) {
+        return false;
+      }
+    }
+
     this.setBlock(targetX, targetY, targetZ, selectedId);
     return true;
   }
@@ -198,6 +207,40 @@ export class InteractionController {
    * orthogonal neighbour chunks whose meshes could show a seam (only
    * relevant when the edited block sits on a chunk boundary).
    */
+  private getPlacementMetadata(blockId: BlockId, worldX: number, worldY: number, worldZ: number): number {
+    if (blockId === BlockIds.Chest) {
+      // Phase 5B: Inherit facing from adjacent chest
+      const neighbors = [
+        { nx: worldX - 1, nz: worldZ },
+        { nx: worldX + 1, nz: worldZ },
+        { nx: worldX, nz: worldZ - 1 },
+        { nx: worldX, nz: worldZ + 1 }
+      ];
+      for (const { nx, nz } of neighbors) {
+        if (this.blockUpdateWorld.getBlock(nx, worldY, nz) === BlockIds.Chest) {
+          return this.blockUpdateWorld.getBlockMetadata(nx, worldY, nz);
+        }
+      }
+    }
+
+    if (blockId === BlockIds.Chest || blockId === BlockIds.Furnace || blockId === BlockIds.FurnaceBurning) {
+      let yaw = Math.atan2(-this.lookDirection.x, -this.lookDirection.z); 
+      while (yaw < 0) yaw += Math.PI * 2;
+      while (yaw >= Math.PI * 2) yaw -= Math.PI * 2;
+
+      if (yaw >= Math.PI * 0.25 && yaw < Math.PI * 0.75) {
+        return 5; // +X (East)
+      } else if (yaw >= Math.PI * 0.75 && yaw < Math.PI * 1.25) {
+        return 2; // -Z (North)
+      } else if (yaw >= Math.PI * 1.25 && yaw < Math.PI * 1.75) {
+        return 4; // -X (West)
+      } else {
+        return 3; // +Z (South)
+      }
+    }
+    return 0;
+  }
+
   private setBlock(worldX: number, worldY: number, worldZ: number, blockId: BlockId): void {
     const { chunkX, chunkZ } = worldToChunkLocal(worldX, worldZ);
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
@@ -206,7 +249,10 @@ export class InteractionController {
       return;
     }
 
+    const metadata = this.getPlacementMetadata(blockId, worldX, worldY, worldZ);
+
     this.blockUpdateWorld.setBlock(worldX, worldY, worldZ, blockId, {
+      metadata,
       reason: 'player',
       notifyNeighbours: true,
       updateLighting: true,

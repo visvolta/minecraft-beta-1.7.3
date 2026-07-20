@@ -245,7 +245,7 @@ export class FireBehaviour implements BlockBehaviour {
    * Beta BlockFire.canPlaceBlockAt().
    * Fire can exist if solid normal cube below OR any flammable neighbour.
    */
-  private canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+  public canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
     return this.isBlockNormalCube(ctx, x, y - 1, z) || this.canNeighborCatchFire(ctx, x, y, z);
   }
 

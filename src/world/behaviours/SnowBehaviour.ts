@@ -41,7 +41,7 @@ export class SnowBehaviour implements BlockBehaviour {
    * Beta BlockSnow.canPlaceBlockAt():
    * Block below must be opaque and solid.
    */
-  private canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+  public canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
     const below = ctx.world.getBlock(x, y - 1, z);
     if (below === 0) return false;
     // Beta: blocksList[var5].isOpaqueCube() && material.getIsSolid()

@@ -17,6 +17,7 @@ export interface BlockBehaviour {
   scheduledTick?(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void;
   randomTick?(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void;
   neighborChanged?(ctx: BlockBehaviourContext, x: number, y: number, z: number, sourceX: number, sourceY: number, sourceZ: number): void;
+  canPlaceBlockAt?(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean;
   onPlaced?(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void;
   onRemoved?(ctx: BlockBehaviourContext, x: number, y: number, z: number, oldBlockId: BlockId): void;
 }

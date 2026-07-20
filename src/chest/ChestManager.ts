@@ -6,10 +6,21 @@ import { BlockIds } from '../blocks/BlockId';
 import { Chunk } from '../world/Chunk';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../world/chunkConstants';
 
+import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
+
+export interface DoubleChestPair {
+  readonly inventoryFirst: ChestContainer;
+  readonly inventorySecond: ChestContainer;
+  readonly visualLeft: ChestContainer;
+  readonly visualRight: ChestContainer;
+  readonly facing: number;
+}
+
 export class ChestManager {
   private readonly containers = new Map<string, ChestContainer>();
 
   public constructor(
+    private readonly blockUpdateWorld: BlockUpdateWorld,
     private readonly itemEntityManager: ItemEntityManager
   ) {}
 
@@ -57,6 +68,92 @@ export class ChestManager {
 
   public getContainers(): ReadonlyArray<ChestContainer> {
     return Array.from(this.containers.values());
+  }
+
+  public getPairDescriptor(x: number, y: number, z: number): DoubleChestPair | null {
+    const c = this.get(x, y, z);
+    if (!c) return null;
+
+    const neighbors = [
+      { nx: x - 1, nz: z },
+      { nx: x + 1, nz: z },
+      { nx: x, nz: z - 1 },
+      { nx: x, nz: z + 1 },
+    ];
+
+    let foundNeighbor: ChestContainer | null = null;
+
+    for (const { nx, nz } of neighbors) {
+      const blockId = this.blockUpdateWorld.getBlock(nx, y, nz);
+      if (blockId === BlockIds.Chest) {
+        if (foundNeighbor !== null) {
+          // More than one chest neighbor -> invalid (triple or L-shape)
+          return null;
+        }
+        foundNeighbor = this.get(nx, y, nz) ?? null;
+      }
+    }
+
+    if (!foundNeighbor) return null;
+
+    // Validate that the neighbor doesn't have ANY OTHER chest neighbors
+    let neighborOfNeighborCount = 0;
+    const nNeighbors = [
+      { nnx: foundNeighbor.x - 1, nnz: foundNeighbor.z },
+      { nnx: foundNeighbor.x + 1, nnz: foundNeighbor.z },
+      { nnx: foundNeighbor.x, nnz: foundNeighbor.z - 1 },
+      { nnx: foundNeighbor.x, nnz: foundNeighbor.z + 1 },
+    ];
+    for (const { nnx, nnz } of nNeighbors) {
+      if (this.blockUpdateWorld.getBlock(nnx, y, nnz) === BlockIds.Chest) {
+        neighborOfNeighborCount++;
+      }
+    }
+
+    if (neighborOfNeighborCount > 1) {
+      return null;
+    }
+
+    if (c.facing !== foundNeighbor.facing) {
+      return null;
+    }
+
+    let inventoryFirst = c;
+    let inventorySecond = foundNeighbor;
+    if (foundNeighbor.x < c.x || foundNeighbor.z < c.z) {
+      inventoryFirst = foundNeighbor;
+      inventorySecond = c;
+    }
+
+    let visualLeft = c;
+    let visualRight = foundNeighbor;
+
+    // Visual left/right depends on facing.
+    // facing 2 (North/-Z): looking -Z, so visual right is +X. Left is -X.
+    // facing 3 (South/+Z): looking +Z, so visual right is -X. Left is +X.
+    // facing 4 (West/-X): looking -X, so visual right is -Z. Left is +Z.
+    // facing 5 (East/+X): looking +X, so visual right is +Z. Left is -Z.
+    if (c.facing === 2) {
+      if (foundNeighbor.x < c.x) { visualLeft = foundNeighbor; visualRight = c; }
+      else { visualLeft = c; visualRight = foundNeighbor; }
+    } else if (c.facing === 3) {
+      if (foundNeighbor.x > c.x) { visualLeft = foundNeighbor; visualRight = c; }
+      else { visualLeft = c; visualRight = foundNeighbor; }
+    } else if (c.facing === 4) {
+      if (foundNeighbor.z > c.z) { visualLeft = foundNeighbor; visualRight = c; }
+      else { visualLeft = c; visualRight = foundNeighbor; }
+    } else if (c.facing === 5) {
+      if (foundNeighbor.z < c.z) { visualLeft = foundNeighbor; visualRight = c; }
+      else { visualLeft = c; visualRight = foundNeighbor; }
+    }
+
+    return {
+      inventoryFirst,
+      inventorySecond,
+      visualLeft,
+      visualRight,
+      facing: inventoryFirst.facing,
+    };
   }
 
   public update(): void {

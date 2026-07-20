@@ -123,7 +123,7 @@ canvas {
   color: #fff;
   font-family: 'Courier New', Courier, monospace;
   font-weight: bold;
-  font-size: calc(10px * var(--gui-scale, 1));
+  font-size: calc(5px * var(--gui-scale, 1));
   text-shadow: calc(1px * var(--gui-scale, 1)) calc(1px * var(--gui-scale, 1)) 0 #222;
   margin-left: calc(1px * var(--gui-scale, 1));
   white-space: nowrap;

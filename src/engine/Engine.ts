@@ -59,7 +59,7 @@ import { PrecipitationSimulator } from '../world/weather/PrecipitationSimulator'
 import { registerFallingBlockBehaviours } from '../world/behaviours/FallingBlockBehaviour';
 import { registerLeafBehaviour } from '../world/behaviours/LeafBehaviour';
 import { registerLogBehaviour } from '../world/behaviours/LogBehaviour';
-import { registerChestBehaviour } from '../world/behaviours/ChestBehaviour.ts';
+import { registerChestBehaviour } from '../world/behaviours/ChestBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
@@ -464,6 +464,7 @@ export class Engine {
       this.blockUpdateWorld,
       this.itemEntityManager,
       this.inventory,
+      this.blockBehaviourRegistry,
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
     this.destroyOverlayRenderer = new DestroyOverlayRenderer(
@@ -538,7 +539,7 @@ export class Engine {
     registerDefaultSmeltingAndFuels(this.smeltingRegistry, this.fuelRegistry, blockRegistry, this.hotbarHudRenderer.getSlotContentRenderer()['itemIcons']);
     this.furnaceManager.deserialize(metadata.furnaces);
 
-    this.chestManager = new ChestManager(this.itemEntityManager);
+    this.chestManager = new ChestManager(this.blockUpdateWorld, this.itemEntityManager);
     this.chestManager.deserialize(metadata.chests);
 
     registerChestBehaviour(this.blockBehaviourRegistry, this.chestManager);
@@ -553,6 +554,7 @@ export class Engine {
       this.itemEntityManager,
       this.player
     );
+    this.chestController.setDisplayNameResolver(displayNameResolver as any);
 
     this.furnaceUi = new FurnaceUi();
     this.furnaceController = new FurnaceController(
@@ -585,14 +587,28 @@ export class Engine {
         if (!this.chestController.isOpen) {
           const container = this.chestManager.get(_x, _y, _z);
           if (container) {
-            // Check for solid block above
-            const blockAbove = this.blockUpdateWorld.getBlock(_x, _y + 1, _z);
-            const defAbove = blockRegistry.getById(blockAbove);
-            if (!defAbove || !defAbove.solid || defAbove.renderType !== 'opaque') {
-              if (this.inventoryController.isOpen) this.inventoryController.close();
-              if (this.craftingTableController.isOpen) this.craftingTableController.close();
-              if (this.furnaceController.isOpen) this.furnaceController.close();
-              this.chestController.openContainer(container, this.hotbarHudRenderer.getLayout().scale);
+            const isSolid = (x: number, y: number, z: number) => {
+              const def = blockRegistry.getById(this.blockUpdateWorld.getBlock(x, y, z));
+              return def && def.solid && def.renderType === 'opaque';
+            };
+
+            const pair = this.chestManager.getPairDescriptor(_x, _y, _z);
+
+            if (pair) {
+              if (!isSolid(pair.inventoryFirst.x, pair.inventoryFirst.y + 1, pair.inventoryFirst.z) && 
+                  !isSolid(pair.inventorySecond.x, pair.inventorySecond.y + 1, pair.inventorySecond.z)) {
+                if (this.inventoryController.isOpen) this.inventoryController.close();
+                if (this.craftingTableController.isOpen) this.craftingTableController.close();
+                if (this.furnaceController.isOpen) this.furnaceController.close();
+                this.chestController.openDoubleContainer(pair.inventoryFirst, pair.inventorySecond, this.hotbarHudRenderer.getLayout().scale);
+              }
+            } else {
+              if (!isSolid(_x, _y + 1, _z)) {
+                if (this.inventoryController.isOpen) this.inventoryController.close();
+                if (this.craftingTableController.isOpen) this.craftingTableController.close();
+                if (this.furnaceController.isOpen) this.furnaceController.close();
+                this.chestController.openSingleContainer(container, this.hotbarHudRenderer.getLayout().scale);
+              }
             }
           }
         }
@@ -623,8 +639,11 @@ export class Engine {
 
     this.interactionController.breakingController.setOnBlockBrokenHandler((blockId, x, y, z) => {
       if (blockId === BlockIds.Chest) {
-        if (this.chestController.isOpen && this.chestController.activeContainer && this.chestController.activeContainer.x === x && this.chestController.activeContainer.y === y && this.chestController.activeContainer.z === z) {
-          this.chestController.close();
+        if (this.chestController.isOpen) {
+          const isActive = this.chestController.activeContainers.some(c => c.x === x && c.y === y && c.z === z);
+          if (isActive) {
+            this.chestController.close();
+          }
         }
         this.chestManager.breakChest(x, y, z);
       }

@@ -4,14 +4,17 @@ import type { CursorHeldItemRenderer } from '../inventory/CursorHeldItemRenderer
 import type { SlotContentRenderer } from '../inventory/SlotContentRenderer';
 import type { InventoryTooltip } from '../inventory/InventoryTooltip';
 import type { ChestUi } from './ChestUi';
-import { ItemStack } from '../inventory/ItemStack';
+import type { ItemStack } from '../inventory/ItemStack';
 import { InventoryTransferService } from '../inventory/InventoryTransferService';
 import { BaseContainerController } from '../inventory/BaseContainerController';
 import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import type { Player } from '../player/Player';
+import { DoubleChestInventoryProxy } from './DoubleChestInventoryProxy';
 
 export class ChestController extends BaseContainerController {
-  public activeContainer: ChestContainer | null = null;
+  public activeContainers: ChestContainer[] = [];
+  public activeInventory: Inventory | null = null;
+  public isDoubleChest = false;
 
   public constructor(
     private readonly ui: ChestUi,
@@ -25,7 +28,7 @@ export class ChestController extends BaseContainerController {
     super(inventory, tooltip, cursorRenderer, slotRenderer, itemEntityManager, player);
 
     this.ui.setOnSlotClick((slotIndex, e) => {
-      if (!this.isOpen || !this.activeContainer) return;
+      if (!this.isOpen || !this.activeInventory) return;
 
       const isRightClick = e.button === 2;
       const isShiftClick = e.shiftKey;
@@ -37,37 +40,37 @@ export class ChestController extends BaseContainerController {
         return;
       }
 
-      if (slotIndex < 27) {
-        // Click on chest slot
+      const chestSize = this.isDoubleChest ? 54 : 27;
+
+      if (slotIndex < chestSize) {
         if (isShiftClick) {
           InventoryTransferService.shiftClickBetweenInventories(
-            this.activeContainer.inventory,
+            this.activeInventory,
             slotIndex,
             this.inventory
           );
         } else if (isRightClick) {
           const res = InventoryTransferService.rightClickSlot(
-            this.activeContainer.inventory,
+            this.activeInventory,
             slotIndex,
             this.cursorStack
           );
           this.cursorStack = res.cursorStack;
         } else {
           const res = InventoryTransferService.leftClickSlot(
-            this.activeContainer.inventory,
+            this.activeInventory,
             slotIndex,
             this.cursorStack
           );
           this.cursorStack = res.cursorStack;
         }
       } else {
-        // Click on player inventory slot
-        const invIndex = slotIndex - 27;
+        const invIndex = slotIndex - chestSize;
         if (isShiftClick) {
           InventoryTransferService.shiftClickBetweenInventories(
             this.inventory,
             invIndex,
-            this.activeContainer.inventory
+            this.activeInventory
           );
         } else if (isRightClick) {
           const res = InventoryTransferService.rightClickSlot(
@@ -86,7 +89,7 @@ export class ChestController extends BaseContainerController {
         }
       }
 
-      this.cursorRenderer.update(0, 0, this.cursorStack, this.slotRenderer, this.scale);
+      this.cursorRenderer.update(e.clientX || 0, e.clientY || 0, this.cursorStack, this.slotRenderer, this.scale);
       this.renderAll();
       this.updateTooltip(slotIndex);
     });
@@ -97,7 +100,7 @@ export class ChestController extends BaseContainerController {
     });
 
     this.ui.setOnBackgroundClick((e) => {
-      if (!this.isOpen || !this.activeContainer) return;
+      if (!this.isOpen || !this.activeInventory) return;
       if (this.cursorStack !== null && this.cursorStack.count > 0 && !this.isRightDragging) {
         const eyeY = this.player.position.y + 1.62;
         super.handleOutsideClick(e, eyeY);
@@ -106,26 +109,27 @@ export class ChestController extends BaseContainerController {
     });
 
     this.ui.setOnDragEnd(() => {
-      if (!this.isOpen || !this.isRightDragging || !this.activeContainer) {
+      if (!this.isOpen || !this.isRightDragging || !this.activeInventory) {
         this.isRightDragging = false;
         this.dragSlots.clear();
         return;
       }
 
+      const chestSize = this.isDoubleChest ? 54 : 27;
       const chestDragSlots = new Set<number>();
       const invDragSlots = new Set<number>();
 
       for (const slotIndex of this.dragSlots) {
-        if (slotIndex < 27) {
+        if (slotIndex < chestSize) {
           chestDragSlots.add(slotIndex);
         } else {
-          invDragSlots.add(slotIndex - 27);
+          invDragSlots.add(slotIndex - chestSize);
         }
       }
 
       if (chestDragSlots.size > 0) {
         const res = InventoryTransferService.rightDrag(
-          this.activeContainer.inventory,
+          this.activeInventory,
           chestDragSlots,
           this.cursorStack
         );
@@ -148,44 +152,61 @@ export class ChestController extends BaseContainerController {
     });
   }
 
-  public openContainer(container: ChestContainer, scale: number): void {
+  public openSingleContainer(container: ChestContainer, scale: number): void {
     super.open();
-    this.activeContainer = container;
+    this.activeContainers = [container];
+    this.activeInventory = container.inventory;
+    this.isDoubleChest = false;
     container.viewerCount++;
-    this.ui.show(scale);
+    this.ui.show(scale, false);
+    this.renderAll();
+    this.cursorRenderer.update(0, 0, this.cursorStack, this.slotRenderer, this.scale);
+  }
+
+  public openDoubleContainer(first: ChestContainer, second: ChestContainer, scale: number): void {
+    super.open();
+    this.activeContainers = [first, second];
+    this.activeInventory = new DoubleChestInventoryProxy(first, second);
+    this.isDoubleChest = true;
+    first.viewerCount++;
+    second.viewerCount++;
+    this.ui.show(scale, true);
     this.renderAll();
     this.cursorRenderer.update(0, 0, this.cursorStack, this.slotRenderer, this.scale);
   }
 
   public close(): void {
-    if (this.activeContainer) {
-      this.activeContainer.viewerCount = Math.max(0, this.activeContainer.viewerCount - 1);
+    for (const c of this.activeContainers) {
+      c.viewerCount = Math.max(0, c.viewerCount - 1);
     }
     super.close();
-    this.activeContainer = null;
+    this.activeContainers = [];
+    this.activeInventory = null;
+    this.isDoubleChest = false;
     this.ui.hide();
     this.tooltip.update(0, 0, null);
   }
 
   public updateScale(scale: number): void {
     if (this.isOpen) {
-      this.ui.updateScale(scale);
+      this.ui.updateScale(scale, this.isDoubleChest);
     }
   }
 
   public handleNumberKey(digit: number): void {
-    if (!this.isOpen || this.hoveredSlotIndex === null || !this.activeContainer) return;
+    if (!this.isOpen || this.hoveredSlotIndex === null || !this.activeInventory) return;
     const hotbarIndex = digit - 1;
+    const chestSize = this.isDoubleChest ? 54 : 27;
 
-    if (this.hoveredSlotIndex >= 27) {
-      const invIndex = this.hoveredSlotIndex - 27;
+    if (this.hoveredSlotIndex >= chestSize) {
+      const invIndex = this.hoveredSlotIndex - chestSize;
       InventoryTransferService.numberKeySwap(this.inventory, invIndex, hotbarIndex);
     } else {
       const chestSlot = this.hoveredSlotIndex;
-      const chestStack = this.activeContainer.inventory.getStack(chestSlot);
+      const chestStack = this.activeInventory.getStack(chestSlot);
       const hotbarStack = this.inventory.getStack(hotbarIndex);
 
-      this.activeContainer.inventory.setStack(chestSlot, hotbarStack);
+      this.activeInventory.setStack(chestSlot, hotbarStack);
       this.inventory.setStack(hotbarIndex, chestStack);
     }
 
@@ -194,7 +215,7 @@ export class ChestController extends BaseContainerController {
   }
 
   private updateTooltip(slotIndex: number | null): void {
-    if (!this.isOpen || slotIndex === null || !this.activeContainer) {
+    if (!this.isOpen || slotIndex === null || !this.activeInventory) {
       this.tooltip.update(0, 0, null);
       return;
     }
@@ -204,11 +225,12 @@ export class ChestController extends BaseContainerController {
       return;
     }
 
+    const chestSize = this.isDoubleChest ? 54 : 27;
     let stack: ItemStack | null = null;
-    if (slotIndex < 27) {
-      stack = this.activeContainer.inventory.getStack(slotIndex);
+    if (slotIndex < chestSize) {
+      stack = this.activeInventory.getStack(slotIndex);
     } else {
-      stack = this.inventory.getStack(slotIndex - 27);
+      stack = this.inventory.getStack(slotIndex - chestSize);
     }
 
     if (stack !== null) {
@@ -223,17 +245,18 @@ export class ChestController extends BaseContainerController {
   }
 
   public getHoveredStack(): ItemStack | null {
-    if (!this.activeContainer || this.hoveredSlotIndex === -1) return null;
-    if (this.hoveredSlotIndex < 27) {
-      return this.activeContainer.inventory.getStack(this.hoveredSlotIndex);
+    if (!this.activeInventory || this.hoveredSlotIndex === -1) return null;
+    const chestSize = this.isDoubleChest ? 54 : 27;
+    if (this.hoveredSlotIndex < chestSize) {
+      return this.activeInventory.getStack(this.hoveredSlotIndex);
     } else {
-      return this.inventory.getStack(this.hoveredSlotIndex - 27);
+      return this.inventory.getStack(this.hoveredSlotIndex - chestSize);
     }
   }
 
   public renderAll(): void {
-    if (this.activeContainer) {
-      this.ui.renderInventories(this.activeContainer, this.inventory, this.slotRenderer);
+    if (this.activeInventory) {
+      this.ui.renderInventories(this.activeInventory, this.inventory, this.slotRenderer, this.isDoubleChest);
     }
   }
 }

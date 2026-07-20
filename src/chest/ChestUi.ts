@@ -1,6 +1,5 @@
 import type { ItemStack } from '../inventory/ItemStack';
 import type { SlotContentRenderer } from '../inventory/SlotContentRenderer';
-import type { ChestContainer } from './ChestContainer';
 import type { Inventory } from '../inventory/Inventory';
 
 /**
@@ -75,26 +74,27 @@ export class ChestUi {
     if (typeof document === 'undefined') return;
 
     // Based on visual layout logic of 175x167:
-    // Chest slots (27): 9 cols x 3 rows. Offset top ~17, left ~7
+    // Single Chest slots (27): 9 cols x 3 rows. Offset top ~17, left ~7
     for (let row = 0; row < 3; row++) {
       for (let col = 0; col < 9; col++) {
         const slotIdx = row * 9 + col;
-        this.addSlotEl(slotIdx, 7 + col * 18, 17 + row * 18);
+        this.addSlotEl(slotIdx, 8 + col * 18, 18 + row * 18);
       }
     }
 
-    // Player Inventory (27 main): Offset top ~83, left ~7
-    for (let row = 0; row < 3; row++) {
+    // Double Chest extra slots (27): 9 cols x 3 rows.
+    for (let row = 3; row < 6; row++) {
       for (let col = 0; col < 9; col++) {
-        const slotIdx = 27 + 9 + (row * 9 + col); // Hotbar is 0-8 in player inv
-        this.addSlotEl(slotIdx, 7 + col * 18, 83 + row * 18);
+        const slotIdx = row * 9 + col;
+        this.addSlotEl(slotIdx, 8 + col * 18, 18 + row * 18);
       }
     }
 
-    // Hotbar (9): Offset top ~141, left ~7
-    for (let col = 0; col < 9; col++) {
-      const slotIdx = 27 + col; // 0-8 in player inv
-      this.addSlotEl(slotIdx, 7 + col * 18, 141);
+    // Player Inventory (27 main) + Hotbar (9). We allocate them up to index 89.
+    // They will need to move dynamically.
+    for (let i = 0; i < 36; i++) {
+      const slotIdx = 54 + i;
+      this.addSlotEl(slotIdx, 0, 0); // Will position dynamically
     }
   }
 
@@ -109,8 +109,10 @@ export class ChestUi {
     el.addEventListener('mousedown', (e) => this.onSlotClick?.(index, e));
     el.addEventListener('mouseenter', () => {
       this.highlightEl.style.display = 'block';
-      this.highlightEl.style.left = `${x * this.currentScale}px`;
-      this.highlightEl.style.top = `${y * this.currentScale}px`;
+      const currentX = Number(el.dataset.x);
+      const currentY = Number(el.dataset.y);
+      this.highlightEl.style.left = `${currentX * this.currentScale}px`;
+      this.highlightEl.style.top = `${currentY * this.currentScale}px`;
       this.onSlotHover?.(index);
     });
     el.addEventListener('mouseleave', () => {
@@ -129,9 +131,18 @@ export class ChestUi {
   public setOnBackgroundClick(cb: (e: MouseEvent) => void): void { this.onBackgroundClick = cb; }
   public setOnDragEnd(cb: (e: MouseEvent) => void): void { this.onDragEnd = cb; }
 
-  public show(scale: number): void {
+  public show(scale: number, isDouble: boolean): void {
     if (typeof document === 'undefined') return;
-    this.updateScale(scale);
+    this.windowEl.style.backgroundImage = isDouble 
+      ? 'url(/textures/gui/doublechest_menu.png)' 
+      : 'url(/textures/gui/single_chestmenu.png)';
+    
+    // Hide extra chest slots if single
+    for (let i = 27; i < 54; i++) {
+      if (this.slots[i]) this.slots[i]!.style.display = isDouble ? 'block' : 'none';
+    }
+
+    this.updateScale(scale, isDouble);
     this.root.style.display = 'block';
   }
 
@@ -140,25 +151,55 @@ export class ChestUi {
     this.root.style.display = 'none';
   }
 
-  public updateScale(scale: number): void {
+  public updateScale(scale: number, isDouble: boolean): void {
     this.currentScale = scale;
-    // Window is ~175x167 natively.
+    
+    const height = isDouble ? 221 : 167; // Assuming 221 from typical assets (167 + 3*18)
     this.windowEl.style.width = `${175 * scale}px`;
-    this.windowEl.style.height = `${167 * scale}px`;
+    this.windowEl.style.height = `${height * scale}px`;
     this.windowEl.style.setProperty('--gui-scale', String(scale));
 
     this.highlightEl.style.width = `${16 * scale}px`;
     this.highlightEl.style.height = `${16 * scale}px`;
 
-    for (const el of this.slots) {
+    const playerInvOffset = isDouble ? 138 : 84; 
+    const hotbarOffset = isDouble ? 196 : 142;
+
+    for (let i = 0; i < 90; i++) {
+      const el = this.slots[i];
       if (!el) continue;
-      const x = Number(el.dataset.x);
-      const y = Number(el.dataset.y);
+
+      let x = 0;
+      let y = 0;
+
+      if (i < 54) {
+        // Chest slots (static layout)
+        x = Number(el.dataset.x);
+        y = Number(el.dataset.y);
+      } else {
+        // Player Inventory
+        const invIdx = i - 54; // 0-35
+        if (invIdx < 9) {
+          // Hotbar
+          x = 8 + invIdx * 18;
+          y = hotbarOffset;
+        } else {
+          // Main
+          const mainIdx = invIdx - 9;
+          const row = Math.floor(mainIdx / 9);
+          const col = mainIdx % 9;
+          x = 8 + col * 18;
+          y = playerInvOffset + row * 18;
+        }
+        // Update dataset for mouse events
+        el.dataset.x = x.toString();
+        el.dataset.y = y.toString();
+      }
+
       el.style.left = `${x * scale}px`;
       el.style.top = `${y * scale}px`;
       el.style.width = `${16 * scale}px`;
       el.style.height = `${16 * scale}px`;
-      el.style.setProperty('--gui-scale', String(scale));
     }
   }
 
@@ -171,20 +212,23 @@ export class ChestUi {
   }
 
   public renderInventories(
-    container: ChestContainer | null,
+    activeInventory: Inventory,
     inventory: Inventory,
-    contentRenderer: SlotContentRenderer
+    contentRenderer: SlotContentRenderer,
+    isDouble: boolean
   ): void {
-    if (typeof document === 'undefined' || !container) return;
+    if (typeof document === 'undefined') return;
 
-    for (let i = 0; i < 27; i++) {
-      const s = container.inventory.getStack(i);
+    const chestSize = isDouble ? 54 : 27;
+
+    for (let i = 0; i < chestSize; i++) {
+      const s = activeInventory.getStack(i);
       this.renderSlot(i, s, contentRenderer);
     }
 
     for (let i = 0; i < 36; i++) {
       const s = inventory.getStack(i);
-      this.renderSlot(27 + i, s, contentRenderer);
+      this.renderSlot(54 + i, s, contentRenderer);
     }
   }
 

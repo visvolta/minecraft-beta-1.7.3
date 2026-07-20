@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { ChestManager } from './ChestManager';
 import type { TextureAtlas, AtlasUvRect } from '../assets/TextureAtlas';
+
 export class ChestRenderer {
   private readonly group = new THREE.Group();
   private baseGeometry!: THREE.BufferGeometry;
@@ -27,45 +28,33 @@ export class ChestRenderer {
   }
 
   private buildGeometries(): void {
-    // Top, bottom, side, front texture rects from the atlas
     const topUv = this.atlas.getUvRect('singlechest_top') || { u0: 0, v0: 0, u1: 1, v1: 1 };
+    const bottomUv = this.atlas.getUvRect('singlechest_top') || { u0: 0, v0: 0, u1: 1, v1: 1 };
     const sideUv = this.atlas.getUvRect('singlechest_side') || { u0: 0, v0: 0, u1: 1, v1: 1 };
     const frontUv = this.atlas.getUvRect('singlechest_front') || { u0: 0, v0: 0, u1: 1, v1: 1 };
 
-    // In Beta 1.7.3, the chest is visually 16x16x16, but we'll split it at y=10/16
-    // Base: y=0 to y=10/16
-    // Lid:  y=10/16 to y=16/16. The lid pivots on the back top edge of the base.
-    
-    // We'll build simple Box geometries and remap UVs.
     const baseGeo = new THREE.BoxGeometry(1, 10/16, 1);
     const lidGeo = new THREE.BoxGeometry(1, 6/16, 1);
 
     // Apply UVs to Base
-    this.mapBoxUVs(baseGeo, topUv, topUv, sideUv, frontUv, 0, 10/16);
+    this.mapBoxUVs(baseGeo, topUv, bottomUv, sideUv, frontUv, 6/16, 1);
     
     // Apply UVs to Lid
-    this.mapBoxUVs(lidGeo, topUv, topUv, sideUv, frontUv, 10/16, 1);
+    this.mapBoxUVs(lidGeo, topUv, bottomUv, sideUv, frontUv, 0, 6/16);
 
-    // Shift lid geometry so origin is at the hinge (back bottom edge of the lid)
-    // BoxGeometry origin is center.
-    // The lid is 1x(6/16)x1. Center is at y=(3/16), z=0
-    // To hinge at z=-0.5 (back), y=-3/16 (bottom of lid).
-    // We add 0.5 to Z so the hinge is at local Z=0.
     lidGeo.translate(0, 3/16, 0.5);
 
-    // Add color attribute (white) to avoid black rendering
     const addColors = (g: THREE.BoxGeometry) => {
       const col = new Float32Array(g.attributes.position!.count * 3);
-      col.fill(1); // Fill with white
+      col.fill(1);
       g.setAttribute('color', new THREE.BufferAttribute(col, 3));
       
-      // Also add dummy lighting attributes for the shader
       const ones = new Float32Array(g.attributes.position!.count);
       ones.fill(1);
       const fifteens = new Float32Array(g.attributes.position!.count);
-      fifteens.fill(15); // max sky light
+      fifteens.fill(15);
       const zeros = new Float32Array(g.attributes.position!.count);
-      zeros.fill(0); // 0 block light
+      zeros.fill(0);
       
       g.setAttribute('tintColor', new THREE.BufferAttribute(col.slice(), 3));
       g.setAttribute('skyLightLevel', new THREE.BufferAttribute(fifteens, 1));
@@ -85,44 +74,67 @@ export class ChestRenderer {
     const uvAttr = geo.attributes.uv;
     if (!uvAttr) return;
 
-    // Three.js BoxGeometry face order:
-    // +x (right), -x (left), +y (top), -y (bottom), +z (front), -z (back)
-    // Each face has 4 vertices (2 triangles) -> 8 UV floats per face.
-    
-    // helper to set UVs
-    const setFaceUv = (faceIdx: number, rect: AtlasUvRect, v1: number, v2: number, rotated = false) => {
-      let u0 = rect.u0;
-      let v0_tex = rect.v0;
-      let u1 = rect.u1;
-      let v1_tex = rect.v1;
+    // We explicitly map uMin, uMax, vMin, vMax to the exact vertices of each face
+    // For standard THREE.BoxGeometry:
+    // Face 0: +X (Right)
+    // Face 1: -X (Left)
+    // Face 2: +Y (Top)
+    // Face 3: -Y (Bottom)
+    // Face 4: +Z (Front)
+    // Face 5: -Z (Back)
 
-      // Interpolate vertical slice
+    const setExplicitUv = (
+      faceIdx: number, 
+      rect: AtlasUvRect, 
+      v1: number, 
+      v2: number,
+      v0Map: number, v1Map: number, v2Map: number, v3Map: number
+    ) => {
+      const u0 = rect.u0;
+      const v0_tex = rect.v0;
+      const u1 = rect.u1;
+      const v1_tex = rect.v1;
+
       const vRange = v1_tex - v0_tex;
-      const faceV0 = v0_tex + v1 * vRange;
-      const faceV1 = v0_tex + v2 * vRange;
+      const faceV0 = v0_tex + v1 * vRange; // Top of the slice
+      const faceV1 = v0_tex + v2 * vRange; // Bottom of the slice
 
-      const idx = faceIdx * 8;
-      
-      if (rotated) {
-        // Rotated 180 degrees (for back side matching Beta 1.7.3 top/bottom UV maps)
-        uvAttr.setXY(idx/2 + 0, u1, faceV0);
-        uvAttr.setXY(idx/2 + 1, u0, faceV0);
-        uvAttr.setXY(idx/2 + 2, u1, faceV1);
-        uvAttr.setXY(idx/2 + 3, u0, faceV1);
-      } else {
-        uvAttr.setXY(idx/2 + 0, u0, faceV1);
-        uvAttr.setXY(idx/2 + 1, u1, faceV1);
-        uvAttr.setXY(idx/2 + 2, u0, faceV0);
-        uvAttr.setXY(idx/2 + 3, u1, faceV0);
-      }
+      const idx = faceIdx * 4;
+
+      // Determine which vertex gets which UV corner based on explicit map
+      const assign = (vertIndex: number, corner: number) => {
+        let u = u0, v = faceV0;
+        if (corner === 0) { u = u0; v = faceV0; } // Top-Left
+        else if (corner === 1) { u = u1; v = faceV0; } // Top-Right
+        else if (corner === 2) { u = u0; v = faceV1; } // Bottom-Left
+        else if (corner === 3) { u = u1; v = faceV1; } // Bottom-Right
+        uvAttr.setXY(idx + vertIndex, u, v);
+      };
+
+      assign(0, v0Map);
+      assign(1, v1Map);
+      assign(2, v2Map);
+      assign(3, v3Map);
     };
 
-    setFaceUv(0, sideUv, vStart, vEnd);  // Right (+X)
-    setFaceUv(1, sideUv, vStart, vEnd);  // Left (-X)
-    setFaceUv(2, topUv, 0, 1);           // Top (+Y)
-    setFaceUv(3, bottomUv, 0, 1);        // Bottom (-Y)
-    setFaceUv(4, frontUv, vStart, vEnd); // Front (+Z)
-    setFaceUv(5, sideUv, vStart, vEnd);  // Back (-Z)
+    // For side faces (0, 1, 4, 5): 
+    // v0: Top-Left (0), v1: Top-Right (1), v2: Bottom-Left (2), v3: Bottom-Right (3)
+    const sides = [0, 1, 4, 5];
+    for (const f of sides) {
+      const rect = f === 4 ? frontUv : sideUv;
+      setExplicitUv(f, rect, vStart, vEnd, 0, 1, 2, 3);
+    }
+
+    // Top face (+Y, Face 2):
+    // v0: Top-Left (0), v1: Top-Right (1), v2: Bottom-Left (2), v3: Bottom-Right (3)
+    setExplicitUv(2, topUv, 0, 1, 0, 1, 2, 3);
+
+    // Bottom face (-Y, Face 3):
+    // v0: Bottom-Left (2)
+    // v1: Bottom-Right (3)
+    // v2: Top-Left (0)
+    // v3: Top-Right (1)
+    setExplicitUv(3, bottomUv, 0, 1, 2, 3, 0, 1);
   }
 
   private rebuildInstancedMeshes(): void {
@@ -135,7 +147,7 @@ export class ChestRenderer {
       this.lidMesh.dispose();
     }
 
-    const count = Math.max(1, this.chestManager.getContainers().length + 50); // pad
+    const count = Math.max(1, this.chestManager.getContainers().length + 50);
     
     this.baseMesh = new THREE.InstancedMesh(this.baseGeometry, this.material, count);
     this.lidMesh = new THREE.InstancedMesh(this.lidGeometry, this.material, count);
@@ -162,31 +174,24 @@ export class ChestRenderer {
       const c = containers[i]!;
       this.chestMap.set(c.getPosKey(), i);
 
-      // Facing rotations (Beta 1.7.3 placement meta: 2=Z-, 3=Z+, 4=X-, 5=X+)
+      // Facing rotations
       let rotY = 0;
       if (c.facing === 2) rotY = Math.PI;
       else if (c.facing === 4) rotY = Math.PI / 2;
       else if (c.facing === 5) rotY = -Math.PI / 2;
-      // 3 is default (0 rotation)
 
-      // Base Transform
       this.dummyObj.position.set(c.x + 0.5, c.y + 5/16, c.z + 0.5);
       this.dummyObj.rotation.set(0, rotY, 0);
       this.dummyObj.updateMatrix();
       this.baseMesh.setMatrixAt(i, this.dummyObj.matrix);
 
-      // Lid Transform
-      // Interpolate angle:
-      // In a real frame loop, we'd use a partial tick alpha, but here we'll just use lidAngle.
-      const angle = THREE.MathUtils.lerp(c.prevLidAngle, c.lidAngle, 1.0); // actually deltaSeconds is needed for real interpolation but ok
-      // Beta 1.8+ lid opens to roughly 1.0 radian (approx 60 degrees) backwards
+      const angle = THREE.MathUtils.lerp(c.prevLidAngle, c.lidAngle, 1.0);
       const rotX = angle * 1.0; 
 
       this.dummyObj.position.set(c.x + 0.5, c.y + 10/16, c.z + 0.5);
       this.dummyObj.rotation.set(0, rotY, 0);
       
-      // Pivot offset
-      this.dummyObj.translateZ(-0.5); // move to back hinge
+      this.dummyObj.translateZ(-0.5);
       this.dummyObj.rotateX(-rotX);
       
       this.dummyObj.updateMatrix();
