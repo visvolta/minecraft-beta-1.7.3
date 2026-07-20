@@ -1,169 +1,86 @@
-import * as THREE from 'three';
-import { DroppedItemEntity } from './DroppedItemEntity';
-import type { ChunkManager } from '../../world/ChunkManager';
 import type { BlockRegistry } from '../../blocks/BlockRegistry';
-import type { BlockUpdateWorld } from '../../world/BlockUpdateWorld';
-import type { TextureAtlas } from '../../assets/TextureAtlas';
-import type { ItemTextureAtlas } from '../../assets/ItemTextureAtlas';
 import type { Player } from '../../player/Player';
 import type { Drop } from './BlockDropResolver';
 import type { Inventory } from '../../inventory/Inventory';
+import type { EntityManager } from '../core/EntityManager';
+import { DroppedItemEntity } from './DroppedItemEntity';
 
+/**
+ * Thin facade for dropped items on top of the shared {@link EntityManager}.
+ *
+ * Movement, gravity, collision, interpolation, chunk streaming, persistence
+ * and disposal are all handled by the EntityManager and {@link DroppedItemEntity}.
+ * This facade only provides ergonomic spawn helpers and the player-pickup
+ * pass (which needs the player + inventory and so stays outside the entity).
+ */
 export class ItemEntityManager {
-  private readonly scene: THREE.Scene;
-  private readonly chunkManager: ChunkManager;
-  private readonly blockRegistry: BlockRegistry;
-  private readonly atlas: TextureAtlas;
-  private readonly itemAtlas: ItemTextureAtlas;
-  private readonly heldBlockMaterial: THREE.Material;
-  private readonly itemHeldMaterial: THREE.Material;
-  private readonly inventory: Inventory;
-
-  private readonly items: DroppedItemEntity[] = [];
-
   public constructor(
-    scene: THREE.Scene,
-    chunkManager: ChunkManager,
-    blockRegistry: BlockRegistry,
-    _blockUpdateWorld: BlockUpdateWorld,
-    atlas: TextureAtlas,
-    itemAtlas: ItemTextureAtlas,
-    _buildBlockGeometry: (id: number) => THREE.BufferGeometry,
-    heldBlockMaterial: THREE.Material,
-    itemHeldMaterial: THREE.Material,
-    inventory: Inventory,
-  ) {
-    this.scene = scene;
-    this.chunkManager = chunkManager;
-    this.blockRegistry = blockRegistry;
-    this.atlas = atlas;
-    this.itemAtlas = itemAtlas;
-    this.heldBlockMaterial = heldBlockMaterial;
-    this.itemHeldMaterial = itemHeldMaterial;
-    this.inventory = inventory;
+    private readonly entityManager: EntityManager,
+    private readonly inventory: Inventory,
+    private readonly blockRegistry: BlockRegistry,
+  ) {}
+
+  /** Spawns a dropped-item entity at the given coordinates. */
+  public spawnItem(x: number, y: number, z: number, drop: Drop, delay = 10): DroppedItemEntity {
+    const item = new DroppedItemEntity(this.entityManager.context, drop, x, y, z, delay);
+    this.entityManager.add(item);
+    return item;
   }
 
-  /**
-   * Spawns a new dropped-item entity at the given coordinates.
-   */
-  public spawnItem(
-    x: number,
-    y: number,
-    z: number,
-    drop: Drop,
-    delay = 10,
-  ): void {
-    const item = new DroppedItemEntity(
-      this.scene,
-      this.chunkManager,
-      this.blockRegistry,
-      this.atlas,
-      this.itemAtlas,
-      this.heldBlockMaterial,
-      this.itemHeldMaterial,
-      x,
-      y,
-      z,
-      drop,
-      delay
-    );
-    this.items.push(item);
-  }
-
-  /**
-   * Spawns a new thrown dropped-item entity with specific initial velocities.
-   */
+  /** Spawns a thrown dropped-item entity with specific initial velocities. */
   public spawnThrownItem(
-    x: number,
-    y: number,
-    z: number,
+    x: number, y: number, z: number,
     drop: Drop,
-    motionX: number,
-    motionY: number,
-    motionZ: number,
+    motionX: number, motionY: number, motionZ: number,
     delay = 40,
-  ): void {
-    const item = new DroppedItemEntity(
-      this.scene,
-      this.chunkManager,
-      this.blockRegistry,
-      this.atlas,
-      this.itemAtlas,
-      this.heldBlockMaterial,
-      this.itemHeldMaterial,
-      x,
-      y,
-      z,
-      drop,
-      delay
-    );
+  ): DroppedItemEntity {
+    const item = new DroppedItemEntity(this.entityManager.context, drop, x, y, z, delay);
     item.velocity.x = motionX;
     item.velocity.y = motionY;
     item.velocity.z = motionZ;
-    this.items.push(item);
+    this.entityManager.add(item);
+    return item;
   }
 
   /**
-   * Simulates a single fixed 20Hz authoritative tick.
-   * Resolves item movement, friction, lifetime despawns, and player pickups.
+   * Player-pickup pass. Runs after the EntityManager tick each simulation
+   * step. Uses a chunk-first AABB query (never scans all entities), matching
+   * Beta's expanded player pickup box (×1.0 horizontal, ×0.5 vertical).
    */
-  public tick(player: Player): void {
-    // 1. Process tick for each item
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      const item = this.items[i]!;
-      item.tick();
-
-      if (item.isDead) {
-        item.cleanup();
-        this.items.splice(i, 1);
-      }
-    }
-
-    // 2. Exact player collision check
-    // Player's bounding box is expanded by 1.0 block horizontally (X/Z) and 0.5 block vertically (Y)
+  public tickPickups(player: Player): void {
     const pickupBox = player.getAABB().expand(1.0, 0.5, 1.0);
 
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      const item = this.items[i]!;
-      if (item.isDead) continue;
+    const candidates = this.entityManager.getEntitiesInAABB(
+      pickupBox,
+      (entity): entity is DroppedItemEntity =>
+        entity instanceof DroppedItemEntity && entity.delayBeforeCanPickup === 0 && !entity.removed,
+    );
 
-      if (item.delayBeforeCanPickup === 0) {
-        if (item.getAABB().intersects(pickupBox)) {
-          // Attempt atomic insertion into player inventory
-          const accepted = this.inventory.insert(
-            item.drop.type,
-            item.drop.id,
-            item.drop.count,
-            item.drop.metadata
-          );
-
-          if (accepted > 0) {
-            const remainder = item.drop.count - accepted;
-            if (remainder <= 0) {
-              // Entire stack collected
-              item.isDead = true;
-              this.triggerPickup(item.drop.type, item.drop.id, accepted, item.drop.metadata);
-              item.cleanup();
-              this.items.splice(i, 1);
-            } else {
-              // Partial stack accepted, keep remainder in the world entity
-              const mutableDrop = item.drop as any;
-              mutableDrop.count = remainder;
-              this.triggerPickup(item.drop.type, item.drop.id, accepted, item.drop.metadata);
-              item.rebuildVisualsForCount(remainder);
-            }
-          }
-        }
+    for (const item of candidates) {
+      if (item.removed || !item.getAABB().intersects(pickupBox)) {
+        continue;
       }
-    }
-  }
 
-  /**
-   * Updates visual rendering (rotation and bobbing) for smooth interpolation.
-   */
-  public updateVisuals(): void {
-    for (const item of this.items) {
-      item.updateVisuals();
+      const accepted = this.inventory.insert(
+        item.drop.type,
+        item.drop.id,
+        item.drop.count,
+        item.drop.metadata,
+      );
+
+      if (accepted <= 0) {
+        continue;
+      }
+
+      const remainder = item.drop.count - accepted;
+      this.triggerPickup(item.drop.type, item.drop.id, accepted, item.drop.metadata);
+
+      if (remainder <= 0) {
+        this.entityManager.remove(item);
+      } else {
+        item.drop = { ...item.drop, count: remainder };
+        item.rebuildVisualsForCount(remainder);
+      }
     }
   }
 
@@ -178,21 +95,8 @@ export class ItemEntityManager {
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
         .join(' ');
     }
-
-    // Format exact concise pickup debug log
     console.log(
-      `[PICKUP DEBUG] Collected: ${displayName} (ID: ${id}) | Quantity: ${count} | Metadata: ${metadata}`
+      `[PICKUP DEBUG] Collected: ${displayName} (ID: ${id}) | Quantity: ${count} | Metadata: ${metadata}`,
     );
-  }
-
-  public cleanup(): void {
-    if (typeof document !== 'undefined') {
-      const container = document.getElementById('pickup-toast-container');
-      if (container) container.remove();
-    }
-    for (const item of this.items) {
-      item.cleanup();
-    }
-    this.items.length = 0;
   }
 }

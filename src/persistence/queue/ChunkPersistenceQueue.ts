@@ -3,6 +3,17 @@ import { ChunkSerializer } from '../nbt/ChunkSerializer.ts';
 import { RegionCoordinator } from './RegionCoordinator.ts';
 import { encodeNbt, decodeNbt } from '../nbt/NbtCodec.ts';
 import { RegionCorruptionError } from '../region/RegionCorruptionError.ts';
+import type { NbtCompound, NbtTag } from '../nbt/Nbt.ts';
+
+/**
+ * Bridge between chunk persistence and the EntityManager. Lets chunks save and
+ * load their owned entities without the queue depending on entity internals.
+ */
+export interface ChunkEntityHooks {
+  serializeChunkEntities(chunkX: number, chunkZ: number): NbtTag[];
+  loadChunkEntities(tags: readonly NbtCompound[]): void;
+  hasParkedEntities(chunkX: number, chunkZ: number): boolean;
+}
 
 interface QueuedRead {
   chunkX: number;
@@ -35,9 +46,15 @@ export class ChunkPersistenceQueue {
 
   private pendingPeriodicFlush: ReturnType<typeof setTimeout> | null = null;
   private stats = { saved: 0, failed: 0, loaded: 0 };
+  private entityHooks: ChunkEntityHooks | null = null;
 
   public constructor(regionCoordinator: RegionCoordinator) {
     this.regionCoordinator = regionCoordinator;
+  }
+
+  /** Connects the EntityManager so chunks can save/load their entities. */
+  public setEntityHooks(hooks: ChunkEntityHooks): void {
+    this.entityHooks = hooks;
   }
 
   public getStats() {
@@ -117,6 +134,14 @@ export class ChunkPersistenceQueue {
       const chunk = ChunkSerializer.decodeChunk(decoded.root);
       chunk.markAsLoadedFromDisk();
       this.stats.loaded++;
+      // Restore owned entities from disk unless in-memory parked entities are
+      // authoritative for this chunk (a same-session re-stream).
+      if (this.entityHooks !== null && !this.entityHooks.hasParkedEntities(read.chunkX, read.chunkZ)) {
+        const entityTags = ChunkSerializer.decodeEntities(decoded.root);
+        if (entityTags.length > 0) {
+          this.entityHooks.loadChunkEntities(entityTags);
+        }
+      }
       read.resolve(chunk);
     } catch (err) {
       if (err instanceof RegionCorruptionError) {
@@ -140,7 +165,8 @@ export class ChunkPersistenceQueue {
     this.activeSaves++;
     try {
       const snapshotRevision = chunk.getPersistenceRevision();
-      const nbt = ChunkSerializer.encodeChunk(chunk, 0n);
+      const entityTags = this.entityHooks?.serializeChunkEntities(chunk.chunkX, chunk.chunkZ) ?? [];
+      const nbt = ChunkSerializer.encodeChunk(chunk, 0n, entityTags);
       const bytes = encodeNbt(nbt, '');
 
       const rx = Math.floor(chunk.chunkX / 32);

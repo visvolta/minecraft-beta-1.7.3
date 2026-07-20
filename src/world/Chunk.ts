@@ -103,6 +103,18 @@ export class Chunk {
     this.persistenceRevision += 1;
   }
 
+  /**
+   * Marks the chunk as needing a persistence re-save because its *entity*
+   * membership changed (an entity spawned, was removed, or crossed into/out of
+   * this chunk). Bumps only the persistence revision — block/mesh data is
+   * untouched, so no visual dirtying occurs. Required so the EntityManager can
+   * keep the saved `Entities` list correct and avoid duplicate entity saves
+   * across chunk boundaries.
+   */
+  public markEntitiesDirty(): void {
+    this.markPersistenceDirty();
+  }
+
   public getPersistenceRevision(): number {
     return this.persistenceRevision;
   }

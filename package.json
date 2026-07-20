@@ -22,7 +22,8 @@
     "validate:player-rendering": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePlayerRendering.js",
     "validate:inventory": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateInventory.js",
     "validate:crafting": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateCrafting.js",
-    "validate:nbt": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateNbt.js"
+    "validate:nbt": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateNbt.js",
+    "validate:entities": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateEntities.js"
   },
   "dependencies": {
     "three": "^0.185.1"

@@ -9,6 +9,11 @@ import { LightEngine } from '../src/world/generation/lighting/LightEngine.ts';
 import { RandomTickScheduler } from '../src/world/ticks/RandomTickScheduler.ts';
 import { WorldTickScheduler } from '../src/world/ticks/WorldTickScheduler.ts';
 import { FallingBlockManager } from '../src/world/entities/FallingBlockManager.ts';
+import { EntityManager } from '../src/entities/core/EntityManager.ts';
+import { createDefaultEntityTypeRegistry } from '../src/entities/core/EntityType.ts';
+import { registerEntityTypes } from '../src/entities/registerEntityTypes.ts';
+import { JavaRandom } from '../src/world/generation/random/JavaRandom.ts';
+import { DroppedItemEntity } from '../src/entities/items/DroppedItemEntity.ts';
 import { WorldEventQueue } from '../src/world/events/WorldEventQueue.ts';
 import { registerFallingBlockBehaviours } from '../src/world/behaviours/FallingBlockBehaviour.ts';
 import { registerFireBehaviour, getFireEncouragement, getFireAbility, FireBehaviour } from '../src/world/behaviours/FireBehaviour.ts';
@@ -21,86 +26,137 @@ function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
 }
 
-function setup(): { world: BlockUpdateWorld; scheduler: WorldTickScheduler; falling: FallingBlockManager; events: WorldEventQueue; chunks: ChunkManager } {
+function buildEntityManager(
+  blocks: BlockRegistry,
+  behaviours: BlockBehaviourRegistry,
+  world: BlockUpdateWorld,
+  chunks: ChunkManager,
+): EntityManager {
+  const scene = new THREE.Scene();
+  const mockAtlas = { texture: new THREE.Texture(), getUvRect: () => ({ u0: 0, v0: 0, u1: 1, v1: 1 }) } as never;
+  const mockItemAtlas = { texture: new THREE.Texture(), getUvRect: () => ({ u0: 0, v0: 0, u1: 1, v1: 1 }) } as never;
+  const material = new THREE.MeshBasicMaterial();
+  const registry = createDefaultEntityTypeRegistry();
+  registerEntityTypes(registry);
+  return new EntityManager({
+    blockRegistry: blocks,
+    behaviourRegistry: behaviours,
+    blockUpdateWorld: world,
+    chunkManager: chunks,
+    scene,
+    blockAtlas: mockAtlas,
+    itemAtlas: mockItemAtlas,
+    heldBlockMaterial: material,
+    itemHeldMaterial: material,
+    typeRegistry: registry,
+    rng: new JavaRandom(12345n),
+  });
+}
+
+/** Ticks the entity manager until no falling blocks remain (or maxTicks). */
+function settle(entities: EntityManager, falling: FallingBlockManager, maxTicks: number): void {
+  for (let i = 0; i < maxTicks; i++) {
+    entities.tick();
+    if (falling.getCount() === 0) {
+      break;
+    }
+  }
+}
+
+/** Counts active dropped-item entities (used to verify drop fallbacks). */
+function countItems(entities: EntityManager): number {
+  let count = 0;
+  entities.forEachActive((entity) => {
+    if (entity instanceof DroppedItemEntity) {
+      count += 1;
+    }
+  });
+  return count;
+}
+
+function setup(): { world: BlockUpdateWorld; scheduler: WorldTickScheduler; falling: FallingBlockManager; events: WorldEventQueue; chunks: ChunkManager; entities: EntityManager } {
   const blocks = new BlockRegistry();
   registerDefaultBlocks(blocks);
   const chunks = new ChunkManager();
   for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) chunks.getOrCreateChunk(x, z);
   const light = new LightEngine(chunks, blocks);
   const world = new BlockUpdateWorld(chunks, blocks, light);
-  const atlas = { texture: new THREE.Texture(), getUvRect: () => ({ u0: 0, v0: 0, u1: 1, v1: 1 }) } as never;
   const events = new WorldEventQueue();
-  const falling = new FallingBlockManager(world, blocks, chunks, new THREE.Scene(), atlas, events);
   const behaviours = new BlockBehaviourRegistry();
+  const entities = buildEntityManager(blocks, behaviours, world, chunks);
+  const falling = new FallingBlockManager(entities);
   const weather = new WeatherController(12345n);
   registerFallingBlockBehaviours(behaviours, blocks, falling);
   registerFireBehaviour(behaviours, blocks, weather, chunks);
   registerSnowIceBehaviours(behaviours);
   const scheduler = new WorldTickScheduler(chunks, world, behaviours, new RandomTickScheduler(123n));
   world.setScheduleCallback((x, y, z, id, delay) => scheduler.schedule(x, y, z, id, delay));
-  return { world, scheduler, falling, events, chunks };
+  return { world, scheduler, falling, events, chunks, entities };
 }
 
 {
-  const { world, scheduler, falling } = setup();
+  const { world, scheduler, falling, entities } = setup();
   world.setBlock(0, 9, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
   world.setBlock(0, 20, 0, BlockIds.Sand, { metadata: 3, notifyNeighbours: false, updateLighting: false });
   world.scheduleBlockTick(0, 20, 0, BlockIds.Sand, 1);
   scheduler.update(0.05);
   assert(world.getBlock(0, 20, 0) === BlockIds.Air, 'unsupported sand was not removed into a falling entity');
+  entities.tick();
   assert(falling.getCount() === 1, 'sand falling entity was not created');
-  for (let i = 0; i < 60 && falling.getCount() > 0; i++) falling.update(0.05);
+  settle(entities, falling, 60);
   assert(falling.getCount() === 0, 'falling sand did not land');
   assert(world.getBlock(0, 10, 0) === BlockIds.Sand, 'falling sand landed at the wrong height');
   assert(world.getBlockMetadata(0, 10, 0) === 3, 'falling sand metadata was not preserved');
 }
 
 {
-  const { world, scheduler, falling } = setup();
+  const { world, scheduler, falling, entities } = setup();
   world.setBlock(0, 9, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
   world.setBlock(0, 20, 0, BlockIds.Gravel, { metadata: 4, notifyNeighbours: false, updateLighting: false });
   world.scheduleBlockTick(0, 20, 0, BlockIds.Gravel, 1);
   scheduler.update(0.05);
-  for (let i = 0; i < 80 && falling.getCount() > 0; i++) falling.update(0.05);
+  settle(entities, falling, 80);
   assert(world.getBlock(0, 10, 0) === BlockIds.Gravel, 'gravel did not land');
   assert(world.getBlockMetadata(0, 10, 0) === 4, 'gravel metadata was not preserved');
 }
 
 {
-  const { world, scheduler, falling } = setup();
+  const { world, scheduler, falling, entities } = setup();
   world.setBlock(0, 9, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
   world.setBlock(0, 10, 0, BlockIds.DeadBush, { notifyNeighbours: false, updateLighting: false });
   world.setBlock(0, 20, 0, BlockIds.Sand, { notifyNeighbours: false, updateLighting: false });
   world.scheduleBlockTick(0, 20, 0, BlockIds.Sand, 1);
   scheduler.update(0.05);
-  for (let i = 0; i < 80 && falling.getCount() > 0; i++) falling.update(0.05);
+  settle(entities, falling, 80);
   assert(world.getBlock(0, 10, 0) === BlockIds.Sand, 'sand did not replace a replaceable landing cell');
 }
 
 for (const fluid of [BlockIds.WaterStill, BlockIds.LavaStill]) {
-  const { world, scheduler, falling } = setup();
+  const { world, scheduler, falling, entities } = setup();
   world.setBlock(0, 9, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
   world.setBlock(0, 10, 0, fluid, { notifyNeighbours: false, updateLighting: false });
   world.setBlock(0, 20, 0, BlockIds.Sand, { notifyNeighbours: false, updateLighting: false });
   world.scheduleBlockTick(0, 20, 0, BlockIds.Sand, 1);
   scheduler.update(0.05);
-  for (let i = 0; i < 80 && falling.getCount() > 0; i++) falling.update(0.05);
+  settle(entities, falling, 80);
   assert(world.getBlock(0, 10, 0) === BlockIds.Sand, `sand did not land in fluid ${fluid}`);
 }
 
 {
-  const { world, falling, events } = setup();
+  const { world, falling, entities } = setup();
   world.setBlock(0, 9, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
   world.setBlock(0, 10, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
   falling.spawn(BlockIds.Sand, 0, 0.5, 10.5, 0.5);
-  falling.update(0.05);
+  entities.tick(); // activate + simulate: cannot place on stone, removed, item drop queued
+  entities.tick(); // flush removal and the queued dropped item
   assert(falling.getCount() === 0, 'failed landing entity was not removed');
-  assert(events.getBlockDropCount() === 1, 'failed landing did not emit a deterministic block drop');
+  assert(countItems(entities) === 1, 'failed landing did not spawn a dropped item');
 }
 
 {
-  const { falling, chunks } = setup();
+  const { falling, chunks, entities } = setup();
   falling.spawn(BlockIds.Sand, 7, 0.5, 20.5, 0.5);
+  entities.tick(); // activate the entity so it lives in its chunk bucket
   const before = falling.getDebugEntities()[0]!;
   chunks.removeChunk(0, 0);
   assert(falling.getCount() === 0 && falling.getPersistedCount() === 1, 'falling entity was not persisted on chunk unload');
@@ -114,12 +170,12 @@ for (const fluid of [BlockIds.WaterStill, BlockIds.LavaStill]) {
 // Stacking: multiple sand blocks cascade correctly
 // ============================================================
 {
-  const { world, falling } = setup();
+  const { world, falling, entities } = setup();
   world.setBlock(0, 5, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
   for (let y = 6; y <= 10; y++) {
     falling.spawn(BlockIds.Sand, 0, 0.5, y + 0.5, 0.5);
   }
-  for (let i = 0; i < 200 && falling.getCount() > 0; i++) falling.update(0.05);
+  settle(entities, falling, 200);
   assert(falling.getCount() === 0, 'stacked sand entities did not all land');
   for (let y = 6; y <= 10; y++) {
     assert(world.getBlock(0, y, 0) === BlockIds.Sand, `stacked sand missing at y=${y}`);
@@ -137,14 +193,13 @@ for (const fluid of [BlockIds.WaterStill, BlockIds.LavaStill]) {
     for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) cm.getOrCreateChunk(x, z);
     const le = new LightEngine(cm, blocks);
     const w = new BlockUpdateWorld(cm, blocks, le);
-    const atlas = { texture: new THREE.Texture(), getUvRect: () => ({ u0: 0, v0: 0, u1: 1, v1: 1 }) } as never;
-    const events = new WorldEventQueue();
-    const mgr = new FallingBlockManager(w, blocks, cm, new THREE.Scene(), atlas, events);
-    void events; // suppress unused warning
+    const behaviours = new BlockBehaviourRegistry();
+    const em = buildEntityManager(blocks, behaviours, w, cm);
+    const mgr = new FallingBlockManager(em);
     w.setBlock(0, 5, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
     mgr.spawn(BlockIds.Sand, 0, 0.5, 20.5, 0.5);
     mgr.spawn(BlockIds.Gravel, 0, 2.5, 20.5, 0.5);
-    for (let i = 0; i < 100 && mgr.getCount() > 0; i++) mgr.update(0.05);
+    settle(em, mgr, 100);
     const placed: number[] = [];
     for (let y = 0; y < 30; y++) {
       const b = w.getBlock(0, y, 0);
@@ -161,8 +216,9 @@ for (const fluid of [BlockIds.WaterStill, BlockIds.LavaStill]) {
 // Duplicate entity detection: same entity ID is rejected
 // ============================================================
 {
-  const { falling } = setup();
+  const { falling, entities } = setup();
   falling.spawn(BlockIds.Sand, 0, 0.5, 20.5, 0.5);
+  entities.tick(); // activate the spawned entity
   assert(falling.getCount() === 1, 'entity should be created');
   // Upstream assigns unique IDs per spawn; verify mesh count stays consistent
   assert(falling.getMeshCount() === 1, 'should have exactly 1 mesh');

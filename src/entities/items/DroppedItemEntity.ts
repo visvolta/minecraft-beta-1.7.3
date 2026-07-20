@@ -1,10 +1,8 @@
 import * as THREE from 'three';
-import { AABB } from '../../physics/AABB';
-import type { ChunkManager } from '../../world/ChunkManager';
-import { BlockRegistry } from '../../blocks/BlockRegistry';
-import type { TextureAtlas } from '../../assets/TextureAtlas';
-import type { ItemTextureAtlas } from '../../assets/ItemTextureAtlas';
-import { worldToChunkLocal } from '../../world/worldToChunkCoords';
+import { Entity } from '../core/Entity';
+import { EntityTypeIds } from '../core/EntityType';
+import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
+import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
 import { BlockIds } from '../../blocks/BlockId';
 import type { Drop } from './BlockDropResolver';
 import { classifyItemRender, isBlock3dCategory, isFlatItemCategory, isToolCategory } from '../../inventory/ItemRenderClassifier';
@@ -13,90 +11,99 @@ import { resolveBlockTexture } from '../../blocks/resolveBlockTexture';
 import { resolveBlockTint } from '../../blocks/resolveBlockTint';
 import { ItemIconResolver } from '../../inventory/ItemIconResolver';
 
-const COLLISION_EPSILON = 0.001;
+/** Dropped-item cube footprint (Beta `EntityItem` is 0.25×0.25). */
 const ITEM_SIZE = 0.25;
+/** Beta despawn age: 6000 ticks (5 minutes). */
+const DESPAWN_AGE = 6000;
+/** Terminal fall speed used by the current implementation (blocks/tick). */
+const TERMINAL_VELOCITY = -1.0;
 
-export class DroppedItemEntity {
-  public readonly position = { x: 0, y: 0, z: 0 };
-  public readonly velocity = { x: 0, y: 0, z: 0 };
-  public readonly drop: Drop;
+/**
+ * A dropped item entity (Beta `EntityItem`).
+ *
+ * Now built on the shared {@link Entity} base: identity, transform, lifecycle,
+ * chunk ownership and base serialisation come from the base; per-tick gravity,
+ * drag, pickup-delay, despawn and the item visuals are item-specific and live
+ * here. Collision uses the shared metadata-aware mover.
+ */
+export class DroppedItemEntity extends Entity {
+  public readonly typeId = EntityTypeIds.DroppedItem;
+  public readonly typeStringId = 'Item';
 
-  public age = 0;
-  public delayBeforeCanPickup = 10;
-  public readonly hoverStart: number;
-  public onGround = false;
-  public isDead = false;
+  /** The dropped stack. `count` mutates on partial pickup. */
+  public drop: Drop;
+  public delayBeforeCanPickup: number;
+  public hoverStart: number;
+  /** Beta item health (fire/damage); kept for parity, not yet applied. */
+  public health = 5;
 
-  public readonly group = new THREE.Group();
-
-  private readonly scene: THREE.Scene;
-  private readonly chunkManager: ChunkManager;
-  private readonly blockRegistry: BlockRegistry;
-  private readonly atlas: TextureAtlas;
-  private readonly itemAtlas: ItemTextureAtlas;
-  private readonly heldBlockMaterial: THREE.Material;
-  private readonly itemHeldMaterial: THREE.Material;
   private readonly icons = new ItemIconResolver();
+  private group: THREE.Group | null = null;
 
   public constructor(
-    scene: THREE.Scene,
-    chunkManager: ChunkManager,
-    blockRegistry: BlockRegistry,
-    atlas: TextureAtlas,
-    itemAtlas: ItemTextureAtlas,
-    heldBlockMaterial: THREE.Material,
-    itemHeldMaterial: THREE.Material,
+    ctx: EntityWorldContext,
+    drop: Drop,
     x: number,
     y: number,
     z: number,
-    drop: Drop,
     delay = 10,
+    hoverStart?: number,
   ) {
-    this.scene = scene;
-    this.chunkManager = chunkManager;
-    this.blockRegistry = blockRegistry;
-    this.atlas = atlas;
-    this.itemAtlas = itemAtlas;
-    this.heldBlockMaterial = heldBlockMaterial;
-    this.itemHeldMaterial = itemHeldMaterial;
+    super();
     this.drop = drop;
-
-    this.position.x = x;
-    this.position.y = y;
-    this.position.z = z;
-
     this.delayBeforeCanPickup = delay;
-    this.hoverStart = Math.random() * Math.PI * 2;
+    this.hoverStart = hoverStart ?? Math.random() * Math.PI * 2;
 
-    // 1. Initial Launch Velocity (Beta 1.7.3)
+    this.setSize(ITEM_SIZE, ITEM_SIZE);
+    this.setPosition(x, y, z);
+
+    // Beta initial launch velocity.
     this.velocity.x = Math.random() * 0.2 - 0.1;
     this.velocity.y = 0.2;
     this.velocity.z = Math.random() * 0.2 - 0.1;
 
-    // Build the visual meshes based on initial count
-    this.rebuildVisualsForCount(drop.count);
+    this.ctx = ctx;
+    this.buildRender();
+  }
 
-    this.group.position.set(x, y, z);
-    this.scene.add(this.group);
+  /** World context captured at construction for render rebuilds on restore. */
+  private ctx: EntityWorldContext;
+
+  // ---- Rendering ---------------------------------------------------------
+
+  private buildRender(): void {
+    const group = new THREE.Group();
+    group.position.set(this.position.x, this.position.y, this.position.z);
+    this.group = group;
+    this.renderObject = group;
+    this.rebuildVisualsForCount(this.drop.count);
+    this.ctx.scene.add(group);
   }
 
   public rebuildVisualsForCount(count: number): void {
-    // Clear old visual meshes cleanly
-    while (this.group.children.length > 0) {
-      const child = this.group.children[0]!;
-      this.group.remove(child);
+    const group = this.group;
+    if (group === null) {
+      return;
+    }
+
+    // Clear old visual meshes cleanly.
+    while (group.children.length > 0) {
+      const child = group.children[0]!;
+      group.remove(child);
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
-        // Only dispose material if it is NOT one of the shared/pooled engine materials
-        if (child.material instanceof THREE.Material && child.material !== this.heldBlockMaterial && child.material !== this.itemHeldMaterial) {
+        if (
+          child.material instanceof THREE.Material &&
+          child.material !== this.ctx.heldBlockMaterial &&
+          child.material !== this.ctx.itemHeldMaterial
+        ) {
           child.material.dispose();
         }
       }
     }
 
-    // Determine the category using the authoritative classifier
-    const category = classifyItemRender({ id: this.drop.id, type: this.drop.type }, this.blockRegistry);
-    const def = this.blockRegistry.getById(this.drop.id as number);
+    const category = classifyItemRender({ id: this.drop.id, type: this.drop.type }, this.ctx.blockRegistry);
+    const def = this.ctx.blockRegistry.getById(this.drop.id as number);
 
     let copyCount = 1;
     if (count > 20) copyCount = 4;
@@ -107,15 +114,13 @@ export class DroppedItemEntity {
       let mesh: THREE.Mesh | undefined;
 
       if (category === 'unsupported' || category === 'empty') {
-        const geometry = BlockItemModelBuilder.buildDebugPlaceholder();
-        mesh = new THREE.Mesh(geometry, this.heldBlockMaterial);
+        mesh = new THREE.Mesh(BlockItemModelBuilder.buildDebugPlaceholder(), this.ctx.heldBlockMaterial);
       } else if (isBlock3dCategory(category) && def !== undefined) {
-        const geometry = BlockItemModelBuilder.build3DGeometry(def, this.atlas);
-        mesh = new THREE.Mesh(geometry, this.heldBlockMaterial);
+        mesh = new THREE.Mesh(BlockItemModelBuilder.build3DGeometry(def, this.ctx.blockAtlas), this.ctx.heldBlockMaterial);
         mesh.scale.set(0.25, 0.25, 0.25);
       } else if ((isFlatItemCategory(category) || isToolCategory(category)) && this.drop.type === 'block' && def !== undefined) {
         const texName = resolveBlockTexture(def, 'side') || resolveBlockTexture(def, 'top') || 'stone';
-        let uvRect = this.atlas.getUvRect(texName);
+        let uvRect = this.ctx.blockAtlas.getUvRect(texName);
         const tint = resolveBlockTint(def, 'side');
         let useItemAtlas = false;
 
@@ -123,24 +128,20 @@ export class DroppedItemEntity {
           const itemPath = this.icons.resolve(String(this.drop.id));
           const nameMatch = itemPath.match(/\/textures\/items\/([^/]+)\.png$/);
           if (nameMatch && nameMatch[1]) {
-            uvRect = this.itemAtlas.getUvRect(nameMatch[1]);
+            uvRect = this.ctx.itemAtlas.getUvRect(nameMatch[1]);
             useItemAtlas = uvRect !== undefined;
           }
         }
 
         if (uvRect === undefined) {
-          console.warn(`[DroppedItemEntity] Missing block texture: "${texName}". Using debug placeholder.`);
-          const geometry = BlockItemModelBuilder.buildDebugPlaceholder();
-          mesh = new THREE.Mesh(geometry, this.heldBlockMaterial);
+          mesh = new THREE.Mesh(BlockItemModelBuilder.buildDebugPlaceholder(), this.ctx.heldBlockMaterial);
         } else {
-          const u0 = uvRect.u0, v0 = uvRect.v0, u1 = uvRect.u1, v1 = uvRect.v1;
-          const geometry = this.createOpposedQuadsGeometry(u0, v0, u1, v1, tint[0], tint[1], tint[2], false);
-          mesh = new THREE.Mesh(geometry, useItemAtlas ? this.itemHeldMaterial : this.heldBlockMaterial);
+          const geometry = this.createOpposedQuadsGeometry(uvRect.u0, uvRect.v0, uvRect.u1, uvRect.v1, tint[0], tint[1], tint[2]);
+          mesh = new THREE.Mesh(geometry, useItemAtlas ? this.ctx.itemHeldMaterial : this.ctx.heldBlockMaterial);
         }
       } else if (isFlatItemCategory(category) || isToolCategory(category)) {
-        // Flat item or tool drop: quads mapped to ItemTextureAtlas or BlockAtlas fallback
-        let itemKey = String(this.drop.id);
-        let uvRect = this.itemAtlas.getUvRect(itemKey);
+        const itemKey = String(this.drop.id);
+        let uvRect = this.ctx.itemAtlas.getUvRect(itemKey);
         let useBlockAtlas = false;
 
         if (uvRect === undefined) {
@@ -148,291 +149,143 @@ export class DroppedItemEntity {
           const itemMatch = resolvedPath.match(/\/textures\/items\/([^/]+)\.png$/);
           const blockMatch = resolvedPath.match(/\/textures\/blocks\/([^/]+)\.png$/);
           if (itemMatch && itemMatch[1]) {
-            uvRect = this.itemAtlas.getUvRect(itemMatch[1]);
+            uvRect = this.ctx.itemAtlas.getUvRect(itemMatch[1]);
           } else if (blockMatch && blockMatch[1]) {
-            uvRect = this.atlas.getUvRect(blockMatch[1]);
+            uvRect = this.ctx.blockAtlas.getUvRect(blockMatch[1]);
             useBlockAtlas = uvRect !== undefined;
           }
         }
 
         if (uvRect === undefined) {
-          console.warn(`[DroppedItemEntity] Missing item texture: "${this.drop.id}". Using debug placeholder.`);
-          const geometry = BlockItemModelBuilder.buildDebugPlaceholder();
-          mesh = new THREE.Mesh(geometry, this.itemHeldMaterial);
+          mesh = new THREE.Mesh(BlockItemModelBuilder.buildDebugPlaceholder(), this.ctx.itemHeldMaterial);
         } else {
-          const u0 = uvRect.u0, v0 = uvRect.v0, u1 = uvRect.u1, v1 = uvRect.v1;
-          const geometry = this.createOpposedQuadsGeometry(u0, v0, u1, v1, 1.0, 1.0, 1.0, false);
-          mesh = new THREE.Mesh(geometry, useBlockAtlas ? this.heldBlockMaterial : this.itemHeldMaterial);
+          const geometry = this.createOpposedQuadsGeometry(uvRect.u0, uvRect.v0, uvRect.u1, uvRect.v1, 1.0, 1.0, 1.0);
+          mesh = new THREE.Mesh(geometry, useBlockAtlas ? this.ctx.heldBlockMaterial : this.ctx.itemHeldMaterial);
         }
       } else {
-        const geometry = BlockItemModelBuilder.buildDebugPlaceholder();
-        mesh = new THREE.Mesh(geometry, this.heldBlockMaterial);
+        mesh = new THREE.Mesh(BlockItemModelBuilder.buildDebugPlaceholder(), this.ctx.heldBlockMaterial);
       }
 
-      if (mesh) {
-        if (i > 0) {
-          mesh.position.set(
-            (Math.random() * 2 - 1) * 0.15,
-            (Math.random() * 2 - 1) * 0.15,
-            (Math.random() * 2 - 1) * 0.15
-          );
-        }
-        this.group.add(mesh);
+      if (i > 0) {
+        mesh.position.set(
+          (Math.random() * 2 - 1) * 0.15,
+          (Math.random() * 2 - 1) * 0.15,
+          (Math.random() * 2 - 1) * 0.15,
+        );
       }
+      group.add(mesh);
     }
   }
 
-  public getAABB(): AABB {
-    const half = ITEM_SIZE / 2;
-    return new AABB(
-      this.position.x - half,
-      this.position.y,
-      this.position.z - half,
-      this.position.x + half,
-      this.position.y + ITEM_SIZE,
-      this.position.z + half
-    );
+  public override updateRenderInterpolation(alpha: number): void {
+    const group = this.group;
+    if (group === null) {
+      return;
+    }
+    const p = this.previousPosition;
+    const c = this.position;
+    const x = p.x + (c.x - p.x) * alpha;
+    const y = p.y + (c.y - p.y) * alpha;
+    const z = p.z + (c.z - p.z) * alpha;
+
+    // Beta spin + bob, driven by integer age (as before).
+    group.rotation.y = (this.age / 20.0) + this.hoverStart;
+    const bobOffset = Math.sin(this.age / 10.0 + this.hoverStart) * 0.1 + 0.1;
+    group.position.set(x, y + bobOffset, z);
   }
 
-  /**
-   * Run once per 20Hz authoritative game tick.
-   * Performs exact gravity, world-collision, friction, and age updates.
-   */
-  public tick(): void {
-    if (this.isDead) return;
+  protected override disposeRender(): void {
+    const group = this.group;
+    if (group === null) {
+      return;
+    }
+    group.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (
+          child.material instanceof THREE.Material &&
+          child.material !== this.ctx.heldBlockMaterial &&
+          child.material !== this.ctx.itemHeldMaterial
+        ) {
+          child.material.dispose();
+        }
+      }
+    });
+    this.group = null;
+  }
 
-    // Decrement delay cooldown
+  public override onRestore(ctx: EntityWorldContext): void {
+    this.ctx = ctx;
+    this.buildRender();
+  }
+
+  // ---- Simulation --------------------------------------------------------
+
+  public onTick(ctx: EntityTickContext): void {
     if (this.delayBeforeCanPickup > 0) {
       this.delayBeforeCanPickup--;
     }
 
-    // Gravity per tick: motionY -= 0.04
+    // Gravity + terminal clamp (preserves current behaviour).
     this.velocity.y -= 0.04;
-
-    // Maximum terminal velocity fall check
-    if (this.velocity.y < -1.0) {
-      this.velocity.y = -1.0;
+    if (this.velocity.y < TERMINAL_VELOCITY) {
+      this.velocity.y = TERMINAL_VELOCITY;
     }
 
-    // Resolve vertical/horizontal collision resolution
-    this.moveAndCollide();
+    // Shared metadata-aware collision mover (sets onGround, zeroes blocked axes).
+    ctx.world.physics.move(this);
 
-    // Ground slipperiness / drag multiplication per tick
+    // Drag / ground friction (Beta: air 0.98; ground slipperiness×0.98).
     let friction = 0.98;
     if (this.onGround) {
-      // Default ground friction slipperiness is 0.6. Ice block is 0.98.
       let slipperiness = 0.6;
-      const bx = Math.floor(this.position.x);
-      const by = Math.floor(this.position.y - 0.1);
-      const bz = Math.floor(this.position.z);
-      const blockId = this.getBlockIdAt(bx, by, bz);
-      if (blockId === BlockIds.Ice) {
+      const belowId = ctx.world.blockUpdateWorld.getBlock(
+        Math.floor(this.position.x),
+        Math.floor(this.position.y - 0.1),
+        Math.floor(this.position.z),
+      );
+      if (belowId === BlockIds.Ice) {
         slipperiness = 0.98;
       }
-      friction = slipperiness * 0.98; // = 0.588 on standard blocks
+      friction = slipperiness * 0.98;
     }
-
     this.velocity.x *= friction;
     this.velocity.z *= friction;
-    this.velocity.y *= 0.98; // vertical air drag
+    this.velocity.y *= 0.98;
 
-    // Ground bounce
     if (this.onGround) {
       this.velocity.y *= -0.5;
     }
 
-    // Update simulation lifetime age
     this.age++;
-    if (this.age >= 6000) { // 5 minutes despawn time
-      this.isDead = true;
-      this.cleanup();
+    if (this.age >= DESPAWN_AGE) {
+      this.markRemoved();
     }
-  }
-
-  /**
-   * Continuous rotation and bobbing calculations for smooth rendering between simulation updates.
-   */
-  public updateVisuals(): void {
-    if (this.isDead) return;
-
-    // 1. Smooth rotation: Y-rotation angle in radians is (age / 20.0) + hoverStart
-    const rotationAngle = (this.age / 20.0) + this.hoverStart;
-    this.group.rotation.y = rotationAngle;
-
-    // 2. Smooth bobbing: Y hover offset is sin(age / 10.0 + hoverStart) * 0.1 + 0.1
-    const bobOffset = Math.sin(this.age / 10.0 + this.hoverStart) * 0.1 + 0.1;
-    this.group.position.set(
-      this.position.x,
-      this.position.y + bobOffset,
-      this.position.z
-    );
-  }
-
-  private moveAndCollide(): void {
-    const delta = {
-      x: this.velocity.x,
-      y: this.velocity.y,
-      z: this.velocity.z,
-    };
-
-    let grounded = false;
-
-    // Resolve collision order: Y, then X, then Z
-    const order: ('x' | 'y' | 'z')[] = ['y', 'x', 'z'];
-    for (const axis of order) {
-      const box = this.getAABB();
-      const resolved = this.resolveAxis(box, axis, delta[axis]);
-
-      if (axis === 'x') {
-        this.position.x += resolved;
-        if (resolved !== delta.x) {
-          this.velocity.x = 0;
-        }
-      } else if (axis === 'z') {
-        this.position.z += resolved;
-        if (resolved !== delta.z) {
-          this.velocity.z = 0;
-        }
-      } else {
-        this.position.y += resolved;
-        if (resolved !== delta.y) {
-          if (delta.y < 0) {
-            grounded = true;
-          }
-          this.velocity.y = 0;
-        }
-      }
-    }
-
-    this.onGround = grounded;
-  }
-
-  private resolveAxis(box: AABB, axis: 'x' | 'y' | 'z', distance: number): number {
-    if (distance === 0) return 0;
-
-    const movingPositive = distance > 0;
-    const sweptBox = this.sweptBoxAlongAxis(box, axis, distance);
-    const blockRange = this.blockRangeCoveringBox(sweptBox);
-
-    let allowedDistance = distance;
-
-    for (let bx = blockRange.minX; bx <= blockRange.maxX; bx++) {
-      for (let by = blockRange.minY; by <= blockRange.maxY; by++) {
-        for (let bz = blockRange.minZ; bz <= blockRange.maxZ; bz++) {
-          if (!this.isSolidBlock(bx, by, bz)) {
-            continue;
-          }
-
-          const blockBox = new AABB(bx, by, bz, bx + 1, by + 1, bz + 1);
-
-          if (!this.overlapsOnOtherAxes(box, blockBox, axis)) {
-            continue;
-          }
-
-          const limited = this.limitDistance(box, blockBox, axis, movingPositive);
-          if (movingPositive) {
-            allowedDistance = Math.min(allowedDistance, Math.max(0, limited));
-          } else {
-            allowedDistance = Math.max(allowedDistance, Math.min(0, limited));
-          }
-        }
-      }
-    }
-
-    return allowedDistance;
-  }
-
-  private isSolidBlock(worldX: number, worldY: number, worldZ: number): boolean {
-    if (worldY < 0 || worldY >= 128) return false;
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(worldX, worldZ);
-    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    if (chunk === undefined) return false; // Unloaded chunks are treat as non-solid
-
-    const blockId = chunk.getBlock(localX, worldY, localZ);
-    const definition = this.blockRegistry.getById(blockId);
-    return definition !== undefined && definition.solid;
-  }
-
-  private getBlockIdAt(worldX: number, worldY: number, worldZ: number): number {
-    if (worldY < 0 || worldY >= 128) return 0;
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(worldX, worldZ);
-    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    return chunk?.getBlock(localX, worldY, localZ) ?? 0;
-  }
-
-  private overlapsOnOtherAxes(box: AABB, blockBox: AABB, axis: 'x' | 'y' | 'z'): boolean {
-    const xOverlap = axis === 'x' || (box.minX < blockBox.maxX && box.maxX > blockBox.minX);
-    const yOverlap = axis === 'y' || (box.minY < blockBox.maxY && box.maxY > blockBox.minY);
-    const zOverlap = axis === 'z' || (box.minZ < blockBox.maxZ && box.maxZ > blockBox.minZ);
-    return xOverlap && yOverlap && zOverlap;
-  }
-
-  private limitDistance(box: AABB, blockBox: AABB, axis: 'x' | 'y' | 'z', movingPositive: boolean): number {
-    if (axis === 'x') {
-      return movingPositive ? blockBox.minX - box.maxX - COLLISION_EPSILON : blockBox.maxX - box.minX + COLLISION_EPSILON;
-    }
-    if (axis === 'y') {
-      return movingPositive ? blockBox.minY - box.maxY - COLLISION_EPSILON : blockBox.maxY - box.minY + COLLISION_EPSILON;
-    }
-    return movingPositive ? blockBox.minZ - box.maxZ - COLLISION_EPSILON : blockBox.maxZ - box.minZ + COLLISION_EPSILON;
-  }
-
-  private sweptBoxAlongAxis(box: AABB, axis: 'x' | 'y' | 'z', distance: number): AABB {
-    const dx = axis === 'x' ? distance : 0;
-    const dy = axis === 'y' ? distance : 0;
-    const dz = axis === 'z' ? distance : 0;
-    const moved = box.translated(dx, dy, dz);
-    return new AABB(
-      Math.min(box.minX, moved.minX),
-      Math.min(box.minY, moved.minY),
-      Math.min(box.minZ, moved.minZ),
-      Math.max(box.maxX, moved.maxX),
-      Math.max(box.maxY, moved.maxY),
-      Math.max(box.maxZ, moved.maxZ)
-    );
-  }
-
-  private blockRangeCoveringBox(box: AABB) {
-    return {
-      minX: Math.floor(box.minX),
-      maxX: Math.ceil(box.maxX) - 1,
-      minY: Math.floor(box.minY),
-      maxY: Math.ceil(box.maxY) - 1,
-      minZ: Math.floor(box.minZ),
-      maxZ: Math.ceil(box.maxZ) - 1,
-    };
   }
 
   private createOpposedQuadsGeometry(
     u0: number, v0: number, u1: number, v1: number,
-    r = 1.0, g = 1.0, b = 1.0, isMissing = false
+    r = 1.0, g = 1.0, b = 1.0,
   ): THREE.BufferGeometry {
     const geom = new THREE.BufferGeometry();
-    const half = 0.2; // Miniature size
-    
-    // 8 vertices: 4 for front quad, 4 for back quad
-    const positions = new Float32Array([
-      // Front quad
-      -half,  half,  0.001,
-       half,  half,  0.001,
-      -half, -half,  0.001,
-       half, -half,  0.001,
+    const half = 0.2;
 
-      // Back quad (offset slightly backward)
-      -half,  half, -0.001,
-       half,  half, -0.001,
+    const positions = new Float32Array([
+      -half, half, 0.001,
+      half, half, 0.001,
+      -half, -half, 0.001,
+      half, -half, 0.001,
+      -half, half, -0.001,
+      half, half, -0.001,
       -half, -half, -0.001,
-       half, -half, -0.001,
+      half, -half, -0.001,
     ]);
 
     const uvs = new Float32Array([
-      // Front face standard UVs
       u0, v0,
       u1, v0,
       u0, v1,
       u1, v1,
-
-      // Back face horizontally-flipped UVs so they render unmirrored from behind
       u1, v0,
       u0, v0,
       u1, v1,
@@ -440,23 +293,17 @@ export class DroppedItemEntity {
     ]);
 
     const colors = new Float32Array(24);
-    const finalR = isMissing ? 1.0 : r;
-    const finalG = isMissing ? 0.0 : g;
-    const finalB = isMissing ? 1.0 : b;
     for (let i = 0; i < 8; i++) {
-      colors[i * 3 + 0] = finalR;
-      colors[i * 3 + 1] = finalG;
-      colors[i * 3 + 2] = finalB;
+      colors[i * 3 + 0] = r;
+      colors[i * 3 + 1] = g;
+      colors[i * 3 + 2] = b;
     }
 
     const indices = [
-      // Front face (Counter-clockwise winding)
       0, 2, 1,
       1, 2, 3,
-
-      // Back face (Clockwise winding from front, but counter-clockwise from back)
       5, 6, 4,
-      7, 6, 5
+      7, 6, 5,
     ];
 
     geom.setIndex(indices);
@@ -467,15 +314,82 @@ export class DroppedItemEntity {
     return geom;
   }
 
-  public cleanup(): void {
-    this.group.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (child.material instanceof THREE.Material && child.material !== this.heldBlockMaterial && child.material !== this.itemHeldMaterial) {
-          child.material.dispose();
-        }
+  // ---- Serialisation (type-specific) -------------------------------------
+
+  protected writeEntityNbt(map: Map<string, NbtTag>): void {
+    map.set('Health', nbt.short(this.health));
+    map.set('PickupDelay', nbt.short(this.delayBeforeCanPickup));
+    map.set('HoverStart', nbt.float(this.hoverStart));
+    const item = new Map<string, NbtTag>();
+    item.set('Type', nbt.string(this.drop.type));
+    item.set('Id', nbt.string(String(this.drop.id)));
+    item.set('Count', nbt.int(this.drop.count));
+    item.set('Metadata', nbt.int(this.drop.metadata));
+    map.set('Item', nbt.compound(item));
+  }
+
+  protected readEntityNbt(data: NbtCompound): void {
+    const map = data.value;
+
+    const health = map.get('Health');
+    if (health?.type === 'short') {
+      this.health = health.value;
+    }
+
+    const delay = map.get('PickupDelay');
+    if (delay?.type === 'short') {
+      this.delayBeforeCanPickup = delay.value;
+    } else if (delay?.type === 'int') {
+      this.delayBeforeCanPickup = delay.value;
+    }
+
+    const hover = map.get('HoverStart');
+    if (hover?.type === 'float') {
+      this.hoverStart = hover.value;
+    }
+
+    const item = map.get('Item');
+    if (item?.type === 'compound') {
+      const parsed = DroppedItemEntity.parseDrop(item.value);
+      if (parsed !== undefined) {
+        this.drop = parsed;
+        this.rebuildVisualsForCount(parsed.count);
       }
-    });
-    this.group.removeFromParent();
+    }
+  }
+
+  private static parseDrop(map: ReadonlyMap<string, NbtTag>): Drop | undefined {
+    const type = map.get('Type');
+    const id = map.get('Id');
+    const count = map.get('Count');
+    const metadata = map.get('Metadata');
+    if (type?.type !== 'string' || id?.type !== 'string') {
+      return undefined;
+    }
+    if (type.value !== 'block' && type.value !== 'item') {
+      return undefined;
+    }
+    const dropId = type.value === 'block' ? Number(id.value) : id.value;
+    if (type.value === 'block' && !Number.isFinite(dropId as number)) {
+      return undefined;
+    }
+    return {
+      type: type.value,
+      id: dropId,
+      count: count?.type === 'int' ? count.value : (count?.type === 'short' ? count.value : 1),
+      metadata: metadata?.type === 'int' ? metadata.value : (metadata?.type === 'short' ? metadata.value : 0),
+    };
+  }
+
+  /** Factory used by the entity-type registry to load a saved item. */
+  public static deserialize(ctx: EntityWorldContext, data: NbtCompound): DroppedItemEntity | undefined {
+    const item = data.value.get('Item');
+    const drop = item?.type === 'compound' ? DroppedItemEntity.parseDrop(item.value) : undefined;
+    if (drop === undefined) {
+      return undefined;
+    }
+    const entity = new DroppedItemEntity(ctx, drop, 0, 0, 0, 10);
+    entity.readFromNbt(data);
+    return entity;
   }
 }

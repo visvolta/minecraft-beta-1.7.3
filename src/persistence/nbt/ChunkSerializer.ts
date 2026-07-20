@@ -3,7 +3,7 @@ import { nbt, type NbtCompound, type NbtTag } from './Nbt.ts';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../../world/chunkConstants.ts';
 
 export class ChunkSerializer {
-  public static encodeChunk(chunk: Chunk, lastUpdate: bigint): NbtCompound {
+  public static encodeChunk(chunk: Chunk, lastUpdate: bigint, entityTags: readonly NbtTag[] = []): NbtCompound {
     const blocks = new Uint8Array(32768);
     const metadata = new Uint8Array(16384);
     const skyLight = new Uint8Array(16384);
@@ -68,7 +68,7 @@ export class ChunkSerializer {
     levelMap.set('BlockLight', nbt.bytes(blockLight));
     levelMap.set('HeightMap', nbt.bytes(heightMap));
     levelMap.set('TerrainPopulated', nbt.byte(1));
-    levelMap.set('Entities', nbt.list('compound', []));
+    levelMap.set('Entities', nbt.list('compound', entityTags));
     levelMap.set('TileEntities', nbt.list('compound', []));
     levelMap.set('TileTicks', nbt.list('compound', scheduledTicksList));
 
@@ -161,5 +161,28 @@ export class ChunkSerializer {
 
     chunk.markClean();
     return chunk;
+  }
+
+  /**
+   * Extracts the raw entity records from a saved chunk compound. Returns an
+   * empty array when the chunk has no entities. The EntityManager turns these
+   * into live entities via its type registry; unknown types are skipped there.
+   */
+  public static decodeEntities(compound: NbtCompound): NbtCompound[] {
+    const levelTag = compound.value.get('Level');
+    if (levelTag?.type !== 'compound') {
+      return [];
+    }
+    const entitiesTag = levelTag.value.get('Entities');
+    if (entitiesTag?.type !== 'list' || entitiesTag.elementType !== 'compound') {
+      return [];
+    }
+    const out: NbtCompound[] = [];
+    for (const tag of entitiesTag.value) {
+      if (tag.type === 'compound') {
+        out.push(tag);
+      }
+    }
+    return out;
   }
 }

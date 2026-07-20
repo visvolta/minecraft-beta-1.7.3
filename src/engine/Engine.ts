@@ -16,6 +16,11 @@ import { BlockHighlight } from '../rendering/BlockHighlight';
 import { DestroyOverlayRenderer } from '../rendering/DestroyOverlayRenderer';
 import { ItemTextureAtlas } from '../assets/ItemTextureAtlas';
 import { ItemEntityManager } from '../entities/items/ItemEntityManager';
+import { EntityManager } from '../entities/core/EntityManager';
+import { createDefaultEntityTypeRegistry } from '../entities/core/EntityType';
+import { registerEntityTypes } from '../entities/registerEntityTypes';
+import { JavaRandom } from '../world/generation/random/JavaRandom';
+import { PigEntity } from '../entities/living/PigEntity';
 import { Inventory } from '../inventory/Inventory';
 import { InventorySerializer } from '../inventory/InventorySerializer';
 import { HotbarHudRenderer } from '../inventory/HotbarHudRenderer';
@@ -109,9 +114,6 @@ import { FirstPersonMotionController } from '../player/FirstPersonMotionControll
 import { CameraModeController, CameraMode } from '../camera/CameraModeController';
 import * as THREE from 'three';
 import { PlayerSkinManager } from '../player/PlayerSkinManager';
-import { resolveBlockTexture } from '../blocks/resolveBlockTexture';
-import { resolveBlockTint } from '../blocks/resolveBlockTint';
-import type { BlockId } from '../blocks/BlockId';
 import {
   FIRST_PERSON_HELD_BLOCK_X,
   FIRST_PERSON_HELD_BLOCK_Y,
@@ -180,6 +182,7 @@ export class Engine {
   private readonly destroyOverlayRenderer: DestroyOverlayRenderer;
   private readonly itemAtlas: ItemTextureAtlas;
   private readonly itemEntityManager: ItemEntityManager;
+  private readonly entityManager: EntityManager;
   private lastTotalTicks = 0;
   private readonly inventory: Inventory;
   private readonly hotbarHudRenderer: HotbarHudRenderer;
@@ -334,6 +337,40 @@ export class Engine {
     });
     attachEntityLighting(this.heldBlockMaterial);
 
+    this.itemHeldMaterial = new THREE.MeshBasicMaterial({
+      map: itemAtlas.texture,
+      transparent: true,
+      side: THREE.FrontSide,
+      alphaTest: 0.1,
+    });
+    attachEntityLighting(this.itemHeldMaterial);
+
+    // Shared entity foundation (single authoritative simulation owner, driven
+    // by the Engine's 20 Hz clock). Created early so specialised entity
+    // systems (falling blocks, items) can be wired against it.
+    const entityTypeRegistry = createDefaultEntityTypeRegistry();
+    registerEntityTypes(entityTypeRegistry);
+    this.entityManager = new EntityManager({
+      blockRegistry,
+      behaviourRegistry: this.blockBehaviourRegistry,
+      blockUpdateWorld: this.blockUpdateWorld,
+      chunkManager: this.chunkManager,
+      scene: this.renderer.scene,
+      blockAtlas: this.atlas,
+      itemAtlas: this.itemAtlas,
+      heldBlockMaterial: this.heldBlockMaterial,
+      itemHeldMaterial: this.itemHeldMaterial,
+      typeRegistry: entityTypeRegistry,
+      rng: new JavaRandom(worldSeed),
+    });
+
+    // Persist each chunk's owned entities on save and restore them on load.
+    this.chunkPersistenceQueue.setEntityHooks({
+      serializeChunkEntities: (cx, cz) => this.entityManager.serializeChunkEntities(cx, cz),
+      loadChunkEntities: (tags) => this.entityManager.loadChunkEntities(tags),
+      hasParkedEntities: (cx, cz) => this.entityManager.hasParkedEntities(cx, cz),
+    });
+
     this.playerModelUniforms = this.playerModel.material.userData.dynamicLightingUniforms as EntityLightingUniforms | undefined;
 
     // Dummy initial geometries
@@ -378,7 +415,7 @@ export class Engine {
     this.renderer.scene.add(this.playerModel.root);
 
     this.worldEventQueue = new WorldEventQueue();
-    this.fallingBlockManager = new FallingBlockManager(this.blockUpdateWorld, blockRegistry, this.chunkManager, this.renderer.scene, atlas, this.worldEventQueue);
+    this.fallingBlockManager = new FallingBlockManager(this.entityManager);
     registerFluidBehaviours(this.blockBehaviourRegistry);
     registerPlantBehaviours(this.blockBehaviourRegistry, blockRegistry);
     registerSupportBehaviours(this.blockBehaviourRegistry, blockRegistry);
@@ -457,25 +494,10 @@ export class Engine {
     InventorySerializer.deserialize(this.inventory, metadata.inventory);
     this.selectedSlot = metadata.selectedHotbarSlot ?? 0;
 
-    this.itemHeldMaterial = new THREE.MeshBasicMaterial({
-      map: itemAtlas.texture,
-      transparent: true,
-      side: THREE.FrontSide,
-      alphaTest: 0.1,
-    });
-    attachEntityLighting(this.itemHeldMaterial);
-
     this.itemEntityManager = new ItemEntityManager(
-      this.renderer.scene,
-      this.chunkManager,
-      blockRegistry,
-      this.blockUpdateWorld,
-      this.atlas,
-      this.itemAtlas,
-      this.buildHeldBlockGeometry.bind(this),
-      this.heldBlockMaterial,
-      this.itemHeldMaterial,
+      this.entityManager,
       this.inventory,
+      blockRegistry,
     );
     this.lastTotalTicks = this.worldTime.getTotalTicks();
 
@@ -789,13 +811,20 @@ export class Engine {
     const validationHarness = new WorkerValidationHarness(worldSeed, this.atlas);
     (window as unknown as { __mcDebug?: Record<string, unknown> }).__mcDebug = {
       saveWorldMetadata: () => this.saveMetadata(true),
-      // Compatibility alias: metadata only; blocks, chunks, inventory, and entities are not persisted.
+      // Compatibility alias: persists metadata + dirty chunks (chunks now carry
+      // their owned entities via the EntityManager persistence hooks).
       saveWorld: () => this.saveMetadata(true),
       getSaveMetrics: () => this.saveCoordinator.getMetrics(),
       inspectWorldMetadata: () => this.saveCoordinator.getMetadata(),
       isWorldDirty: () => this.saveCoordinator.isDirty(),
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
       validateMeshWorkers: () => validationHarness.validateMeshWorker(),
+      spawnPig: () => this.spawnDebugPig(),
+      getEntityMetrics: () => ({
+        active: this.entityManager.activeCount,
+        parked: this.entityManager.parkedCount,
+        tick: this.entityManager.currentTick,
+      }),
       getTickMetrics: () => this.worldTickScheduler.getMetrics(),
       getFallingBlockMetrics: () => ({
         simulationTick: this.fallingBlockManager.getSimulationTick(),
@@ -999,7 +1028,7 @@ export class Engine {
     this.furnaceManager.clear();
     this.contextMenuSuppressor.dispose();
     this.heldItemRenderer.dispose();
-    this.itemEntityManager.cleanup();
+    this.entityManager.dispose();
     this.chunkStreamer.dispose();
     this.fallingBlockManager.dispose();
     this.lightningRenderer.dispose();
@@ -1108,6 +1137,18 @@ export class Engine {
       this.weatherController.forceMode('thunder');
     }
 
+    // Stage 1 entity validation: spawn a pig in front of the player (no modal open).
+    if (
+      this.input.isKeyJustPressed('KeyP') &&
+      !this.inventoryController.isOpen &&
+      !this.craftingTableController.isOpen &&
+      !this.furnaceController.isOpen &&
+      !this.chestController.isOpen &&
+      !this.signController.isOpen
+    ) {
+      this.spawnDebugPig();
+    }
+
     // Basic time controls.
     if (this.input.isKeyJustPressed('ArrowLeft')) {
       this.worldTime.addTicks(-1000);
@@ -1132,7 +1173,10 @@ export class Engine {
     const elapsedTicks = currentTicks - prevTicks;
     if (elapsedTicks > 0) {
       for (let i = 0; i < elapsedTicks; i++) {
-        this.itemEntityManager.tick(this.player);
+        // Single authoritative 20 Hz simulation clock: the Engine advances all
+        // entities, then the item-pickup pass (which needs the player).
+        this.entityManager.tick();
+        this.itemEntityManager.tickPickups(this.player);
       }
     }
     const now = performance.now();
@@ -1141,7 +1185,6 @@ export class Engine {
       void this.saveMetadata(false);
     }
     this.worldTickScheduler.update(deltaSeconds);
-    this.fallingBlockManager.update(deltaSeconds);
     this.chestManager.update();
     this.chestRenderer.update(deltaSeconds);
     this.signTextRenderer.update();
@@ -1460,7 +1503,10 @@ export class Engine {
     this.destroyOverlayRenderer.update(activeMiningPos, progress);
 
     // Update dropped item visuals (rotation and bobbing)
-    this.itemEntityManager.updateVisuals();
+    // Interpolate entity transforms between the last two simulation ticks
+    // using the authoritative world clock's fractional tick as alpha.
+    const totalTicksForAlpha = this.worldTime.getTotalTicks();
+    this.entityManager.render(totalTicksForAlpha - Math.floor(totalTicksForAlpha));
 
     // 14. Update debug overlay stats. Frame timing is recorded every
     // frame (so FPS smoothing stays accurate even while the overlay is
@@ -1683,49 +1729,18 @@ export class Engine {
     return geom;
   }
 
-  private buildHeldBlockGeometry(blockId: BlockId): THREE.BufferGeometry {
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const def = this.blockRegistry.getById(blockId);
-    if (!def) return geometry;
-
-    const uvs = new Float32Array(48);
-    const colors = new Float32Array(72); // 24 vertices * 3 channels
-
-    const faces = [
-      { slot: 'side', f: 0 },   // +X (Right)
-      { slot: 'side', f: 1 },   // -X (Left)
-      { slot: 'top', f: 2 },    // +Y (Top)
-      { slot: 'bottom', f: 3 }, // -Y (Bottom)
-      { slot: 'side', f: 4 },   // +Z (Front)
-      { slot: 'side', f: 5 },   // -Z (Back)
-    ] as const;
-
-    for (const { slot, f } of faces) {
-      const texName = resolveBlockTexture(def, slot) || 'stone';
-      const uvRect = this.atlas.getUvRect(texName) || { u0: 0, v0: 0, u1: 1, v1: 1 };
-      const tint = resolveBlockTint(def, slot);
-
-      const offsetUv = f * 8;
-      uvs[offsetUv + 0] = uvRect.u0;
-      uvs[offsetUv + 1] = uvRect.v0;
-      uvs[offsetUv + 2] = uvRect.u1;
-      uvs[offsetUv + 3] = uvRect.v0;
-      uvs[offsetUv + 4] = uvRect.u0;
-      uvs[offsetUv + 5] = uvRect.v1;
-      uvs[offsetUv + 6] = uvRect.u1;
-      uvs[offsetUv + 7] = uvRect.v1;
-
-      const offsetCol = f * 12;
-      for (let v = 0; v < 4; v++) {
-        colors[offsetCol + v * 3 + 0] = tint[0];
-        colors[offsetCol + v * 3 + 1] = tint[1];
-        colors[offsetCol + v * 3 + 2] = tint[2];
-      }
-    }
-
-    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    return geometry;
+  /** Spawns a validation pig a couple of blocks in front of the player. */
+  private spawnDebugPig(): void {
+    const yawRad = (this.cameraController.getYaw() * Math.PI) / 180;
+    const forwardX = -Math.sin(yawRad);
+    const forwardZ = Math.cos(yawRad);
+    const x = this.player.position.x + forwardX * 2;
+    const z = this.player.position.z + forwardZ * 2;
+    const y = this.player.position.y + 0.5;
+    const pig = new PigEntity(this.entityManager.context, x, y, z);
+    pig.yaw = this.cameraController.getYaw();
+    this.entityManager.add(pig);
+    console.log(`[Debug] Spawned pig at (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)})`);
   }
 
 }
