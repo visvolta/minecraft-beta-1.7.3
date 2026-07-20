@@ -115,7 +115,15 @@ export function registerDefaultRecipes(
 
   tryRegisterShaped('wood_slab', 3, 1, [
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }
+  ], new ItemStack(BlockIds.Slab, 'block', 3, 2), false);
+
+  tryRegisterShaped('stone_slab', 3, 1, [
+    { id: BlockIds.Stone, metadata: -1 }, { id: BlockIds.Stone, metadata: -1 }, { id: BlockIds.Stone, metadata: -1 }
   ], new ItemStack(BlockIds.Slab, 'block', 3, 0), false);
+
+  tryRegisterShaped('cobblestone_slab', 3, 1, [
+    { id: BlockIds.Cobblestone, metadata: -1 }, { id: BlockIds.Cobblestone, metadata: -1 }, { id: BlockIds.Cobblestone, metadata: -1 }
+  ], new ItemStack(BlockIds.Slab, 'block', 3, 3), false);
 
   tryRegisterShaped('wood_door', 2, 3, [
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 },
@@ -154,9 +162,8 @@ export function registerDefaultRecipes(
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }
   ], new ItemStack(BlockIds.WoodPressurePlate, 'block', 1, 0), false);
 
-  tryRegisterShaped('stone_button', 1, 2, [
-    { id: BlockIds.Stone, metadata: -1 },
-    { id: BlockIds.Stone, metadata: -1 }
+  tryRegisterShaped('stone_button', 1, 1, [
+    { id: BlockIds.Cobblestone, metadata: -1 }
   ], new ItemStack(BlockIds.StoneButton, 'block', 1, 0), false);
 
   tryRegisterShaped('lever', 1, 2, [

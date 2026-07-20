@@ -14,6 +14,7 @@ export interface SetBlockOptions {
   readonly reason?: BlockUpdateReason;
   readonly notifyNeighbours?: boolean;
   readonly updateLighting?: boolean;
+  readonly player?: any;
 }
 
 export interface NeighbourNotification {
@@ -160,6 +161,7 @@ export class BlockUpdateWorld {
         gameTick,
         nextInt: this.getNextInt,
         events: this.eventQueue,
+        player: options.player,
       } as any;
 
       if (previousBlockId !== 0 && previousBlockId !== blockId) {

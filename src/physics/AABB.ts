@@ -8,14 +8,28 @@
 import type { FaceNormal } from '../world/Raycaster';
 
 export class AABB {
+  public minX: number;
+  public minY: number;
+  public minZ: number;
+  public maxX: number;
+  public maxY: number;
+  public maxZ: number;
+
   public constructor(
-    public minX: number,
-    public minY: number,
-    public minZ: number,
-    public maxX: number,
-    public maxY: number,
-    public maxZ: number,
-  ) {}
+    minX: number,
+    minY: number,
+    minZ: number,
+    maxX: number,
+    maxY: number,
+    maxZ: number,
+  ) {
+    this.minX = Math.min(minX, maxX);
+    this.minY = Math.min(minY, maxY);
+    this.minZ = Math.min(minZ, maxZ);
+    this.maxX = Math.max(minX, maxX);
+    this.maxY = Math.max(minY, maxY);
+    this.maxZ = Math.max(minZ, maxZ);
+  }
 
   public intersectRay(
     originX: number, originY: number, originZ: number,
@@ -239,12 +253,12 @@ export class AABB {
    * Matches Beta's AxisAlignedBB.setBB().
    */
   public setBounds(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): this {
-    this.minX = minX;
-    this.minY = minY;
-    this.minZ = minZ;
-    this.maxX = maxX;
-    this.maxY = maxY;
-    this.maxZ = maxZ;
+    this.minX = Math.min(minX, maxX);
+    this.minY = Math.min(minY, maxY);
+    this.minZ = Math.min(minZ, maxZ);
+    this.maxX = Math.max(minX, maxX);
+    this.maxY = Math.max(minY, maxY);
+    this.maxZ = Math.max(minZ, maxZ);
     return this;
   }
 }

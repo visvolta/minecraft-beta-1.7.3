@@ -52,22 +52,21 @@ export class SignTextRenderer {
     this.removeMesh(c.getPosKey());
 
     const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128; // Text area resolution
+    canvas.width = 256;
+    canvas.height = 128; // Text area resolution (2:1 aspect ratio matches wooden board exactly)
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     ctx.fillStyle = 'rgba(0,0,0,0)';
-    ctx.fillRect(0, 0, 128, 128);
+    ctx.fillRect(0, 0, 256, 128);
 
-    ctx.fillStyle = '#000';
-    // Match Beta font somewhat
-    ctx.font = '16px monospace';
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold 20px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
 
     for (let i = 0; i < 4; i++) {
-      ctx.fillText(c.lines[i] || '', 64, 20 + i * 20);
+      ctx.fillText(c.lines[i] || '', 128, 22 + i * 22);
     }
 
     const texture = new THREE.CanvasTexture(canvas);

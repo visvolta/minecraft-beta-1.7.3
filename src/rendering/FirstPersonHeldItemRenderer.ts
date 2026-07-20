@@ -65,7 +65,7 @@ export class FirstPersonHeldItemRenderer {
     if (d.kind === 'block') {
       const def = this.blocks.getById(s.identity.id);
       if (!def) return false;
-      this.mesh = new THREE.Mesh(IsolatedBlockModelBuilder.build(def, this.atlas), this.blockMat);
+      this.mesh = new THREE.Mesh(IsolatedBlockModelBuilder.build(def, this.atlas, s.metadata), this.blockMat);
       this.mesh.userData.block = true;
     } else {
       const iconUrl = this.icons.resolve(String(s.identity.id));

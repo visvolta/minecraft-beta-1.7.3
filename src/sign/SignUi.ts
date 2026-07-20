@@ -31,7 +31,11 @@ export class SignUi {
     this.windowEl.className = 'sign-window';
     this.windowEl.style.width = '300px';
     this.windowEl.style.height = '150px';
-    this.windowEl.style.background = '#8B6B4A'; // Wood color approx
+    this.windowEl.style.backgroundImage = "url('/textures/blocks/planks_oak.png')";
+    this.windowEl.style.backgroundSize = "64px 64px";
+    this.windowEl.style.imageRendering = "pixelated";
+    this.windowEl.style.backgroundColor = "rgba(200, 180, 150, 1)";
+    this.windowEl.style.backgroundBlendMode = "multiply";
     this.windowEl.style.border = '4px solid #5A4027';
     this.windowEl.style.display = 'flex';
     this.windowEl.style.flexDirection = 'column';

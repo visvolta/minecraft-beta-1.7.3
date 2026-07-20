@@ -18,7 +18,7 @@ export class SlotContentRenderer {
   public getIconUrl(stack: ItemStack): string {
     const category = classifyItemRender(stack.identity, this.blockRegistry);
     if (isBlock3dCategory(category)) {
-      return this.blockIcons.icon(stack.identity.id as number) || ItemIconResolver.missing();
+      return this.blockIcons.icon(stack.identity.id as number, stack.metadata) || ItemIconResolver.missing();
     }
     return this.itemIcons.resolve(String(stack.identity.id));
   }

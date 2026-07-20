@@ -77,21 +77,36 @@ export function classifyItemRender(
 
   // Beta 1.7.3 precise render classification:
   if (
+    def.id === BlockIds.WoodDoor ||
+    def.id === BlockIds.IronDoor ||
+    def.id === BlockIds.SignPost ||
+    def.id === BlockIds.WallSign ||
+    def.id === BlockIds.Ladder ||
+    def.id === BlockIds.Torch ||
+    def.id === BlockIds.RedstoneTorch ||
     def.renderType === 'cross' ||
     def.renderType === 'cactus' ||
     def.renderType === 'snow' ||
-    def.id === BlockIds.Torch ||
-    def.id === BlockIds.RedstoneTorch ||
-    def.id === BlockIds.Ladder ||
-    def.id === BlockIds.WoodDoor ||
-    def.id === BlockIds.SignPost ||
-    def.id === BlockIds.WallSign ||
-    def.id === BlockIds.StoneButton ||
-    def.id === BlockIds.Lever ||
-    def.id === BlockIds.StonePressurePlate ||
     def.id === 66 || // Rail
     def.id === 27 || // PoweredRail
-    def.id === 28 || // DetectorRail
+    def.id === 28    // DetectorRail
+  ) {
+    return 'flatItem';
+  }
+
+  if (
+    def.id === BlockIds.Slab ||
+    def.id === BlockIds.DoubleSlab ||
+    def.id === BlockIds.Trapdoor ||
+    def.id === BlockIds.WoodPressurePlate ||
+    def.id === BlockIds.StonePressurePlate ||
+    def.id === BlockIds.StoneButton ||
+    def.id === BlockIds.Lever
+  ) {
+    return 'block3d';
+  }
+
+  if (
     (!def.solid && def.renderType !== 'ice')
   ) {
     return 'flatItem';

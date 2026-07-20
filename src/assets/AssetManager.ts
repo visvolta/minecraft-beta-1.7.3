@@ -35,6 +35,16 @@ export class AssetManager {
     // Not referenced by any block definition directly.
     textureNames.add('grass_side_snowed');
 
+    // Required Slab base material textures (Stone and Sandstone)
+    textureNames.add('stone_slab_top');
+    textureNames.add('stone_slab_side');
+    textureNames.add('sandstone_top');
+    textureNames.add('sandstone_normal');
+
+    // Required Door upper-half textures
+    textureNames.add('door_wood_upper');
+    textureNames.add('door_iron_upper');
+
     // Add destruction stage textures to the atlas.
     for (let i = 0; i < 10; i++) {
       textureNames.add(`destroy_stage_${i}`);

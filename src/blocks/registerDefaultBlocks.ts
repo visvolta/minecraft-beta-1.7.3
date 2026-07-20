@@ -633,6 +633,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   // Wooden slab: non-full block (half height). blocksWeather: false.
   registerSimple(BlockIds.Slab, 'wood_slab', 'Oak Wood Slab', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
 
+  // Double wooden slab: full block, solid.
+  registerSimple(BlockIds.DoubleSlab, 'double_slab', 'Double Wood Slab', { all: 'planks_oak' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+
   // Post-process blocks to apply authentic Beta 1.7.3 hardness and harvestableByHand properties
   const hardnessMap: Record<number, number> = {
     [BlockIds.Air]: 0.0,
@@ -711,6 +714,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Fence]: 2.0,
     [BlockIds.WoodStairs]: 2.0,
     [BlockIds.Slab]: 2.0,
+    [BlockIds.DoubleSlab]: 2.0,
   };
 
   const handHarvestableMap: Record<number, boolean> = {

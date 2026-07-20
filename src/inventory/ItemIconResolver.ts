@@ -12,6 +12,8 @@ const ITEM_ALIASES: Record<string, string> = {
   '68': 'sign',
   'sign_post': 'sign',
   'wall_sign': 'sign',
+  '65': 'ladder',
+  'ladder': 'ladder',
   // Reeds / Sugar cane
   '83': 'reeds',
   'reed': 'reeds',
@@ -93,9 +95,6 @@ const BLOCK_TEXTURE_FALLBACKS: Record<string, string> = {
   'brown_mushroom': '/textures/blocks/mushroom_brown.png',
   '40': '/textures/blocks/mushroom_red.png',
   'red_mushroom': '/textures/blocks/mushroom_red.png',
-  // Ladder
-  '65': '/textures/blocks/ladder.png',
-  'ladder': '/textures/blocks/ladder.png',
   // Levers / Buttons / Plates
   '69': '/textures/blocks/lever.png',
   'lever': '/textures/blocks/lever.png',

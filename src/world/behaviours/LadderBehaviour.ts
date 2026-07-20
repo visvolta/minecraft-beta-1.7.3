@@ -15,6 +15,9 @@ export class LadderBehaviour implements BlockBehaviour {
   }
 
   public onPlaced(ctx: BlockBehaviourContext, x: number, y: number, z: number, _blockId: BlockId): void {
+    const metaAlreadySet = ctx.world.getBlockMetadata(x, y, z);
+    if (metaAlreadySet !== 0) return;
+
     const player = (ctx as any).player;
     if (!player) return;
 

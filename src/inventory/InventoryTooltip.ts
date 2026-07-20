@@ -30,11 +30,11 @@ export class InventoryTooltip {
 
     this.root.textContent = text;
     this.root.style.display = 'block';
-    this.root.style.fontSize = `${12 * scale}px`;
-    this.root.style.padding = `${4 * scale}px ${6 * scale}px`;
+    this.root.style.fontSize = `${10 * scale}px`;
+    this.root.style.padding = `${3 * scale}px ${5 * scale}px`;
 
-    let left = x + 14 * scale;
-    let top = y - 16 * scale;
+    let left = x + 10 * scale;
+    let top = y - 12 * scale;
 
     const rect = this.root.getBoundingClientRect();
     const winWidth = typeof window !== 'undefined' ? window.innerWidth : 1000;

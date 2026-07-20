@@ -80,7 +80,7 @@ export function registerDefaultSmeltingAndFuels(
   // Wooden blocks (300 ticks = 15s = 1.5 items)
   tryRegisterFuel('planks', BlockIds.Planks, 300, -1);
   tryRegisterFuel('wood_stairs', BlockIds.WoodStairs, 300, -1);
-  tryRegisterFuel('wood_slab', BlockIds.WoodSlab, 300, -1);
+  tryRegisterFuel('wood_slab', BlockIds.Slab, 300, -1);
   tryRegisterFuel('fence', BlockIds.Fence, 300, -1);
   tryRegisterFuel('bookshelf', BlockIds.Bookshelf, 300, -1);
   tryRegisterFuel('chest', BlockIds.Chest, 300, -1);

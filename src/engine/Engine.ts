@@ -72,6 +72,7 @@ import { registerLadderBehaviour } from '../world/behaviours/LadderBehaviour';
 import { registerPressurePlateBehaviour } from '../world/behaviours/PressurePlateBehaviour';
 import { registerButtonBehaviour } from '../world/behaviours/ButtonBehaviour';
 import { registerLeverBehaviour } from '../world/behaviours/LeverBehaviour';
+import { SlabBehaviour } from '../world/behaviours/SlabBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
@@ -387,6 +388,7 @@ export class Engine {
     registerPressurePlateBehaviour(this.blockBehaviourRegistry);
     registerButtonBehaviour(this.blockBehaviourRegistry);
     registerLeverBehaviour(this.blockBehaviourRegistry);
+    this.blockBehaviourRegistry.register(BlockIds.Slab, new SlabBehaviour());
     // Fire needs WeatherController + ChunkManager for rain/sky-exposure checks.
     this.weatherController = new WeatherController(worldSeed);
     this.weatherController.restore(metadata.weather);
@@ -614,6 +616,11 @@ export class Engine {
     );
 
     this.interactionController.setBlockInteractionHandler((targetId, _x, _y, _z) => {
+      if (targetId === BlockIds.SignPost || targetId === BlockIds.WallSign) {
+        this.signController.open(_x, _y, _z);
+        return true;
+      }
+
       if (targetId === BlockIds.Chest) {
         if (!this.chestController.isOpen) {
           const container = this.chestManager.get(_x, _y, _z);
@@ -666,6 +673,12 @@ export class Engine {
         return true;
       }
       return false;
+    });
+
+    this.interactionController.setBlockPlacedHandler((blockId, x, y, z) => {
+      if (blockId === BlockIds.SignPost || blockId === BlockIds.WallSign) {
+        this.signController.open(x, y, z);
+      }
     });
 
     this.interactionController.breakingController.setOnBlockBrokenHandler((blockId, x, y, z) => {
@@ -1152,7 +1165,7 @@ export class Engine {
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
 
     // 4. Update camera look
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
       this.cameraController.update();
     }
 
@@ -1167,7 +1180,7 @@ export class Engine {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
-        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen) {
+        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
           this.playerController.update();
         } else {
           this.player.wishVelocity.x = 0;
@@ -1315,7 +1328,7 @@ export class Engine {
     );
 
     // 10. Update interaction (raycast targeting + break/place edits)
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
       this.interactionController.update(deltaSeconds);
     }
 

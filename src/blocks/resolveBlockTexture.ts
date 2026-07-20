@@ -14,9 +14,34 @@ export function resolveBlockTexture(
     return definition.textures.front ?? definition.textures.side ?? definition.textures.all;
   }
   if (face === 'back') {
-    return definition.textures.side ?? definition.textures.all; // no explicit back texture config usually, but could add it later
+    return definition.textures.side ?? definition.textures.all;
   }
   return definition.textures[face] ?? definition.textures.all;
+}
+
+/**
+ * Centralized slab variant texture resolver.
+ * Ensures consistent texture mappings for Stone, Sandstone, Wood, and Cobblestone slabs.
+ * Strict number checks prevent valid metadata 0 from falling back to wood.
+ */
+export function resolveSlabTexture(
+  slot: 'top' | 'bottom' | 'side',
+  metadata: number | undefined
+): string {
+  const meta = (metadata !== undefined && !Number.isNaN(metadata)) ? metadata : 0;
+  if (meta === 0) {
+    return slot === 'top' ? 'stone_slab_top' : 'stone_slab_side';
+  }
+  if (meta === 1) {
+    return (slot === 'top' || slot === 'bottom') ? 'sandstone_top' : 'sandstone_normal';
+  }
+  if (meta === 2) {
+    return 'planks_oak';
+  }
+  if (meta === 3) {
+    return 'cobblestone';
+  }
+  return 'stone_slab_top';
 }
 
 /**
@@ -28,9 +53,6 @@ export function getSemanticFace(dir: FaceDirection, metadata = 3): BlockFace {
   if (dir === FaceDirection.TOP) return 'top';
   if (dir === FaceDirection.BOTTOM) return 'bottom';
 
-  // For Crafting tables, which use metadata=0 usually, we hardcode its Beta appearance if needed,
-  // but usually it's front on North/South, side on East/West.
-  // Actually, we can treat metadata=0 as default South facing.
   const facing = metadata === 0 ? 3 : metadata;
 
   if (facing === 2) { // Facing North (-Z)

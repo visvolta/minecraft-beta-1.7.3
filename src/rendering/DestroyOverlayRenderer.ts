@@ -245,6 +245,7 @@ export class DestroyOverlayRenderer {
       }
 
       if (isFaceVisible) {
+        const meta = this.blockUpdateWorld.getBlockMetadata(blockPos.x, blockPos.y, blockPos.z);
         for (let i = 0; i < 4; i++) {
           const corner = face.corners[i]!;
           
@@ -252,17 +253,96 @@ export class DestroyOverlayRenderer {
           let cy = corner[1];
           let cz = corner[2];
 
-          if (renderType === 'snow') {
-            if (cy === 1.0) cy = 0.125;
-          } else if (renderType === 'cactus') {
-            if (face.nx !== 0) {
-              if (cx === 1.0) cx = 0.9375;
-              if (cx === 0.0) cx = 0.0625;
-            } else if (face.nz !== 0) {
-              if (cz === 1.0) cz = 0.9375;
-              if (cz === 0.0) cz = 0.0625;
+          // Determine bounding box based on custom block types (Beta 1.7.3)
+          let minX = 0, maxX = 1, minY = 0, maxY = 1, minZ = 0, maxZ = 1;
+
+          if (blockId === BlockIds.Slab) {
+            minY = 0; maxY = 0.5;
+          } else if (blockId === BlockIds.WoodDoor || blockId === BlockIds.IronDoor) {
+            const isUpper = (meta & 8) !== 0;
+            let baseMeta = meta;
+            if (isUpper) {
+              const lowerId = this.blockUpdateWorld.getBlock(blockPos.x, blockPos.y - 1, blockPos.z);
+              if (lowerId === blockId) {
+                baseMeta = this.blockUpdateWorld.getBlockMetadata(blockPos.x, blockPos.y - 1, blockPos.z);
+              }
             }
+            const state = (baseMeta & 4) === 0 ? (baseMeta - 1) & 3 : baseMeta & 3;
+            const thickness = 3 / 16;
+            if (state === 0) { minZ = 0; maxZ = thickness; }
+            else if (state === 1) { minX = 1 - thickness; maxX = 1; }
+            else if (state === 2) { minZ = 1 - thickness; maxZ = 1; }
+            else if (state === 3) { minX = 0; maxX = thickness; }
+          } else if (blockId === BlockIds.Trapdoor) {
+            const isOpened = (meta & 4) !== 0;
+            const attachMeta = meta & 3;
+            const thickness = 3 / 16;
+            maxY = thickness;
+            if (isOpened) {
+              if (attachMeta === 0) { minX = 0; maxX = thickness; minY = 0; maxY = 1; }
+              else if (attachMeta === 1) { minX = 1 - thickness; maxX = 1; minY = 0; maxY = 1; }
+              else if (attachMeta === 2) { minZ = 0; maxZ = thickness; minY = 0; maxY = 1; }
+              else if (attachMeta === 3) { minZ = 1 - thickness; maxZ = 1; minY = 0; maxY = 1; }
+            }
+          } else if (blockId === BlockIds.Ladder) {
+            const t = 2 / 16;
+            if (meta === 2) { minZ = 1 - t; maxZ = 1; }
+            else if (meta === 3) { minZ = 0; maxZ = t; }
+            else if (meta === 4) { minX = 1 - t; maxX = 1; }
+            else if (meta === 5) { minX = 0; maxX = t; }
+          } else if (blockId === BlockIds.WoodPressurePlate || blockId === BlockIds.StonePressurePlate) {
+            const pressed = meta === 1;
+            const thickness = pressed ? 1/16 : 2/16;
+            const padding = 1/16;
+            minX = padding; maxX = 1 - padding;
+            maxY = thickness;
+            minZ = padding; maxZ = 1 - padding;
+          } else if (blockId === BlockIds.StoneButton) {
+            const pressed = (meta & 8) !== 0;
+            const dir = meta & 7;
+            const depth = pressed ? 1/16 : 2/16;
+            const w = 6/16, h = 4/16;
+            minX = 0.5 - w/2; maxX = 0.5 + w/2;
+            minY = 0.5 - h/2; maxY = 0.5 + h/2;
+            minZ = 0.5 - w/2; maxZ = 0.5 + w/2;
+            if (dir === 1) { minX = 0; maxX = depth; }
+            else if (dir === 2) { minX = 1 - depth; maxX = 1; }
+            else if (dir === 3) { minZ = 0; maxZ = depth; }
+            else if (dir === 4) { minZ = 1 - depth; maxZ = 1; }
+          } else if (blockId === BlockIds.Lever) {
+            const dir = meta & 7;
+            const baseDepth = 3/16;
+            minX = 0.5 - 2/16; maxX = 0.5 + 2/16;
+            minY = 0.5 - 3/16; maxY = 0.5 + 3/16;
+            minZ = 0.5 - 2/16; maxZ = 0.5 + 2/16;
+            if (dir === 1) { minX = 0; maxX = baseDepth; }
+            else if (dir === 2) { minX = 1 - baseDepth; maxX = 1; }
+            else if (dir === 3) { minZ = 0; maxZ = baseDepth; }
+            else if (dir === 4) { minZ = 1 - baseDepth; maxZ = 1; }
+            else if (dir === 5 || dir === 6) { minY = 0; maxY = baseDepth; }
+          } else if (blockId === BlockIds.SignPost) {
+            const bw = 12/32, bh = 12/32, bd = 1/32;
+            minX = 0.5 - bw; maxX = 0.5 + bw;
+            minY = 8/16; maxY = 8/16 + bh;
+            minZ = 0.5 - bd; maxZ = 0.5 + bd;
+          } else if (blockId === BlockIds.WallSign) {
+            const bw = 12/32, bh = 12/32, bd = 2/32;
+            minX = 0.5 - bw; maxX = 0.5 + bw;
+            minY = 0.5 - bh/2; maxY = 0.5 + bh/2;
+            if (meta === 2) { minZ = 1 - bd; maxZ = 1; }
+            else if (meta === 3) { minZ = 0; maxZ = bd; }
+            else if (meta === 4) { minX = 1 - bd; maxX = 1; }
+            else if (meta === 5) { minX = 0; maxX = bd; }
+          } else if (renderType === 'snow') {
+            minY = 0; maxY = 0.125;
+          } else if (renderType === 'cactus') {
+            minX = 0.0625; maxX = 0.9375;
+            minZ = 0.0625; maxZ = 0.9375;
           }
+
+          cx = minX + (maxX - minX) * cx;
+          cy = minY + (maxY - minY) * cy;
+          cz = minZ + (maxZ - minZ) * cz;
 
           const px = cx + face.nx * SURFACE_OFFSET;
           const py = cy + face.ny * SURFACE_OFFSET;

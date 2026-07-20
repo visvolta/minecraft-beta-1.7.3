@@ -143,6 +143,7 @@ export const ITEM_TEXTURE_LIST: string[] = [
   "leather_helmet_overlay",
   "leather_leggings",
   "leather_leggings_overlay",
+  "ladder",
   "magma_cream",
   "map_empty",
   "map_filled",

@@ -19,8 +19,8 @@ export class BlockIconRenderer {
     this.camera.position.set(0, 0, 3);
   }
 
-  icon(id: number): string {
-    const key = String(id);
+  icon(id: number, metadata = 0): string {
+    const key = `${id}:${metadata}`;
     const cached = this.cache.get(key);
     if (cached) return cached;
 
@@ -32,7 +32,7 @@ export class BlockIconRenderer {
       return '';
     }
 
-    const mesh = new THREE.Mesh(IsolatedBlockModelBuilder.build(def, this.atlas), this.material);
+    const mesh = new THREE.Mesh(IsolatedBlockModelBuilder.build(def, this.atlas, metadata), this.material);
     mesh.rotation.set(Math.PI / 6, Math.PI / 4, 0);
     this.scene.add(mesh);
     this.renderer.setClearColor(0, 0);

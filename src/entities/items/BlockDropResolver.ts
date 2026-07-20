@@ -49,6 +49,9 @@ export function resolveBlockDrops(blockId: number, blockMetadata = 0): Drop[] {
       const lapisCount = 4 + Math.floor(Math.random() * 5);
       return [{ type: 'item', id: 'dye_powder_blue', count: lapisCount, metadata: 4 }];
 
+    case BlockIds.DoubleSlab:
+      return [{ type: 'block', id: BlockIds.Slab, count: 2, metadata: blockMetadata }];
+
     case BlockIds.WoodDoor:
       if ((blockMetadata & 8) !== 0) return []; // Upper half drops nothing
       return [{ type: 'item', id: 'door_wood', count: 1, metadata: 0 }];

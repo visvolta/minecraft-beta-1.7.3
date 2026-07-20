@@ -101,17 +101,18 @@ canvas {
 }
 
 .stage1-slot-content {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  max-width: 92%;
-  max-height: 92%;
+  position: relative;
+  width: 100%;
+  height: 100%;
   z-index: 4;
   pointer-events: none;
 }
 
 .stage1-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   width: calc(14px * var(--gui-scale, 1));
   height: calc(14px * var(--gui-scale, 1));
   object-fit: contain;
@@ -120,11 +121,16 @@ canvas {
 }
 
 .stage1-count {
+  position: absolute;
+  bottom: calc(1.5px * var(--gui-scale, 1));
+  right: calc(1.5px * var(--gui-scale, 1));
   color: #fff;
   font-family: 'Courier New', Courier, monospace;
   font-weight: bold;
-  font-size: calc(5px * var(--gui-scale, 1));
+  font-size: calc(4.2px * var(--gui-scale, 1));
+  line-height: 1;
   text-shadow: calc(1px * var(--gui-scale, 1)) calc(1px * var(--gui-scale, 1)) 0 #222;
-  margin-left: calc(1px * var(--gui-scale, 1));
+  margin: 0;
   white-space: nowrap;
+  z-index: 5;
 }
