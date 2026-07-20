@@ -1,7 +1,11 @@
+import { AIR_BLOCK_ID, CHUNK_SIZE_Y } from './chunkConstants';
 import type { BlockDefinition } from '../blocks/BlockDefinition';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { ChunkManager } from './ChunkManager';
-import { AIR_BLOCK_ID, CHUNK_SIZE_Y } from './chunkConstants';
+import type { BlockBehaviourRegistry } from './BlockBehaviour';
+import { getBlockBounds } from './BlockBehaviour';
+import type { BlockUpdateWorld } from './BlockUpdateWorld';
+import type { AABB } from '../physics/AABB';
 import { worldToChunkLocal } from './worldToChunkCoords';
 
 /** Unit axis-aligned face normal. Exactly one component is +/-1. */
@@ -28,6 +32,8 @@ export interface RaycastHit {
   readonly distance: number;
   /** Definition of the block that was hit (from the BlockRegistry). */
   readonly blockDefinition: BlockDefinition;
+  /** The specific AABB hit. */
+  readonly hitAabb: AABB;
 }
 
 /**
@@ -43,13 +49,12 @@ export interface RaycastHit {
  * not this class.
  */
 export class Raycaster {
-  private readonly chunkManager: ChunkManager;
-  private readonly blockRegistry: BlockRegistry;
-
-  public constructor(chunkManager: ChunkManager, blockRegistry: BlockRegistry) {
-    this.chunkManager = chunkManager;
-    this.blockRegistry = blockRegistry;
-  }
+  public constructor(
+    private readonly chunkManager: ChunkManager,
+    private readonly blockRegistry: BlockRegistry,
+    private readonly behaviourRegistry: BlockBehaviourRegistry,
+    private readonly blockUpdateWorld: BlockUpdateWorld
+  ) {}
 
   /**
    * Casts a ray from `origin` along `direction` (need not be normalized)
@@ -96,9 +101,11 @@ export class Raycaster {
     // distance 0 and no meaningful face normal from outside; in practice
     // the player's eye is never inside a solid block, so this is mostly
     // a defensive first check).
-    let lastFace: FaceNormal = { x: 0, y: 0, z: 0 };
     let travelled = 0;
-
+    
+    // Instead of strictly tracking voxel intersections dynamically from the DDA state
+    // we use DDA purely to find which voxels the ray passes through, 
+    // and for each non-air voxel we test Ray-AABB intersection explicitly.
     while (travelled <= maxDistance) {
       const blockId = this.getBlock(voxelX, voxelY, voxelZ);
 
@@ -106,12 +113,27 @@ export class Raycaster {
         const blockDefinition = this.blockRegistry.getById(blockId);
 
         if (blockDefinition !== undefined) {
-          return {
-            blockPos: { x: voxelX, y: voxelY, z: voxelZ },
-            face: lastFace,
-            distance: travelled,
-            blockDefinition,
-          };
+          const aabbs = getBlockBounds(this.blockRegistry, this.behaviourRegistry, this.blockUpdateWorld, voxelX, voxelY, voxelZ, 'interaction');
+          let bestHit: { distance: number, face: FaceNormal, hitAabb: AABB } | undefined = undefined;
+
+          for (const aabb of aabbs) {
+            const hit = aabb.intersectRay(origin.x, origin.y, origin.z, dirX, dirY, dirZ);
+            if (hit && hit.distance <= maxDistance) {
+              if (!bestHit || hit.distance < bestHit.distance) {
+                bestHit = { ...hit, hitAabb: aabb };
+              }
+            }
+          }
+
+          if (bestHit) {
+            return {
+              blockPos: { x: voxelX, y: voxelY, z: voxelZ },
+              face: bestHit.face,
+              distance: bestHit.distance,
+              blockDefinition,
+              hitAabb: bestHit.hitAabb,
+            };
+          }
         }
       }
 
@@ -120,17 +142,14 @@ export class Raycaster {
         voxelX += stepX;
         travelled = tMaxX;
         tMaxX += tDeltaX;
-        lastFace = { x: -stepX, y: 0, z: 0 };
       } else if (tMaxY < tMaxZ) {
         voxelY += stepY;
         travelled = tMaxY;
         tMaxY += tDeltaY;
-        lastFace = { x: 0, y: -stepY, z: 0 };
       } else {
         voxelZ += stepZ;
         travelled = tMaxZ;
         tMaxZ += tDeltaZ;
-        lastFace = { x: 0, y: 0, z: -stepZ };
       }
     }
 

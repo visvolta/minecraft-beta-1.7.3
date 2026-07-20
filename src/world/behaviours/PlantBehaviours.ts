@@ -1,6 +1,7 @@
 import { BlockIds } from '../../blocks/BlockId';
 import type { BlockId } from '../../blocks/BlockId';
 import type { BlockRegistry } from '../../blocks/BlockRegistry';
+import { AABB } from '../../physics/AABB';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
 import { TreeGenerator } from '../generation/trees/TreeGenerator';
 import { BigTreeGenerator } from '../generation/trees/BigTreeGenerator';
@@ -26,17 +27,17 @@ abstract class SupportedPlant implements BlockBehaviour {
 
   public constructor(protected readonly registry: BlockRegistry) {}
 
-  public abstract canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean;
+  public abstract canSurvive(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): boolean;
 
-  public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  public neighborChanged(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): void {
     this.removeIfUnsupported(ctx, x, y, z);
   }
 
-  public randomTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  public randomTick(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): void {
     this.removeIfUnsupported(ctx, x, y, z);
   }
 
-  protected removeIfUnsupported(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  protected removeIfUnsupported(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): void {
     if (!this.canSurvive(ctx, x, y, z)) {
       ctx.world.setBlock(x, y, z, BlockIds.Air, { reason: 'neighbour', notifyNeighbours: true, updateLighting: true });
     }
@@ -44,19 +45,19 @@ abstract class SupportedPlant implements BlockBehaviour {
 }
 
 class FlowerBehaviour extends SupportedPlant {
-  public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+  public canSurvive(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): boolean {
     const below = ctx.world.getBlock(x, y - 1, z);
     return isSoil(below) && ctx.world.getBlock(x, y, z) !== BlockIds.WaterFlowing && ctx.world.getBlock(x, y, z) !== BlockIds.WaterStill;
   }
 }
 
 class MushroomBehaviour extends SupportedPlant {
-  public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+  public canSurvive(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): boolean {
     const below = ctx.world.getBlock(x, y - 1, z);
     return isSolid(this.registry, below) && !isSoil(below) || isSoil(below);
   }
 
-  public randomTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  public randomTick(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): void {
     super.randomTick(ctx, x, y, z);
     if (ctx.world.getBlock(x, y, z) !== BlockIds.BrownMushroom && ctx.world.getBlock(x, y, z) !== BlockIds.RedMushroom) return;
     if ((ctx.nextInt?.(25) ?? 0) !== 0) return;
@@ -71,7 +72,7 @@ class MushroomBehaviour extends SupportedPlant {
 }
 
 class CactusBehaviour extends SupportedPlant {
-  public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+  public canSurvive(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): boolean {
     if (ctx.world.getBlock(x, y - 1, z) !== BlockIds.Sand && ctx.world.getBlock(x, y - 1, z) !== BlockIds.Cactus) return false;
     return !isSolid(this.registry, ctx.world.getBlock(x + 1, y, z)) &&
       !isSolid(this.registry, ctx.world.getBlock(x - 1, y, z)) &&
@@ -79,7 +80,7 @@ class CactusBehaviour extends SupportedPlant {
       !isSolid(this.registry, ctx.world.getBlock(x, y, z - 1));
   }
 
-  public randomTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  public randomTick(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): void {
     super.randomTick(ctx, x, y, z);
     if ((ctx.nextInt?.(16) ?? 0) !== 0 || !this.canSurvive(ctx, x, y, z)) return;
     let height = 1;
@@ -88,16 +89,23 @@ class CactusBehaviour extends SupportedPlant {
       ctx.world.setBlock(x, y + 1, z, BlockIds.Cactus, { reason: 'world', notifyNeighbours: true, updateLighting: true });
     }
   }
+
+  public getBoundingBoxes(_ctx: BlockBehaviourContext | any, x: number, y: number, z: number, type: 'collision' | 'selection' | 'interaction'): AABB[] | undefined {
+    if (type === 'collision') {
+      return [new AABB(x + 0.0625, y, z + 0.0625, x + 0.9375, y + 1, z + 0.9375)];
+    }
+    return undefined; // default
+  }
 }
 
 class ReedBehaviour extends SupportedPlant {
-  public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+  public canSurvive(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): boolean {
     const below = ctx.world.getBlock(x, y - 1, z);
     if (below !== BlockIds.Reed && below !== BlockIds.Dirt && below !== BlockIds.Grass && below !== BlockIds.Sand) return false;
     return isWater(ctx.world.getBlock(x + 1, y - 1, z)) || isWater(ctx.world.getBlock(x - 1, y - 1, z)) || isWater(ctx.world.getBlock(x, y - 1, z + 1)) || isWater(ctx.world.getBlock(x, y - 1, z - 1));
   }
 
-  public randomTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  public randomTick(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): void {
     super.randomTick(ctx, x, y, z);
     if ((ctx.nextInt?.(16) ?? 0) !== 0 || !this.canSurvive(ctx, x, y, z)) return;
     let height = 1;
@@ -109,11 +117,11 @@ class ReedBehaviour extends SupportedPlant {
 }
 
 class CropBehaviour extends SupportedPlant {
-  public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+  public canSurvive(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): boolean {
     return ctx.world.getBlock(x, y - 1, z) === BlockIds.Farmland;
   }
 
-  public randomTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  public randomTick(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): void {
     super.randomTick(ctx, x, y, z);
     if (!this.canSurvive(ctx, x, y, z) || (ctx.nextInt?.(3) ?? 0) !== 0) return;
     const metadata = ctx.world.getBlockMetadata(x, y, z);
@@ -125,8 +133,8 @@ class SaplingBehaviour extends SupportedPlant {
   private readonly oak = new TreeGenerator();
   private readonly birch = new BirchTreeGenerator();
   private readonly spruce = new TaigaTree2Generator();
-  public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean { return isSoil(ctx.world.getBlock(x, y - 1, z)); }
-  public randomTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  public canSurvive(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): boolean { return isSoil(ctx.world.getBlock(x, y - 1, z)); }
+  public randomTick(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): void {
     super.randomTick(ctx, x, y, z);
     if (ctx.world.getBlock(x, y, z) !== BlockIds.Sapling || !this.canSurvive(ctx,x,y,z)) return;
     // Verified BlockSapling order: support check, combined light at y+1, then nextInt(30).

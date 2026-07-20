@@ -1,10 +1,11 @@
+import { COLLISION_EPSILON, GRAVITY, TERMINAL_VELOCITY } from './physicsConstants';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
-import type { ChunkManager } from '../world/ChunkManager';
 import { CHUNK_SIZE_Y } from '../world/chunkConstants';
-import { worldToChunkLocal } from '../world/worldToChunkCoords';
 import type { Player } from '../player/Player';
 import { AABB } from './AABB';
-import { COLLISION_EPSILON, GRAVITY, TERMINAL_VELOCITY } from './physicsConstants';
+import type { BlockBehaviourRegistry } from '../world/BlockBehaviour';
+import { getBlockBounds } from '../world/BlockBehaviour';
+import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 
 /**
  * How quickly horizontal velocity is steered toward wishVelocity while
@@ -37,35 +38,71 @@ const COLLISION_AXIS_ORDER: readonly ('x' | 'y' | 'z')[] = ['y', 'x', 'z'];
  * not touch rendering, input, or camera state.
  */
 export class PlayerPhysics {
-  private readonly chunkManager: ChunkManager;
-  private readonly blockRegistry: BlockRegistry;
-
-  public constructor(chunkManager: ChunkManager, blockRegistry: BlockRegistry) {
-    this.chunkManager = chunkManager;
-    this.blockRegistry = blockRegistry;
-  }
+  public constructor(
+    
+    private readonly blockRegistry: BlockRegistry,
+    private readonly behaviourRegistry: BlockBehaviourRegistry,
+    private readonly blockUpdateWorld: BlockUpdateWorld
+  ) {}
 
   /**
    * Integrates gravity and horizontal acceleration, then resolves movement
    * against solid blocks. Jumping itself is applied by PlayerController
    * before this runs; this only reacts to whatever velocity.y already is.
    */
-  public update(player: Player, deltaSeconds: number): void {
+  public update(player: Player, deltaSeconds: number, isJumpPressed = false): void {
+    const playerBox = player.getAABB();
+    const climbRange = this.blockRangeCoveringBox(playerBox);
+    let isClimbing = false;
+
+    // Check interaction with triggers and ladders
+    for (let bx = climbRange.minX; bx <= climbRange.maxX; bx++) {
+      for (let by = climbRange.minY; by <= climbRange.maxY; by++) {
+        for (let bz = climbRange.minZ; bz <= climbRange.maxZ; bz++) {
+          if (by < 0 || by >= CHUNK_SIZE_Y) continue;
+          
+          const blockId = this.blockUpdateWorld.getBlock(bx, by, bz);
+          if (blockId === 0) continue;
+          
+          const behaviour = this.behaviourRegistry.get(blockId);
+          
+          if (behaviour.isClimbable || behaviour.onEntityCollidedWithBlock) {
+            const bounds = getBlockBounds(this.blockRegistry, this.behaviourRegistry, this.blockUpdateWorld, bx, by, bz, 'interaction');
+            let intersects = false;
+            for (const b of bounds) {
+              if (playerBox.intersects(b)) {
+                intersects = true;
+                break;
+              }
+            }
+
+            if (intersects) {
+              if (behaviour.isClimbable) {
+                isClimbing = true;
+              }
+              if (behaviour.onEntityCollidedWithBlock) {
+                behaviour.onEntityCollidedWithBlock({ world: this.blockUpdateWorld, gameTick: 0 } as any, bx, by, bz, playerBox);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (isClimbing) {
+      player.velocity.y = Math.max(player.velocity.y, -0.15); // slow fall speed
+      if (player.wishVelocity.x !== 0 || player.wishVelocity.z !== 0 || isJumpPressed) {
+        player.velocity.y = 0.2; // climb speed
+      }
+    }
+
     this.applyHorizontalAcceleration(player, deltaSeconds);
 
     const velocityYBeforeGravity = player.velocity.y;
-    this.applyGravity(player, deltaSeconds);
+    if (!isClimbing) {
+      this.applyGravity(player, deltaSeconds);
+    }
 
-    // Use the average of pre- and post-gravity vertical velocity for this
-    // frame's displacement (trapezoidal integration), not just the
-    // post-gravity value. Using only the post-gravity velocity (symplectic
-    // Euler) is fine for X/Z (constant wish speed) but under constant
-    // acceleration it systematically undershoots analytic motion — e.g.
-    // the jump apex height would fall noticeably short of JUMP_HEIGHT at
-    // typical frame rates, more so at low frame rates. Averaging keeps
-    // gravity's effect on displacement accurate regardless of frame rate,
-    // while velocity itself (used for grounded checks, terminal velocity,
-    // etc.) is unaffected.
     const averageVelocityY = (velocityYBeforeGravity + player.velocity.y) / 2;
 
     this.moveAndCollide(player, deltaSeconds, averageVelocityY);
@@ -175,32 +212,23 @@ export class PlayerPhysics {
     for (let bx = blockRange.minX; bx <= blockRange.maxX; bx++) {
       for (let by = blockRange.minY; by <= blockRange.maxY; by++) {
         for (let bz = blockRange.minZ; bz <= blockRange.maxZ; bz++) {
-          if (!this.isSolidBlock(bx, by, bz)) {
-            continue;
-          }
+          if (by < 0 || by >= CHUNK_SIZE_Y) continue;
 
-          const blockId = this.getBlockIdAt(bx, by, bz);
-          let blockBox: AABB;
+          const bounds = getBlockBounds(this.blockRegistry, this.behaviourRegistry, this.blockUpdateWorld, bx, by, bz, 'collision');
+          for (const blockBox of bounds) {
+            if (!this.overlapsOnOtherAxes(box, blockBox, axis)) {
+              continue;
+            }
 
-          if (blockId === 81) { // Cactus block ID is 81
-            // Cactus is inset horizontally by 1/16 (0.0625)
-            blockBox = new AABB(bx + 0.0625, by, bz + 0.0625, bx + 0.9375, by + 1, bz + 0.9375);
-          } else {
-            blockBox = new AABB(bx, by, bz, bx + 1, by + 1, bz + 1);
-          }
+            const limited = this.limitDistance(box, blockBox, axis, movingPositive);
 
-          if (!this.overlapsOnOtherAxes(box, blockBox, axis)) {
-            continue;
-          }
-
-          const limited = this.limitDistance(box, blockBox, axis, movingPositive);
-
-          // Clamp to zero rather than letting a pre-existing overlap (e.g.
-          // floating-point skin contact) push the box backward.
-          if (movingPositive) {
-            allowedDistance = Math.min(allowedDistance, Math.max(0, limited));
-          } else {
-            allowedDistance = Math.max(allowedDistance, Math.min(0, limited));
+            // Clamp to zero rather than letting a pre-existing overlap (e.g.
+            // floating-point skin contact) push the box backward.
+            if (movingPositive) {
+              allowedDistance = Math.min(allowedDistance, Math.max(0, limited));
+            } else {
+              allowedDistance = Math.max(allowedDistance, Math.min(0, limited));
+            }
           }
         }
       }
@@ -209,17 +237,6 @@ export class PlayerPhysics {
     return allowedDistance;
   }
 
-  private getBlockIdAt(worldX: number, worldY: number, worldZ: number): number {
-    if (worldY < 0 || worldY >= CHUNK_SIZE_Y) {
-      return 0;
-    }
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(worldX, worldZ);
-    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    if (chunk === undefined) {
-      return 0;
-    }
-    return chunk.getBlock(localX, worldY, localZ);
-  }
 
   /** True if the box overlaps the block on the two axes other than `axis`. */
   private overlapsOnOtherAxes(box: AABB, blockBox: AABB, axis: 'x' | 'y' | 'z'): boolean {
@@ -292,25 +309,4 @@ export class PlayerPhysics {
   }
 
   /** Looks up a world-space block position via ChunkManager + BlockRegistry. */
-  private isSolidBlock(worldX: number, worldY: number, worldZ: number): boolean {
-    if (worldY < 0 || worldY >= CHUNK_SIZE_Y) {
-      // Above/below the world column: treat as open space, matching how
-      // ChunkMesher treats missing vertical range (never solid there).
-      return false;
-    }
-
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(worldX, worldZ);
-    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-
-    if (chunk === undefined) {
-      // Unloaded chunk: treat as open space rather than solid, consistent
-      // with ChunkMesher's "missing neighbour chunk = Air" rule.
-      return false;
-    }
-
-    const blockId = chunk.getBlock(localX, worldY, localZ);
-    const definition = this.blockRegistry.getById(blockId);
-
-    return definition !== undefined && definition.solid;
-  }
 }

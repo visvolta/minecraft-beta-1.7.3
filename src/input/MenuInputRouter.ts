@@ -4,6 +4,8 @@ import type { FurnaceController } from '../furnace/FurnaceController';
 import type { ChestController } from '../chest/ChestController';
 import type { HotbarLayout } from '../inventory/HotbarLayout';
 
+import type { SignController } from '../sign/SignController';
+
 /**
  * Single authoritative menu-input routing path (`Use one authoritative menu-input routing path`).
  * Prevents duplicate key listeners and ensures only one modal menu is open at a time (`ensure only one modal menu can be open at a time; avoid duplicate key listeners`).
@@ -16,6 +18,7 @@ export class MenuInputRouter {
     private readonly craftingTableController: CraftingTableController,
     private readonly furnaceController: FurnaceController,
     private readonly chestController: ChestController,
+    private readonly signController: SignController,
     private readonly layout: HotbarLayout
   ) {
     if (typeof window !== 'undefined') {
@@ -25,6 +28,8 @@ export class MenuInputRouter {
 
   private handleKeyDown(e: KeyboardEvent): void {
     if (e.code === 'KeyE') {
+      if (this.signController.isOpen) return; // Prevent E from closing inventory while typing on a sign
+
       e.preventDefault();
       e.stopImmediatePropagation();
 
@@ -57,6 +62,11 @@ export class MenuInputRouter {
     }
 
     if (e.code === 'Escape') {
+      if (this.signController.isOpen) {
+        // Handled directly inside SignUi (it restores/cancels and closes).
+        // But we return here so it doesn't propagate to pausing the game.
+        return;
+      }
       if (this.furnaceController.isOpen) {
         e.preventDefault();
         e.stopImmediatePropagation();

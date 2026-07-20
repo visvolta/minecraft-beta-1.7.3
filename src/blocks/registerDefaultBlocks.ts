@@ -598,7 +598,10 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.StoneButton, 'stone_button', 'Stone Button', { all: 'stone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.Lever, 'lever', 'Lever', { all: 'lever' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.StonePressurePlate, 'stone_pressure_plate', 'Stone Pressure Plate', { all: 'stone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
+  registerSimple(BlockIds.WoodPressurePlate, 'wood_pressure_plate', 'Wood Pressure Plate', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.WoodDoor, 'wood_door', 'Wood Door', { all: 'door_wood_lower' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
+  registerSimple(BlockIds.IronDoor, 'iron_door', 'Iron Door', { all: 'door_iron_lower' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
+  registerSimple(BlockIds.Trapdoor, 'trapdoor', 'Trapdoor', { all: 'trapdoor' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.Rail, 'rail', 'Rail', { all: 'rail_normal' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.PoweredRail, 'powered_rail', 'Powered Rail', { all: 'rail_golden' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.DetectorRail, 'detector_rail', 'Detector Rail', { all: 'rail_detector' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
@@ -628,7 +631,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.WoodStairs, 'wood_stairs', 'Oak Wood Stairs', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
 
   // Wooden slab: non-full block (half height). blocksWeather: false.
-  registerSimple(BlockIds.WoodSlab, 'wood_slab', 'Oak Wood Slab', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
+  registerSimple(BlockIds.Slab, 'wood_slab', 'Oak Wood Slab', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
 
   // Post-process blocks to apply authentic Beta 1.7.3 hardness and harvestableByHand properties
   const hardnessMap: Record<number, number> = {
@@ -687,7 +690,10 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.StoneButton]: 0.5,
     [BlockIds.Lever]: 0.5,
     [BlockIds.StonePressurePlate]: 0.5,
+    [BlockIds.WoodPressurePlate]: 0.5,
     [BlockIds.WoodDoor]: 3.0,
+    [BlockIds.IronDoor]: 5.0,
+    [BlockIds.Trapdoor]: 3.0,
     [BlockIds.Rail]: 0.7,
     [BlockIds.PoweredRail]: 0.7,
     [BlockIds.DetectorRail]: 0.7,
@@ -704,7 +710,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Netherrack]: 0.4,
     [BlockIds.Fence]: 2.0,
     [BlockIds.WoodStairs]: 2.0,
-    [BlockIds.WoodSlab]: 2.0,
+    [BlockIds.Slab]: 2.0,
   };
 
   const handHarvestableMap: Record<number, boolean> = {

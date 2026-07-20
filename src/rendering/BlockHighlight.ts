@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { BlockPosition } from '../world/Raycaster';
+import type { RaycastHit } from '../world/Raycaster';
 
 /** Tiny outward offset so the highlight doesn't z-fight with block faces. */
 const SURFACE_INSET = 0.002;
@@ -29,17 +29,24 @@ export class BlockHighlight {
   }
 
   /** Shows the outline centred on the given block, or hides it if undefined. */
-  public setTarget(blockPos: BlockPosition | undefined): void {
-    if (blockPos === undefined) {
+  public setTarget(hit: RaycastHit | undefined): void {
+    if (hit === undefined || !hit.hitAabb) {
       this.lineSegments.visible = false;
       return;
     }
 
+    const w = hit.hitAabb.maxX - hit.hitAabb.minX;
+    const h = hit.hitAabb.maxY - hit.hitAabb.minY;
+    const d = hit.hitAabb.maxZ - hit.hitAabb.minZ;
+
+    this.lineSegments.scale.set(w, h, d);
+
     this.lineSegments.position.set(
-      blockPos.x + 0.5,
-      blockPos.y + 0.5,
-      blockPos.z + 0.5,
+      hit.hitAabb.minX + w / 2,
+      hit.hitAabb.minY + h / 2,
+      hit.hitAabb.minZ + d / 2,
     );
+    
     this.lineSegments.visible = true;
   }
 

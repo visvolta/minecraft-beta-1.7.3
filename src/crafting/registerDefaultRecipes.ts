@@ -115,13 +115,54 @@ export function registerDefaultRecipes(
 
   tryRegisterShaped('wood_slab', 3, 1, [
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }
-  ], new ItemStack(BlockIds.WoodSlab, 'block', 3, 0), false);
+  ], new ItemStack(BlockIds.Slab, 'block', 3, 0), false);
 
   tryRegisterShaped('wood_door', 2, 3, [
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 },
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 },
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }
-  ], new ItemStack(BlockIds.WoodDoor, 'block', 1, 0), false);
+  ], new ItemStack('door_wood', 'item', 1, 0), false);
+
+  tryRegisterShaped('iron_door', 2, 3, [
+    { id: 'iron_ingot' }, { id: 'iron_ingot' },
+    { id: 'iron_ingot' }, { id: 'iron_ingot' },
+    { id: 'iron_ingot' }, { id: 'iron_ingot' }
+  ], new ItemStack('door_iron', 'item', 1, 0), false);
+
+  tryRegisterShaped('trapdoor', 3, 2, [
+    { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 },
+    { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }
+  ], new ItemStack(BlockIds.Trapdoor, 'block', 2, 0), false);
+
+  tryRegisterShaped('ladder', 3, 3, [
+    { id: 'stick' }, null, { id: 'stick' },
+    { id: 'stick' }, { id: 'stick' }, { id: 'stick' },
+    { id: 'stick' }, null, { id: 'stick' }
+  ], new ItemStack(BlockIds.Ladder, 'block', 2, 0), false);
+
+  tryRegisterShaped('sign', 3, 3, [
+    { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 },
+    { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 },
+    null, { id: 'stick' }, null
+  ], new ItemStack('sign', 'item', 1, 0), false);
+
+  tryRegisterShaped('stone_pressure_plate', 2, 1, [
+    { id: BlockIds.Stone, metadata: -1 }, { id: BlockIds.Stone, metadata: -1 }
+  ], new ItemStack(BlockIds.StonePressurePlate, 'block', 1, 0), false);
+
+  tryRegisterShaped('wood_pressure_plate', 2, 1, [
+    { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }
+  ], new ItemStack(BlockIds.WoodPressurePlate, 'block', 1, 0), false);
+
+  tryRegisterShaped('stone_button', 1, 2, [
+    { id: BlockIds.Stone, metadata: -1 },
+    { id: BlockIds.Stone, metadata: -1 }
+  ], new ItemStack(BlockIds.StoneButton, 'block', 1, 0), false);
+
+  tryRegisterShaped('lever', 1, 2, [
+    { id: 'stick' },
+    { id: BlockIds.Cobblestone, metadata: -1 }
+  ], new ItemStack(BlockIds.Lever, 'block', 1, 0), false);
 
   tryRegisterShaped('bread', 3, 1, [
     { id: 'wheat' }, { id: 'wheat' }, { id: 'wheat' }

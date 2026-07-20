@@ -114,11 +114,15 @@ export const BlockIds = {
   /** Beta 1.7.3 TNT. */
   TNT: 46,
   /** Beta 1.7.3 wooden slab (single). Non-full block. */
-  WoodSlab: 44,
+  Slab: 44,
+  DoubleSlab: 43,
   /** Beta 1.7.3 netherrack. Supports infinite fire. */
   Netherrack: 87,
   /** Beta 1.7.3 glass (transparent solid). */
   Glass: 20,
+  IronDoor: 71,
+  WoodPressurePlate: 72,
+  Trapdoor: 96,
   /** Temporary Birch Leaves for Stage 5 species validation (temp ID, see SpruceLeaves). */
   BirchLeaves: 250,
   /** Temporary Birch Log for Stage 5 F2 samples (temp ID). */

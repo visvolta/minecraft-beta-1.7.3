@@ -58,7 +58,7 @@ export class InteractionController {
     this.blockRegistry = blockRegistry;
     this.blockUpdateWorld = blockUpdateWorld;
     this.inventory = inventory;
-    this.raycaster = new Raycaster(chunkManager, blockRegistry);
+    this.raycaster = new Raycaster(chunkManager, blockRegistry, behaviourRegistry, blockUpdateWorld);
     this.breakingController = new BreakingController(player, chunkManager, blockRegistry, blockUpdateWorld, itemEntityManager);
 
     // Listen for mouse wheel to change hotbar slot index with immediate snap
@@ -91,8 +91,14 @@ export class InteractionController {
    */
   public getSelectedBlockId(): BlockId {
     const stack = this.inventory.getStack(this.selectedSlotIndex);
-    if (stack !== null && stack.identity.type === 'block') {
-      return stack.identity.id as BlockId;
+    if (stack !== null) {
+      if (stack.identity.type === 'block') {
+        return stack.identity.id as BlockId;
+      } else if (stack.identity.type === 'item') {
+        if (stack.identity.id === 'door_wood') return BlockIds.WoodDoor;
+        if (stack.identity.id === 'door_iron') return BlockIds.IronDoor;
+        if (stack.identity.id === 'sign') return BlockIds.SignPost; // Temporary fallback, resolved more precisely in placeBlock
+      }
     }
     return 0; // Return empty (Air) if empty or non-block
   }
@@ -130,6 +136,16 @@ export class InteractionController {
     if (this.input.isMouseButtonJustPressed('right')) {
       const { x, y, z } = this.currentHit.blockPos;
       const targetId = this.blockUpdateWorld.getBlock(x, y, z);
+      
+      const behaviour = this.behaviourRegistry.get(targetId);
+      if (behaviour.onInteract) {
+        const consumed = behaviour.onInteract({ world: this.blockUpdateWorld, gameTick: 0 } as any, x, y, z);
+        if (consumed) {
+          this.player.swingItem();
+          return;
+        }
+      }
+
       if (this.blockInteractionHandler && this.blockInteractionHandler(targetId, x, y, z)) {
         this.player.swingItem();
         return;
@@ -137,7 +153,6 @@ export class InteractionController {
 
       const placed = this.placeBlock(this.currentHit);
       if (placed) {
-        // Authoritative decrement of exactly 1 item upon successful placement
         this.inventory.decrementSlot(this.selectedSlotIndex, 1);
       }
       this.player.swingItem();
@@ -158,9 +173,16 @@ export class InteractionController {
    * Returns true on successful block placement, or false on any failure.
    */
   private placeBlock(hit: RaycastHit): boolean {
-    const selectedId = this.getSelectedBlockId();
+    let selectedId = this.getSelectedBlockId();
     if (selectedId === 0) {
       return false; // Nothing held or non-block held
+    }
+
+    if (selectedId === BlockIds.SignPost) {
+      // If we clicked top or bottom face, it's a standing sign. If side face, it's a wall sign.
+      if (hit.face.y === 0) {
+        selectedId = BlockIds.WallSign;
+      }
     }
 
     const targetX = hit.blockPos.x + hit.face.x;
@@ -191,9 +213,21 @@ export class InteractionController {
       return false;
     }
 
+    if (selectedId === BlockIds.WoodDoor || selectedId === BlockIds.IronDoor) {
+      if (targetY + 1 >= CHUNK_SIZE_Y) return false;
+      const upperId = this.blockUpdateWorld.getBlock(targetX, targetY + 1, targetZ);
+      const upperDef = this.blockRegistry.getById(upperId);
+      if (upperDef === undefined || !upperDef.replaceable) return false;
+      
+      const upperBoxAABB = new AABB(targetX, targetY + 1, targetZ, targetX + 1, targetY + 2, targetZ + 1);
+      if (upperBoxAABB.intersects(this.player.getAABB())) {
+        return false;
+      }
+    }
+
     const behaviour = this.behaviourRegistry.get(selectedId);
     if (behaviour.canPlaceBlockAt) {
-      if (!behaviour.canPlaceBlockAt({ world: this.blockUpdateWorld, gameTick: 0 } as any, targetX, targetY, targetZ)) {
+      if (!behaviour.canPlaceBlockAt({ world: this.blockUpdateWorld, gameTick: 0, player: this.player } as any, targetX, targetY, targetZ)) {
         return false;
       }
     }

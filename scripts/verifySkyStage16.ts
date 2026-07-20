@@ -244,7 +244,7 @@ approxEqual(betaGetLightBrightness(15), 1, 1e-12, 'getLightBrightness(15) === 1'
     }
   }
 
-  const raycaster = new Raycaster(chunkManager, registry);
+  const raycaster = new Raycaster(chunkManager, registry, null as any, null as any);
 
   // Find a solid underground cell (Y=10) inside the origin chunk to
   // sit an "underground observer" in. Beta terrain always has stone

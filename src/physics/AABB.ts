@@ -5,6 +5,8 @@
  * Extended with Beta 1.7.3 AxisAlignedBB collision methods used by
  * player physics and entity collision resolution.
  */
+import type { FaceNormal } from '../world/Raycaster';
+
 export class AABB {
   public constructor(
     public minX: number,
@@ -14,6 +16,48 @@ export class AABB {
     public maxY: number,
     public maxZ: number,
   ) {}
+
+  public intersectRay(
+    originX: number, originY: number, originZ: number,
+    dirX: number, dirY: number, dirZ: number
+  ): { distance: number; face: FaceNormal } | undefined {
+    let tmin = -Infinity, tmax = Infinity;
+    let tminFace: FaceNormal | undefined;
+
+    const checkAxis = (
+      dir: number, origin: number,
+      min: number, max: number,
+      faceMin: FaceNormal, faceMax: FaceNormal
+    ) => {
+      if (dir !== 0) {
+        let tx1 = (min - origin) / dir;
+        let tx2 = (max - origin) / dir;
+        let f1 = faceMin;
+        let f2 = faceMax;
+        if (tx1 > tx2) {
+          const t = tx1; tx1 = tx2; tx2 = t;
+          const f = f1; f1 = f2; f2 = f;
+        }
+        if (tx1 > tmin) { tmin = tx1; tminFace = f1; }
+        if (tx2 < tmax) { tmax = tx2; }
+        if (tmin > tmax) return false;
+      } else if (origin < min || origin > max) {
+        return false;
+      }
+      return true;
+    };
+
+    if (!checkAxis(dirX, originX, this.minX, this.maxX, { x: -1, y: 0, z: 0 }, { x: 1, y: 0, z: 0 })) return undefined;
+    if (!checkAxis(dirY, originY, this.minY, this.maxY, { x: 0, y: -1, z: 0 }, { x: 0, y: 1, z: 0 })) return undefined;
+    if (!checkAxis(dirZ, originZ, this.minZ, this.maxZ, { x: 0, y: 0, z: -1 }, { x: 0, y: 0, z: 1 })) return undefined;
+
+    if (tmax < 0) return undefined;
+    
+    return {
+      distance: tmin >= 0 ? tmin : 0,
+      face: tminFace ?? { x: 0, y: 1, z: 0 } // Fallback, shouldn't occur if tmin >= 0
+    };
+  }
 
   /** Returns a new AABB offset by (dx, dy, dz). */
   public translated(dx: number, dy: number, dz: number): AABB {

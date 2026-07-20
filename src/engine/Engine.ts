@@ -1,3 +1,9 @@
+import { SignManager } from '../sign/SignManager';
+import { SignUi } from '../sign/SignUi';
+import { SignController } from '../sign/SignController';
+import { SignTextRenderer } from '../sign/SignTextRenderer';
+import { registerSignBehaviour } from '../world/behaviours/SignBehaviour';
+import { resolveBlockDrops } from '../entities/items/BlockDropResolver';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { TextureAtlas } from '../assets/TextureAtlas';
 import { CameraController } from '../camera/CameraController';
@@ -60,6 +66,12 @@ import { registerFallingBlockBehaviours } from '../world/behaviours/FallingBlock
 import { registerLeafBehaviour } from '../world/behaviours/LeafBehaviour';
 import { registerLogBehaviour } from '../world/behaviours/LogBehaviour';
 import { registerChestBehaviour } from '../world/behaviours/ChestBehaviour';
+import { registerDoorBehaviour } from '../world/behaviours/DoorBehaviour';
+import { registerTrapdoorBehaviour } from '../world/behaviours/TrapdoorBehaviour';
+import { registerLadderBehaviour } from '../world/behaviours/LadderBehaviour';
+import { registerPressurePlateBehaviour } from '../world/behaviours/PressurePlateBehaviour';
+import { registerButtonBehaviour } from '../world/behaviours/ButtonBehaviour';
+import { registerLeverBehaviour } from '../world/behaviours/LeverBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
@@ -189,6 +201,10 @@ export class Engine {
   private readonly chestUi: ChestUi;
   private readonly chestController: ChestController;
   private readonly chestRenderer: ChestRenderer;
+  private readonly signManager: SignManager;
+  private readonly signUi: SignUi;
+  private readonly signController: SignController;
+  private readonly signTextRenderer: SignTextRenderer;
   private readonly menuInputRouter: MenuInputRouter;
   private readonly contextMenuSuppressor: ContextMenuSuppressor;
   private selectedSlot = 0;
@@ -292,10 +308,11 @@ export class Engine {
       this.cameraController,
       this.player,
     );
-    this.playerPhysics = new PlayerPhysics(this.chunkManager, blockRegistry);
+    this.blockBehaviourRegistry = new BlockBehaviourRegistry();
 
     this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
+    this.playerPhysics = new PlayerPhysics(blockRegistry, this.blockBehaviourRegistry, this.blockUpdateWorld);
     this.cameraModeController = new CameraModeController(this.input, this.blockUpdateWorld, blockRegistry);
     this.playerModel = new PlayerModel();
     this.playerAnimator = new PlayerAnimator();
@@ -359,12 +376,17 @@ export class Engine {
 
     this.renderer.scene.add(this.playerModel.root);
 
-    this.blockBehaviourRegistry = new BlockBehaviourRegistry();
     this.worldEventQueue = new WorldEventQueue();
     this.fallingBlockManager = new FallingBlockManager(this.blockUpdateWorld, blockRegistry, this.chunkManager, this.renderer.scene, atlas, this.worldEventQueue);
     registerFluidBehaviours(this.blockBehaviourRegistry);
     registerPlantBehaviours(this.blockBehaviourRegistry, blockRegistry);
     registerSupportBehaviours(this.blockBehaviourRegistry, blockRegistry);
+    registerDoorBehaviour(this.blockBehaviourRegistry);
+    registerTrapdoorBehaviour(this.blockBehaviourRegistry);
+    registerLadderBehaviour(this.blockBehaviourRegistry);
+    registerPressurePlateBehaviour(this.blockBehaviourRegistry);
+    registerButtonBehaviour(this.blockBehaviourRegistry);
+    registerLeverBehaviour(this.blockBehaviourRegistry);
     // Fire needs WeatherController + ChunkManager for rain/sky-exposure checks.
     this.weatherController = new WeatherController(worldSeed);
     this.weatherController.restore(metadata.weather);
@@ -544,6 +566,14 @@ export class Engine {
 
     registerChestBehaviour(this.blockBehaviourRegistry, this.chestManager);
 
+    this.signManager = new SignManager();
+    // this.signManager.deserialize(metadata.signs);
+    
+    registerSignBehaviour(this.blockBehaviourRegistry, this.signManager);
+
+    this.signUi = new SignUi();
+    this.signController = new SignController(this.signUi, this.signManager);
+
     this.chestUi = new ChestUi();
     this.chestController = new ChestController(
       this.chestUi,
@@ -579,6 +609,7 @@ export class Engine {
       this.craftingTableController,
       this.furnaceController,
       this.chestController,
+      this.signController,
       this.hotbarHudRenderer.getLayout()
     );
 
@@ -706,6 +737,12 @@ export class Engine {
       this.chestManager,
       this.atlas,
       this.chunkRenderer.getOpaqueMaterial()
+    );
+
+    this.signTextRenderer = new SignTextRenderer(
+      this.renderer.scene,
+      this.signManager,
+      this.blockUpdateWorld
     );
 
     this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
@@ -1094,8 +1131,23 @@ export class Engine {
     this.fallingBlockManager.update(deltaSeconds);
     this.chestManager.update();
     this.chestRenderer.update(deltaSeconds);
+    this.signTextRenderer.update();
     this.furnaceManager.tick(this.blockUpdateWorld, this.smeltingRegistry, this.fuelRegistry);
+    
+    // Process block and item drops from scheduled events (like plant popping or leaf decay)
+    for (const drop of this.worldEventQueue.drainBlockDrops()) {
+      const drops = resolveBlockDrops(drop.blockId, drop.metadata);
+      for (const d of drops) {
+        this.itemEntityManager.spawnItem(drop.x + 0.5, drop.y + 0.2, drop.z + 0.5, d, 10);
+      }
+    }
+    for (const drop of this.worldEventQueue.drainItemDrops()) {
+      this.itemEntityManager.spawnItem(drop.x + 0.5, drop.y + 0.2, drop.z + 0.5, {
+        type: 'item', id: drop.itemId, count: drop.count, metadata: drop.metadata
+      }, 10);
+    }
     this.worldEventQueue.drainNoop();
+
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
 
@@ -1121,7 +1173,7 @@ export class Engine {
           this.player.wishVelocity.x = 0;
           this.player.wishVelocity.z = 0;
         }
-        this.playerPhysics.update(this.player, deltaSeconds);
+        this.playerPhysics.update(this.player, deltaSeconds, this.input.isActionActive('jump'));
       } else {
         // Pause physics if the containing chunk is not yet loaded
         // Ensure streamer knows this is the highest priority chunk
@@ -1387,7 +1439,7 @@ export class Engine {
     this.renderer.setFogState(fogState);
 
     // 13. Update the block highlight to match the current target
-    this.blockHighlight.setTarget(this.interactionController.getCurrentHit()?.blockPos);
+    this.blockHighlight.setTarget(this.interactionController.getCurrentHit());
 
     // Update the block breaking destroy crack overlay
     const activeMiningPos = this.interactionController.breakingController.getMiningBlockPos();

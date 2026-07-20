@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import type { BlockId } from '../blocks/BlockId';
 import { BlockIds } from '../blocks/BlockId';
+import { FaceDirection, type BlockFace } from '../blocks/BlockFace';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { BlockDefinition } from '../blocks/BlockDefinition';
-import { resolveBlockTexture, getSemanticFace } from '../blocks/resolveBlockTexture';
+import { resolveBlockTexture } from '../blocks/resolveBlockTexture';
 import { resolveBlockTint } from '../blocks/resolveBlockTint';
 import { vegetationTintKind, type VegetationColorProvider } from '../world/generation/climate/VegetationColors';
 import type { TextureAtlas } from '../assets/TextureAtlas';
@@ -25,16 +26,15 @@ import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
 
-import { FaceDirection, type BlockFace } from '../blocks/BlockFace';
-
-export interface FaceDef {
+interface FaceDef {
   readonly nx: number;
   readonly ny: number;
   readonly nz: number;
   readonly dx: number;
   readonly dy: number;
   readonly dz: number;
-  readonly dir: FaceDirection;
+  readonly slot?: BlockFace;
+  readonly dir?: FaceDirection;
   readonly corners: readonly [Corner, Corner, Corner, Corner];
 }
 
@@ -63,7 +63,7 @@ const FACES: readonly FaceDef[] = [
     dx: 1,
     dy: 0,
     dz: 0,
-    dir: FaceDirection.EAST,
+    slot: 'side',
     corners: [
       [1, 0, 0],
       [1, 1, 0],
@@ -78,7 +78,7 @@ const FACES: readonly FaceDef[] = [
     dx: -1,
     dy: 0,
     dz: 0,
-    dir: FaceDirection.WEST,
+    slot: 'side',
     corners: [
       [0, 0, 1],
       [0, 1, 1],
@@ -93,7 +93,7 @@ const FACES: readonly FaceDef[] = [
     dx: 0,
     dy: 1,
     dz: 0,
-    dir: FaceDirection.TOP,
+    slot: 'top',
     corners: [
       [0, 1, 1],
       [1, 1, 1],
@@ -108,7 +108,7 @@ const FACES: readonly FaceDef[] = [
     dx: 0,
     dy: -1,
     dz: 0,
-    dir: FaceDirection.BOTTOM,
+    slot: 'bottom',
     corners: [
       [0, 0, 0],
       [1, 0, 0],
@@ -123,7 +123,7 @@ const FACES: readonly FaceDef[] = [
     dx: 0,
     dy: 0,
     dz: 1,
-    dir: FaceDirection.SOUTH,
+    slot: 'side',
     corners: [
       [0, 0, 1],
       [1, 0, 1],
@@ -138,7 +138,7 @@ const FACES: readonly FaceDef[] = [
     dx: 0,
     dy: 0,
     dz: -1,
-    dir: FaceDirection.NORTH,
+    slot: 'side',
     corners: [
       [0, 1, 0],
       [1, 1, 0],
@@ -816,15 +816,15 @@ export class ChunkMesher {
 
             // Snow-covered grass: Beta BlockGrass.getBlockTexture() checks
             // if block above has Material.snow → use grass_side_snowed (texture 68)
-            let textureName = resolveBlockTexture(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)));
-            if (blockId === BlockIds.Grass && getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)) === 'side') {
+            let textureName = resolveBlockTexture(definition, face.slot!);
+            if (blockId === BlockIds.Grass && face.slot! === 'side') {
               const above = this.getBlockAt(chunk, x, y + 1, z);
               if (above === BlockIds.Snow || above === BlockIds.SnowBlock) {
                 textureName = 'grass_side_snowed';
               }
             }
             const uvRect = this.getSafeUvRect(textureName);
-            const tint = this.resolveVegetationTint(blockId, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)), resolveBlockTint(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z))), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+            const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
 
             buffers.pushFace(
@@ -880,13 +880,42 @@ export class ChunkMesher {
               if (this.hidesLeafFace(neighbourId)) {
                 continue;
               }
-              const textureName = resolveBlockTexture(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)));
+              const textureName = resolveBlockTexture(definition, face.slot!);
               const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-              const tint = this.resolveVegetationTint(blockId, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)), resolveBlockTint(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z))), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+              const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
               const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
               buffers.pushFace(face, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
             }
           } else if (renderType === 'cutout') {
+            if (blockId === BlockIds.WoodDoor || blockId === BlockIds.IronDoor) {
+              this.buildDoor(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
+            if (blockId === BlockIds.Trapdoor) {
+              this.buildTrapdoor(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
+            if (blockId === BlockIds.StonePressurePlate || blockId === BlockIds.WoodPressurePlate) {
+              this.buildPressurePlate(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
+            if (blockId === BlockIds.StoneButton) {
+              this.buildButton(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
+            if (blockId === BlockIds.Lever) {
+              this.buildLever(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
+            if (blockId === BlockIds.SignPost) {
+              this.buildStandingSign(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
+            if (blockId === BlockIds.WallSign) {
+              this.buildWallSign(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
+
             if (blockId === BlockIds.Ladder) {
               const textureName = resolveBlockTexture(definition, 'side') ?? 'ladder';
               let uvRect = this.atlas.getUvRect(textureName);
@@ -905,9 +934,9 @@ export class ChunkMesher {
               if (this.hidesCutoutFace(neighbourId)) {
                 continue;
               }
-              const textureName = resolveBlockTexture(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)));
+              const textureName = resolveBlockTexture(definition, face.slot!);
               const uvRect = this.getSafeUvRect(textureName);
-              const tint = this.resolveVegetationTint(blockId, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)), resolveBlockTint(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z))), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+              const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
               const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
               buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
             }
@@ -934,7 +963,7 @@ export class ChunkMesher {
           } else if (renderType === 'snow') {
             // Beta BlockSnow: flat layer at height 1/8
             // Uses custom bounds: 0,0,0 to 1, 0.125, 1
-            const textureName = resolveBlockTexture(definition, 'top');
+            const textureName = resolveBlockTexture(definition, 'side');
             const uvRect = this.getSafeUvRect(textureName);
             const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const light = this.getLightComponentsAt(chunk, x, y, z);
@@ -1164,7 +1193,7 @@ export class ChunkMesher {
 
     // Top face (normal: 0, 1, 0)
     buffers.pushFace(
-      { nx: 0, ny: 1, nz: 0, dx: 0, dy: 1, dz: 0, dir: FaceDirection.TOP,
+      { nx: 0, ny: 1, nz: 0, dx: 0, dy: 1, dz: 0, slot: 'top',
         corners: [[0, H, 1], [1, H, 1], [1, H, 0], [0, H, 0]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1173,7 +1202,7 @@ export class ChunkMesher {
 
     // +X side
     buffers.pushFace(
-      { nx: 1, ny: 0, nz: 0, dx: 1, dy: 0, dz: 0, dir: FaceDirection.EAST,
+      { nx: 1, ny: 0, nz: 0, dx: 1, dy: 0, dz: 0, slot: 'side',
         corners: [[1, 0, 0], [1, H, 0], [1, H, 1], [1, 0, 1]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1182,7 +1211,7 @@ export class ChunkMesher {
 
     // -X side
     buffers.pushFace(
-      { nx: -1, ny: 0, nz: 0, dx: -1, dy: 0, dz: 0, dir: FaceDirection.EAST,
+      { nx: -1, ny: 0, nz: 0, dx: -1, dy: 0, dz: 0, slot: 'side',
         corners: [[0, 0, 1], [0, H, 1], [0, H, 0], [0, 0, 0]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1191,7 +1220,7 @@ export class ChunkMesher {
 
     // +Z side
     buffers.pushFace(
-      { nx: 0, ny: 0, nz: 1, dx: 0, dy: 0, dz: 1, dir: FaceDirection.EAST,
+      { nx: 0, ny: 0, nz: 1, dx: 0, dy: 0, dz: 1, slot: 'side',
         corners: [[0, 0, 1], [1, 0, 1], [1, H, 1], [0, H, 1]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1200,7 +1229,7 @@ export class ChunkMesher {
 
     // -Z side
     buffers.pushFace(
-      { nx: 0, ny: 0, nz: -1, dx: 0, dy: 0, dz: -1, dir: FaceDirection.EAST,
+      { nx: 0, ny: 0, nz: -1, dx: 0, dy: 0, dz: -1, slot: 'side',
         corners: [[0, H, 0], [1, H, 0], [1, 0, 0], [0, 0, 0]] },
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
@@ -1269,9 +1298,9 @@ export class ChunkMesher {
             // Cull against opaque solids (Stone, Dirt, etc.)
             if (this.hidesOpaqueFace(neighbourId)) continue;
 
-            const textureName = resolveBlockTexture(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)));
+            const textureName = resolveBlockTexture(definition, face.slot!);
             const uvRect = this.getSafeUvRect(textureName);
-            const tint = this.resolveVegetationTint(blockId, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z)), resolveBlockTint(definition, getSemanticFace(face.dir, chunk.getBlockMetadata(x, y, z))), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+            const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
             const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
 
             buffers.pushFace(
@@ -1589,5 +1618,278 @@ export class ChunkMesher {
       return false;
     }
     return definition.renderType === 'opaque';
+  }
+  private buildDoor(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, definition: BlockDefinition): void {
+    const metadata = chunk.getBlockMetadata(x, y, z);
+    const isUpper = (metadata & 8) !== 0;
+    
+    let baseMeta = metadata;
+    if (isUpper) {
+      if (y > 0) {
+        const lowerId = this.getBlockAt(chunk, x, y - 1, z);
+        if (lowerId === blockId) {
+          baseMeta = this.getMetadataAt(chunk, x, y - 1, z);
+        }
+      }
+    }
+
+    const state = (baseMeta & 4) === 0 ? (baseMeta - 1) & 3 : baseMeta & 3;
+    const thickness = 3 / 16;
+    
+    let minX = 0, minZ = 0, maxX = 1, maxZ = 1;
+    
+    if (state === 0) { minX = 0; maxX = 1; minZ = 0; maxZ = thickness; }
+    else if (state === 1) { minX = 1 - thickness; maxX = 1; minZ = 0; maxZ = 1; }
+    else if (state === 2) { minX = 0; maxX = 1; minZ = 1 - thickness; maxZ = 1; }
+    else if (state === 3) { minX = 0; maxX = thickness; minZ = 0; maxZ = 1; }
+
+    const textureName = resolveBlockTexture(definition, 'side') || 'door_wood_lower';
+    let actualTexture = textureName;
+    if (isUpper && textureName.endsWith('_lower')) {
+      actualTexture = textureName.replace('_lower', '_upper');
+    }
+    const uvRect = this.getSafeUvRect(actualTexture);
+    const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
+    const b = [light.block, light.block, light.block, light.block] as Quad4;
+
+    const pushQuadFromBounds = (
+      dir: FaceDirection,
+      p0: [number, number, number], p1: [number, number, number], p2: [number, number, number], p3: [number, number, number],
+      normal: [number, number, number]
+    ) => {
+      if (!uvRect) return;
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+    };
+
+    pushQuadFromBounds(FaceDirection.EAST, [maxX, 0, minZ], [maxX, 1, minZ], [maxX, 1, maxZ], [maxX, 0, maxZ], [1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.WEST, [minX, 0, maxZ], [minX, 1, maxZ], [minX, 1, minZ], [minX, 0, minZ], [-1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.TOP, [minX, 1, maxZ], [maxX, 1, maxZ], [maxX, 1, minZ], [minX, 1, minZ], [0, 1, 0]);
+    pushQuadFromBounds(FaceDirection.BOTTOM, [minX, 0, minZ], [maxX, 0, minZ], [maxX, 0, maxZ], [minX, 0, maxZ], [0, -1, 0]);
+    pushQuadFromBounds(FaceDirection.SOUTH, [minX, 0, maxZ], [maxX, 0, maxZ], [maxX, 1, maxZ], [minX, 1, maxZ], [0, 0, 1]);
+    pushQuadFromBounds(FaceDirection.NORTH, [maxX, 0, minZ], [minX, 0, minZ], [minX, 1, minZ], [maxX, 1, minZ], [0, 0, -1]);
+  }
+
+  private buildTrapdoor(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, definition: BlockDefinition): void {
+    const meta = chunk.getBlockMetadata(x, y, z);
+    const isOpened = (meta & 4) !== 0;
+    const attachMeta = meta & 3;
+    const thickness = 3 / 16;
+    
+    let minX = 0, minZ = 0, maxX = 1, maxZ = 1, minY = 0, maxY = thickness;
+
+    if (isOpened) {
+      if (attachMeta === 0) { minX = 0; maxX = thickness; minY = 0; maxY = 1; }
+      else if (attachMeta === 1) { minX = 1 - thickness; maxX = 1; minY = 0; maxY = 1; }
+      else if (attachMeta === 2) { minZ = 0; maxZ = thickness; minY = 0; maxY = 1; }
+      else if (attachMeta === 3) { minZ = 1 - thickness; maxZ = 1; minY = 0; maxY = 1; }
+    }
+
+    const textureName = resolveBlockTexture(definition, 'side') || 'trapdoor';
+    const uvRect = this.getSafeUvRect(textureName);
+    const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
+    const b = [light.block, light.block, light.block, light.block] as Quad4;
+
+    const pushQuadFromBounds = (dir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+    };
+
+    pushQuadFromBounds(FaceDirection.EAST, [maxX, minY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [maxX, minY, maxZ], [1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.WEST, [minX, minY, maxZ], [minX, maxY, maxZ], [minX, maxY, minZ], [minX, minY, minZ], [-1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.TOP, [minX, maxY, maxZ], [maxX, maxY, maxZ], [maxX, maxY, minZ], [minX, maxY, minZ], [0, 1, 0]);
+    pushQuadFromBounds(FaceDirection.BOTTOM, [minX, minY, minZ], [maxX, minY, minZ], [maxX, minY, maxZ], [minX, minY, maxZ], [0, -1, 0]);
+    pushQuadFromBounds(FaceDirection.SOUTH, [minX, minY, maxZ], [maxX, minY, maxZ], [maxX, maxY, maxZ], [minX, maxY, maxZ], [0, 0, 1]);
+    pushQuadFromBounds(FaceDirection.NORTH, [maxX, minY, minZ], [minX, minY, minZ], [minX, maxY, minZ], [maxX, maxY, minZ], [0, 0, -1]);
+  }
+
+  private buildPressurePlate(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, definition: BlockDefinition): void {
+    const meta = chunk.getBlockMetadata(x, y, z);
+    const pressed = meta === 1;
+    const thickness = pressed ? 1/16 : 2/16;
+    const padding = 1/16;
+    
+    let minX = padding, minZ = padding, maxX = 1 - padding, maxZ = 1 - padding, minY = 0, maxY = thickness;
+
+    const textureName = resolveBlockTexture(definition, 'top') || 'stone';
+    const uvRect = this.getSafeUvRect(textureName);
+    const tint = this.resolveVegetationTint(blockId, 'top', resolveBlockTint(definition, 'top'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
+    const b = [light.block, light.block, light.block, light.block] as Quad4;
+
+    const pushQuadFromBounds = (dir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+    };
+
+    pushQuadFromBounds(FaceDirection.EAST, [maxX, minY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [maxX, minY, maxZ], [1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.WEST, [minX, minY, maxZ], [minX, maxY, maxZ], [minX, maxY, minZ], [minX, minY, minZ], [-1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.TOP, [minX, maxY, maxZ], [maxX, maxY, maxZ], [maxX, maxY, minZ], [minX, maxY, minZ], [0, 1, 0]);
+    pushQuadFromBounds(FaceDirection.BOTTOM, [minX, minY, minZ], [maxX, minY, minZ], [maxX, minY, maxZ], [minX, minY, maxZ], [0, -1, 0]);
+    pushQuadFromBounds(FaceDirection.SOUTH, [minX, minY, maxZ], [maxX, minY, maxZ], [maxX, maxY, maxZ], [minX, maxY, maxZ], [0, 0, 1]);
+    pushQuadFromBounds(FaceDirection.NORTH, [maxX, minY, minZ], [minX, minY, minZ], [minX, maxY, minZ], [maxX, maxY, minZ], [0, 0, -1]);
+  }
+
+  private buildButton(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, definition: BlockDefinition): void {
+    const meta = chunk.getBlockMetadata(x, y, z);
+    const pressed = (meta & 8) !== 0;
+    const dir = meta & 7;
+
+    const depth = pressed ? 1/16 : 2/16;
+    const w = 6/16;
+    const h = 4/16;
+    
+    let minX = 0.5 - w/2, maxX = 0.5 + w/2;
+    let minY = 0.5 - h/2, maxY = 0.5 + h/2;
+    let minZ = 0.5 - w/2, maxZ = 0.5 + w/2;
+
+    if (dir === 1) { minX = 0; maxX = depth; minZ = 0.5 - w/2; maxZ = 0.5 + w/2; }
+    else if (dir === 2) { minX = 1 - depth; maxX = 1; minZ = 0.5 - w/2; maxZ = 0.5 + w/2; }
+    else if (dir === 3) { minZ = 0; maxZ = depth; minX = 0.5 - w/2; maxX = 0.5 + w/2; }
+    else if (dir === 4) { minZ = 1 - depth; maxZ = 1; minX = 0.5 - w/2; maxX = 0.5 + w/2; }
+
+    const textureName = resolveBlockTexture(definition, 'side') || 'stone';
+    const uvRect = this.getSafeUvRect(textureName);
+    const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
+    const b = [light.block, light.block, light.block, light.block] as Quad4;
+
+    const pushQuadFromBounds = (faceDir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: faceDir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+    };
+
+    pushQuadFromBounds(FaceDirection.EAST, [maxX, minY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [maxX, minY, maxZ], [1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.WEST, [minX, minY, maxZ], [minX, maxY, maxZ], [minX, maxY, minZ], [minX, minY, minZ], [-1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.TOP, [minX, maxY, maxZ], [maxX, maxY, maxZ], [maxX, maxY, minZ], [minX, maxY, minZ], [0, 1, 0]);
+    pushQuadFromBounds(FaceDirection.BOTTOM, [minX, minY, minZ], [maxX, minY, minZ], [maxX, minY, maxZ], [minX, minY, maxZ], [0, -1, 0]);
+    pushQuadFromBounds(FaceDirection.SOUTH, [minX, minY, maxZ], [maxX, minY, maxZ], [maxX, maxY, maxZ], [minX, maxY, maxZ], [0, 0, 1]);
+    pushQuadFromBounds(FaceDirection.NORTH, [maxX, minY, minZ], [minX, minY, minZ], [minX, maxY, minZ], [maxX, maxY, minZ], [0, 0, -1]);
+  }
+
+  private buildLever(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, definition: BlockDefinition): void {
+    const meta = chunk.getBlockMetadata(x, y, z);
+    const active = (meta & 8) !== 0;
+    const dir = meta & 7;
+
+    const baseDepth = 3/16;
+    let minX = 0.5 - 2/16, maxX = 0.5 + 2/16;
+    let minY = 0.5 - 3/16, maxY = 0.5 + 3/16;
+    let minZ = 0.5 - 2/16, maxZ = 0.5 + 2/16;
+
+    if (dir === 1) { minX = 0; maxX = baseDepth; minZ = 0.5 - 2/16; maxZ = 0.5 + 2/16; }
+    else if (dir === 2) { minX = 1 - baseDepth; maxX = 1; minZ = 0.5 - 2/16; maxZ = 0.5 + 2/16; }
+    else if (dir === 3) { minZ = 0; maxZ = baseDepth; minX = 0.5 - 2/16; maxX = 0.5 + 2/16; }
+    else if (dir === 4) { minZ = 1 - baseDepth; maxZ = 1; minX = 0.5 - 2/16; maxX = 0.5 + 2/16; }
+    else if (dir === 5 || dir === 6) { minY = 0; maxY = baseDepth; minX = 0.5 - 2/16; maxX = 0.5 + 2/16; minZ = 0.5 - 3/16; maxZ = 0.5 + 3/16; }
+
+    const textureName = resolveBlockTexture(definition, 'side') || 'lever';
+    const uvRect = this.getSafeUvRect(textureName);
+    const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
+    const b = [light.block, light.block, light.block, light.block] as Quad4;
+
+    const pushQuadFromBounds = (faceDir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: faceDir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+    };
+
+    // Push base
+    pushQuadFromBounds(FaceDirection.EAST, [maxX, minY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [maxX, minY, maxZ], [1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.WEST, [minX, minY, maxZ], [minX, maxY, maxZ], [minX, maxY, minZ], [minX, minY, minZ], [-1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.TOP, [minX, maxY, maxZ], [maxX, maxY, maxZ], [maxX, maxY, minZ], [minX, maxY, minZ], [0, 1, 0]);
+    pushQuadFromBounds(FaceDirection.BOTTOM, [minX, minY, minZ], [maxX, minY, minZ], [maxX, minY, maxZ], [minX, minY, maxZ], [0, -1, 0]);
+    pushQuadFromBounds(FaceDirection.SOUTH, [minX, minY, maxZ], [maxX, minY, maxZ], [maxX, maxY, maxZ], [minX, maxY, maxZ], [0, 0, 1]);
+    pushQuadFromBounds(FaceDirection.NORTH, [maxX, minY, minZ], [minX, minY, minZ], [minX, maxY, minZ], [maxX, maxY, minZ], [0, 0, -1]);
+
+    // Push stick (approximated)
+    let sx = 0.5, sy = 0.5, sz = 0.5;
+    if (dir === 1) { sx = baseDepth + (active ? 0.1 : 0.3); sy += active ? -0.2 : 0; }
+    else if (dir === 2) { sx = 1 - baseDepth - (active ? 0.1 : 0.3); sy += active ? -0.2 : 0; }
+    else if (dir === 3) { sz = baseDepth + (active ? 0.1 : 0.3); sy += active ? -0.2 : 0; }
+    else if (dir === 4) { sz = 1 - baseDepth - (active ? 0.1 : 0.3); sy += active ? -0.2 : 0; }
+    else if (dir === 5 || dir === 6) { sy = baseDepth + 0.2; sx += active ? 0.2 : -0.2; }
+
+    const sw = 1/16;
+    const sm = [sx - sw, sy - sw, sz - sw, sx + sw, sy + sw, sz + sw];
+    pushQuadFromBounds(FaceDirection.EAST, [sm[3], sm[1], sm[2]], [sm[3], sm[4], sm[2]], [sm[3], sm[4], sm[5]], [sm[3], sm[1], sm[5]], [1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.WEST, [sm[0], sm[1], sm[5]], [sm[0], sm[4], sm[5]], [sm[0], sm[4], sm[2]], [sm[0], sm[1], sm[2]], [-1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.TOP, [sm[0], sm[4], sm[5]], [sm[3], sm[4], sm[5]], [sm[3], sm[4], sm[2]], [sm[0], sm[4], sm[2]], [0, 1, 0]);
+    pushQuadFromBounds(FaceDirection.BOTTOM, [sm[0], sm[1], sm[2]], [sm[3], sm[1], sm[2]], [sm[3], sm[1], sm[5]], [sm[0], sm[1], sm[5]], [0, -1, 0]);
+    pushQuadFromBounds(FaceDirection.SOUTH, [sm[0], sm[1], sm[5]], [sm[3], sm[1], sm[5]], [sm[3], sm[4], sm[5]], [sm[0], sm[4], sm[5]], [0, 0, 1]);
+    pushQuadFromBounds(FaceDirection.NORTH, [sm[3], sm[1], sm[2]], [sm[0], sm[1], sm[2]], [sm[0], sm[4], sm[2]], [sm[3], sm[4], sm[2]], [0, 0, -1]);
+  }
+
+  private buildStandingSign(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, definition: BlockDefinition): void {
+    const textureName = resolveBlockTexture(definition, 'side') || 'oak_side';
+    const uvRect = this.getSafeUvRect(textureName);
+    const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
+    const b = [light.block, light.block, light.block, light.block] as Quad4;
+
+    const pushQuadFromBounds = (dir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+    };
+
+    const bw = 12/32, bh = 12/32, bd = 1/32;
+    const by = 8/16;
+    const meta = chunk.getBlockMetadata(x, y, z);
+    const angle = (meta * 360 / 16) * Math.PI / 180;
+    
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    
+    const rot = (lx: number, lz: number) => {
+      return [0.5 + lx * cos - lz * sin, 0.5 + lx * sin + lz * cos];
+    };
+
+    pushQuadFromBounds(FaceDirection.EAST, [0.5 + 1/16, 0, 0.5 - 1/16], [0.5 + 1/16, by, 0.5 - 1/16], [0.5 + 1/16, by, 0.5 + 1/16], [0.5 + 1/16, 0, 0.5 + 1/16], [1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.WEST, [0.5 - 1/16, 0, 0.5 + 1/16], [0.5 - 1/16, by, 0.5 + 1/16], [0.5 - 1/16, by, 0.5 - 1/16], [0.5 - 1/16, 0, 0.5 - 1/16], [-1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.SOUTH, [0.5 - 1/16, 0, 0.5 + 1/16], [0.5 + 1/16, 0, 0.5 + 1/16], [0.5 + 1/16, by, 0.5 + 1/16], [0.5 - 1/16, by, 0.5 + 1/16], [0, 0, 1]);
+    pushQuadFromBounds(FaceDirection.NORTH, [0.5 + 1/16, 0, 0.5 - 1/16], [0.5 - 1/16, 0, 0.5 - 1/16], [0.5 - 1/16, by, 0.5 - 1/16], [0.5 + 1/16, by, 0.5 - 1/16], [0, 0, -1]);
+
+    const [blx, blz] = rot(-bw, -bd);
+    const [brx, brz] = rot(bw, -bd);
+    const [tlx, tlz] = rot(-bw, bd);
+    const [trx, trz] = rot(bw, bd);
+
+    pushQuadFromBounds(FaceDirection.NORTH, [trx, by, trz], [tlx, by, tlz], [tlx, by + bh, tlz], [trx, by + bh, trz], [-sin, 0, -cos]);
+    pushQuadFromBounds(FaceDirection.SOUTH, [blx, by, blz], [brx, by, brz], [brx, by + bh, brz], [blx, by + bh, blz], [sin, 0, cos]);
+    pushQuadFromBounds(FaceDirection.EAST, [brx, by, brz], [trx, by, trz], [trx, by + bh, trz], [brx, by + bh, brz], [cos, 0, -sin]);
+    pushQuadFromBounds(FaceDirection.WEST, [tlx, by, tlz], [blx, by, blz], [blx, by + bh, blz], [tlx, by + bh, tlz], [-cos, 0, sin]);
+  }
+
+  private buildWallSign(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, definition: BlockDefinition): void {
+    const meta = chunk.getBlockMetadata(x, y, z);
+    const textureName = resolveBlockTexture(definition, 'side') || 'oak_side';
+    const uvRect = this.getSafeUvRect(textureName);
+    const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
+    const b = [light.block, light.block, light.block, light.block] as Quad4;
+
+    const pushQuadFromBounds = (dir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+    };
+
+    const bw = 12/32, bh = 12/32, bd = 2/32;
+    let minX = 0.5 - bw, maxX = 0.5 + bw;
+    let minY = 0.5 - bh/2, maxY = 0.5 + bh/2;
+    let minZ = 0.5 - bw, maxZ = 0.5 + bw;
+
+    if (meta === 2) { minZ = 1 - bd; maxZ = 1; }
+    else if (meta === 3) { minZ = 0; maxZ = bd; }
+    else if (meta === 4) { minX = 1 - bd; maxX = 1; minZ = 0.5 - bw; maxZ = 0.5 + bw; }
+    else if (meta === 5) { minX = 0; maxX = bd; minZ = 0.5 - bw; maxZ = 0.5 + bw; }
+
+    pushQuadFromBounds(FaceDirection.EAST, [maxX, minY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [maxX, minY, maxZ], [1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.WEST, [minX, minY, maxZ], [minX, maxY, maxZ], [minX, maxY, minZ], [minX, minY, minZ], [-1, 0, 0]);
+    pushQuadFromBounds(FaceDirection.TOP, [minX, maxY, maxZ], [maxX, maxY, maxZ], [maxX, maxY, minZ], [minX, maxY, minZ], [0, 1, 0]);
+    pushQuadFromBounds(FaceDirection.BOTTOM, [minX, minY, minZ], [maxX, minY, minZ], [maxX, minY, maxZ], [minX, minY, maxZ], [0, -1, 0]);
+    pushQuadFromBounds(FaceDirection.SOUTH, [minX, minY, maxZ], [maxX, minY, maxZ], [maxX, maxY, maxZ], [minX, maxY, maxZ], [0, 0, 1]);
+    pushQuadFromBounds(FaceDirection.NORTH, [maxX, minY, minZ], [minX, minY, minZ], [minX, maxY, minZ], [maxX, maxY, minZ], [0, 0, -1]);
   }
 }

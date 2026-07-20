@@ -49,6 +49,18 @@ export function resolveBlockDrops(blockId: number, blockMetadata = 0): Drop[] {
       const lapisCount = 4 + Math.floor(Math.random() * 5);
       return [{ type: 'item', id: 'dye_powder_blue', count: lapisCount, metadata: 4 }];
 
+    case BlockIds.WoodDoor:
+      if ((blockMetadata & 8) !== 0) return []; // Upper half drops nothing
+      return [{ type: 'item', id: 'door_wood', count: 1, metadata: 0 }];
+
+    case BlockIds.IronDoor:
+      if ((blockMetadata & 8) !== 0) return []; // Upper half drops nothing
+      return [{ type: 'item', id: 'door_iron', count: 1, metadata: 0 }];
+
+    case BlockIds.SignPost:
+    case BlockIds.WallSign:
+      return [{ type: 'item', id: 'sign', count: 1, metadata: 0 }];
+
     // Non-full blocks / Crops / Special drops
     case BlockIds.Crops:
       return [{ type: 'item', id: 'wheat', count: 1, metadata: 0 }];
