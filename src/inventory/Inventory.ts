@@ -1,14 +1,21 @@
 import { ItemStack, getMaxStackSize } from './ItemStack';
+import { PlayerEquipment } from './PlayerEquipment';
 
 export class Inventory {
   private readonly slots: (ItemStack | null)[];
   private readonly size: number;
   private readonly isPlayer: boolean;
+  private readonly equipment: PlayerEquipment | undefined;
 
   public constructor(size = 36, isPlayer = true) {
     this.size = size;
     this.isPlayer = isPlayer;
     this.slots = Array(size).fill(null);
+    this.equipment = isPlayer && size === 36 ? new PlayerEquipment() : undefined;
+  }
+
+  public getEquipment(): PlayerEquipment | undefined {
+    return this.equipment;
   }
 
   public getStack(slotIndex: number): ItemStack | null {
@@ -116,5 +123,6 @@ export class Inventory {
    */
   public clear(): void {
     this.slots.fill(null);
+    this.equipment?.clear();
   }
 }

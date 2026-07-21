@@ -1,5 +1,7 @@
 import { AABB } from '../physics/AABB';
 import { DamageSource, type DamageAttacker } from '../entities/damage/DamageSource';
+import type { PlayerEquipment } from '../inventory/PlayerEquipment';
+import { reduceDamageByArmour } from './ArmourProtection';
 import {
   ANIMATION_SWING_DURATION_SECONDS,
   ANIMATION_MOVEMENT_SPEED_SCALING,
@@ -44,6 +46,8 @@ export class Player {
   public hunger=20;public saturation=5;public exhaustion=0;public foodTimer=0;public starvationTimer=0;
   public isEating=false;public foodUseTicks=0;public foodUseSlot=-1;public foodUseItem:string|number|undefined;
   public isSprinting=false;public inWater=false;public inLava=false;public headUnderwater=false;public collidedHorizontally=false;
+  private equipment: PlayerEquipment | undefined;
+  private armourDamageRemainder = 0;
 
   /** Feet position (bottom-centre of the hitbox), world space. */
   public readonly position = { x: 0, y: 0, z: 0 };
@@ -114,19 +118,41 @@ export class Player {
   public addExhaustion(amount:number):void{this.exhaustion=Math.min(40,this.exhaustion+Math.max(0,amount));}
   public canSprint():boolean{return this.isAlive()&&this.hunger>6&&!this.isEating&&!this.inLava;}
   public setMaxHealth(value:number):void{this.maxHealth=Math.max(1,Math.floor(value));this.setHealth(this.health);}
+  public setEquipment(equipment: PlayerEquipment): void { this.equipment = equipment; }
+  public getArmourValue(): number { return this.equipment?.getArmourValue() ?? 0; }
+  public getArmourDamageRemainder(): number { return this.armourDamageRemainder; }
 
   /** Single authoritative entry point for every Player damage source. */
   public attackEntityFrom(source:DamageSource,amount:number):boolean{
     if(!this.isAlive()||amount<=0)return false;
-    let applied=amount,fullHit=true;
-    if(!source.bypassesInvulnerability&&this.hurtResistantTime>10){if(amount<=this.lastDamageAmount)return false;applied=amount-this.lastDamageAmount;this.lastDamageAmount=amount;fullHit=false;}else{this.lastDamageAmount=amount;if(!source.bypassesInvulnerability)this.hurtResistantTime=20;this.hurtTime=10;}
+    let acceptedDamage=amount,fullHit=true;
+    if(!source.bypassesInvulnerability&&this.hurtResistantTime>10){
+      if(amount<=this.lastDamageAmount)return false;
+      acceptedDamage=amount-this.lastDamageAmount;
+      this.lastDamageAmount=amount;
+      fullHit=false;
+    }else{
+      this.lastDamageAmount=amount;
+      if(!source.bypassesInvulnerability)this.hurtResistantTime=20;
+      this.hurtTime=10;
+    }
+
+    let healthDamage=acceptedDamage;
+    if(!source.bypassesArmour&&this.equipment!==undefined){
+      const armourValue=this.equipment.getArmourValue();
+      const reduction=reduceDamageByArmour(acceptedDamage,armourValue,this.armourDamageRemainder);
+      healthDamage=reduction.healthDamage;
+      this.armourDamageRemainder=reduction.remainder;
+      this.equipment.damageArmour(acceptedDamage);
+    }
+
     this.lastDamageSource=source;this.lastAttacker=source.attacker;this.recentHealth=this.health;this.healthFlashTicks=20;
     if(fullHit&&source.appliesKnockback&&source.attacker){const dx=this.position.x-source.attacker.position.x,dz=this.position.z-source.attacker.position.z,length=Math.hypot(dx,dz);if(length>1e-6){this.velocity.x+=dx/length*8;this.velocity.z+=dz/length*8;}this.velocity.y=Math.max(this.velocity.y,8);this.attackedAtYaw=Math.atan2(dz,dx)-this.bodyYaw;}
-    this.setHealth(this.health-applied);this.addExhaustion(.3);if(this.health===0)this.deathSequence++;return true;
+    this.setHealth(this.health-healthDamage);this.addExhaustion(.3);if(this.health===0)this.deathSequence++;return true;
   }
   public attackFromMob(amount:number,attacker:DamageAttacker):boolean{return this.attackEntityFrom(DamageSource.mob(attacker),amount);}
 
-  public resetForRespawn(x:number,y:number,z:number):void{this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.inLava=this.headUnderwater=this.collidedHorizontally=false;this.stopBreakingAnimation();}
+  public resetForRespawn(x:number,y:number,z:number):void{this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.armourDamageRemainder=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.inLava=this.headUnderwater=this.collidedHorizontally=false;this.stopBreakingAnimation();}
 
   public tickCombatState(): void {
     if (this.hurtResistantTime > 0) this.hurtResistantTime -= 1;

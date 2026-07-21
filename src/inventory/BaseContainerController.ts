@@ -104,7 +104,8 @@ export abstract class BaseContainerController {
             type: this.cursorStack.identity.type,
             id: this.cursorStack.identity.id,
             count: this.cursorStack.count,
-            metadata: this.cursorStack.metadata
+            metadata: this.cursorStack.metadata,
+            damage: this.cursorStack.damage
           },
           0, 0.2, 0,
           40
@@ -120,7 +121,8 @@ export abstract class BaseContainerController {
             type: this.cursorStack.identity.type,
             id: this.cursorStack.identity.id,
             count: 1,
-            metadata: this.cursorStack.metadata
+            metadata: this.cursorStack.metadata,
+            damage: this.cursorStack.damage
           },
           0, 0.2, 0,
           40
@@ -150,7 +152,8 @@ export abstract class BaseContainerController {
         this.cursorStack.identity.type,
         this.cursorStack.identity.id,
         this.cursorStack.count,
-        this.cursorStack.metadata
+        this.cursorStack.metadata,
+        this.cursorStack.damage
       );
       this.cursorStack.count -= accepted;
       if (this.cursorStack.count > 0) {
@@ -163,7 +166,8 @@ export abstract class BaseContainerController {
             type: this.cursorStack.identity.type,
             id: this.cursorStack.identity.id,
             count: this.cursorStack.count,
-            metadata: this.cursorStack.metadata
+            metadata: this.cursorStack.metadata,
+            damage: this.cursorStack.damage
           },
           0, 0.2, 0,
           40

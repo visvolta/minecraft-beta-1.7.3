@@ -130,6 +130,7 @@ export class PlayerModel {
 
   public setFirstPersonMode(firstPerson: boolean): void {
     if (firstPerson) {
+        // DO NOT CHANGE THIS
       this.headGroup.visible = false;
       this.rightArmGroup.visible = false;
       this.bodyGroup.visible = false;

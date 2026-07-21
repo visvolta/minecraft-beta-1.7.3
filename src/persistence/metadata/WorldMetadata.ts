@@ -12,6 +12,13 @@ export interface SerializedItemStack {
   readonly type: 'block' | 'item';
 }
 
+export interface SerializedPlayerEquipment {
+  readonly helmet?: SerializedItemStack | null;
+  readonly chestplate?: SerializedItemStack | null;
+  readonly leggings?: SerializedItemStack | null;
+  readonly boots?: SerializedItemStack | null;
+}
+
 export interface WorldMetadata {
   readonly formatVersion: number;
   readonly worldId: string;
@@ -28,6 +35,7 @@ export interface WorldMetadata {
   readonly autosave: { readonly enabled: boolean; readonly intervalSeconds: number };
   readonly lastPlayedMs: number;
   readonly inventory?: (SerializedItemStack | null)[];
+  readonly armour?: SerializedPlayerEquipment;
   readonly selectedHotbarSlot?: number;
   readonly furnaces?: SerializedFurnace[];
   readonly chests?: SerializedChest[];

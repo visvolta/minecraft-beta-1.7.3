@@ -1,5 +1,7 @@
+import type { ArmourSlot } from '../items/ArmourMaterial';
 import type { Inventory } from './Inventory';
 import { ItemStack, getMaxStackSize } from './ItemStack';
+import type { PlayerEquipment } from './PlayerEquipment';
 
 export class InventoryTransferService {
   public static leftClickSlot(
@@ -67,7 +69,8 @@ export class InventoryTransferService {
           slotStack.identity.id,
           slotStack.identity.type,
           toTake,
-          slotStack.metadata
+          slotStack.metadata,
+          slotStack.damage
         );
         slotStack.count -= toTake;
         if (slotStack.count <= 0) {
@@ -84,7 +87,8 @@ export class InventoryTransferService {
         cursorStack.identity.id,
         cursorStack.identity.type,
         1,
-        cursorStack.metadata
+        cursorStack.metadata,
+        cursorStack.damage
       );
       inventory.setStack(slotIndex, single);
       cursorStack.count--;
@@ -117,6 +121,19 @@ export class InventoryTransferService {
 
     const sourceStack = inventory.getStack(slotIndex);
     if (sourceStack === null || sourceStack.count <= 0) return;
+
+    const equipment = inventory.getEquipment();
+    const armourSlot = equipment?.getArmourSlot(sourceStack);
+    if (equipment !== undefined && armourSlot !== undefined && equipment.getStack(armourSlot) === null) {
+      if (sourceStack.count === 1) {
+        if (equipment.setStack(armourSlot, sourceStack)) inventory.setStack(slotIndex, null);
+      } else {
+        const equipped = sourceStack.clone();
+        equipped.count = 1;
+        if (equipment.setStack(armourSlot, equipped)) sourceStack.count--;
+      }
+      return;
+    }
 
     const targetSlots: number[] = [];
     if (size === 36) {
@@ -163,7 +180,8 @@ export class InventoryTransferService {
           sourceStack.identity.id,
           sourceStack.identity.type,
           toAdd,
-          sourceStack.metadata
+          sourceStack.metadata,
+          sourceStack.damage
         );
         inventory.setStack(targetIdx, newStack);
         sourceStack.count -= toAdd;
@@ -217,7 +235,8 @@ export class InventoryTransferService {
           cursorStack.identity.id,
           cursorStack.identity.type,
           1,
-          cursorStack.metadata
+          cursorStack.metadata,
+          cursorStack.damage
         );
         inventory.setStack(slotIndex, single);
         cursorStack.count--;
@@ -241,6 +260,93 @@ export class InventoryTransferService {
     return { cursorStack };
   }
 
+  public static leftClickEquipmentSlot(
+    equipment: PlayerEquipment,
+    slot: ArmourSlot,
+    cursorStack: ItemStack | null,
+  ): { cursorStack: ItemStack | null } {
+    const equipped = equipment.getStack(slot);
+    if (cursorStack === null) {
+      return { cursorStack: equipment.takeStack(slot) };
+    }
+    if (!equipment.accepts(slot, cursorStack)) return { cursorStack };
+    if (!equipment.setStack(slot, cursorStack)) return { cursorStack };
+    return { cursorStack: equipped };
+  }
+
+  public static rightClickEquipmentSlot(
+    equipment: PlayerEquipment,
+    slot: ArmourSlot,
+    cursorStack: ItemStack | null,
+  ): { cursorStack: ItemStack | null } {
+    return this.leftClickEquipmentSlot(equipment, slot, cursorStack);
+  }
+
+  public static rightDragEquipmentSlot(
+    equipment: PlayerEquipment,
+    slot: ArmourSlot,
+    cursorStack: ItemStack | null,
+  ): { cursorStack: ItemStack | null } {
+    if (cursorStack === null || equipment.getStack(slot) !== null || equipment.getArmourSlot(cursorStack) !== slot) {
+      return { cursorStack };
+    }
+    if (cursorStack.count === 1) {
+      if (equipment.setStack(slot, cursorStack)) return { cursorStack: null };
+      return { cursorStack };
+    }
+    const single = cursorStack.clone();
+    single.count = 1;
+    if (equipment.setStack(slot, single)) cursorStack.count--;
+    return { cursorStack };
+  }
+
+  public static shiftClickEquipmentSlot(
+    inventory: Inventory,
+    equipment: PlayerEquipment,
+    slot: ArmourSlot,
+  ): boolean {
+    const stack = equipment.getStack(slot);
+    if (stack === null) return false;
+    const accepted = inventory.insert(
+      stack.identity.type,
+      stack.identity.id,
+      stack.count,
+      stack.metadata,
+      stack.damage,
+    );
+    if (accepted !== stack.count) return false;
+    equipment.setStack(slot, null);
+    return true;
+  }
+
+  public static numberKeySwapEquipment(
+    inventory: Inventory,
+    equipment: PlayerEquipment,
+    slot: ArmourSlot,
+    hotbarIndex: number,
+  ): boolean {
+    if (hotbarIndex < 0 || hotbarIndex > 8) return false;
+    const hotbarStack = inventory.getStack(hotbarIndex);
+    if (!equipment.accepts(slot, hotbarStack)) return false;
+    const equipped = equipment.getStack(slot);
+    if (!equipment.setStack(slot, hotbarStack)) return false;
+    inventory.setStack(hotbarIndex, equipped);
+    return true;
+  }
+
+  /** Auto-equips or atomically swaps a non-stacked armour item from an ordinary slot. */
+  public static autoEquipFromInventorySlot(inventory: Inventory, sourceSlot: number): boolean {
+    const equipment = inventory.getEquipment();
+    const source = inventory.getStack(sourceSlot);
+    if (equipment === undefined || source === null || source.count !== 1) return false;
+    const slot = equipment.getArmourSlot(source);
+    if (slot === undefined) return false;
+    const previous = equipment.getStack(slot);
+    if (!equipment.setStack(slot, source)) return false;
+    inventory.setStack(sourceSlot, previous);
+    return true;
+  }
+
   public static shiftClickBetweenInventories(
     sourceInv: Inventory,
     sourceSlot: number,
@@ -256,7 +362,8 @@ export class InventoryTransferService {
       sourceStack.identity.type,
       sourceStack.identity.id,
       sourceStack.count,
-      sourceStack.metadata
+      sourceStack.metadata,
+      sourceStack.damage
     );
 
     sourceStack.count -= accepted;

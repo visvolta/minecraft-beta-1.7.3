@@ -15,6 +15,7 @@ import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import { BreakingController } from './BreakingController';
 import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import { Inventory } from '../inventory/Inventory';
+import { InventoryTransferService } from '../inventory/InventoryTransferService';
 import type { EntityManager } from '../entities/core/EntityManager';
 import { LivingEntity } from '../entities/living/LivingEntity';
 import { DamageSource } from '../entities/damage/DamageSource';
@@ -199,6 +200,7 @@ export class InteractionController {
       return;
     }
 
+    if(this.input.isMouseButtonJustPressed('right')&&InventoryTransferService.autoEquipFromInventorySlot(this.inventory,this.selectedSlotIndex)){this.player.swingItem();return;}
     if(this.input.isMouseButtonJustPressed('right')&&this.foodUse.tryBegin(this.selectedSlotIndex)){this.player.swingItem();return;}
     if (this.input.isMouseButtonJustPressed('right') && this.targetedEntity instanceof AnimalEntity) {
       const result = this.animalInteractions.interact(this.targetedEntity, this.selectedSlotIndex);

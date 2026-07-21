@@ -40,8 +40,9 @@ export class ArrowEntity extends ProjectileEntity {
     this.inGround = true; this.arrowShake = 7; this.velocity.x = this.velocity.y = this.velocity.z = 0;
   }
   protected onEntityImpact(target: LivingEntity | 'player'): void {
-    if (target === 'player') this.ctx.player?.attackFromMob(4, this.owner ?? this);
-    else target.attackEntityFrom(this.owner ? DamageSource.mob(this.owner) : DamageSource.generic(), 4);
+    const source = DamageSource.projectile(this.owner ?? this);
+    if (target === 'player') this.ctx.player?.attackEntityFrom(source, 4);
+    else target.attackEntityFrom(source, 4);
     this.markRemoved();
   }
   public override updateRenderInterpolation(alpha:number):void{super.updateRenderInterpolation(alpha);const root=this.visualRoot;if(!root)return;const yaw=this.previousYaw+wrapDegrees(this.yaw-this.previousYaw)*alpha,pitch=this.previousPitch+(this.pitch-this.previousPitch)*alpha;const yr=yaw*Math.PI/180,pr=pitch*Math.PI/180;ARROW_RENDER_DIRECTION.set(Math.sin(yr)*Math.cos(pr),Math.sin(pr),Math.cos(yr)*Math.cos(pr)).normalize();root.quaternion.setFromUnitVectors(ARROW_LOCAL_FORWARD,ARROW_RENDER_DIRECTION);const shake=Math.max(0,this.arrowShake-alpha);if(shake>0)root.rotateZ(-Math.sin(shake*3)*shake*Math.PI/180);}

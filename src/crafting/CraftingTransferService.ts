@@ -120,7 +120,8 @@ export class CraftingTransferService {
               type: s.identity.type,
               id: s.identity.id,
               count: s.count,
-              metadata: s.metadata
+              metadata: s.metadata,
+              damage: s.damage
             },
             0, 0.2, 0,
             40

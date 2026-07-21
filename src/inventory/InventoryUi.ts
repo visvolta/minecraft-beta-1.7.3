@@ -1,3 +1,4 @@
+import { ARMOUR_SLOTS } from '../items/ArmourMaterial';
 import type { ItemStack } from './ItemStack';
 import type { SlotContentRenderer } from './SlotContentRenderer';
 
@@ -10,6 +11,7 @@ export class InventoryUi {
   private windowEl = typeof document !== 'undefined' ? document.createElement('div') : ({} as any);
   private highlightEl = typeof document !== 'undefined' ? document.createElement('div') : ({} as any);
   private slots: HTMLDivElement[] = [];
+  private equipmentSlots: HTMLDivElement[] = [];
   private craftingSlots: HTMLDivElement[] = [];
   private resultSlotEl = typeof document !== 'undefined' ? document.createElement('div') : ({} as any);
 
@@ -46,6 +48,14 @@ export class InventoryUi {
       const e = this.createSlotElement(`player-${i}`, String(i));
       this.windowEl.appendChild(e);
       this.slots.push(e);
+    }
+
+    // Dedicated Beta equipment slots, top-to-bottom: helmet, chestplate, leggings, boots.
+    for (const slot of ARMOUR_SLOTS) {
+      const e = this.createSlotElement(`armour-${slot}`, slot);
+      e.dataset.equipmentSlot = slot;
+      this.windowEl.appendChild(e);
+      this.equipmentSlots.push(e);
     }
 
     // 2x2 Crafting input slots 0..3
@@ -138,6 +148,15 @@ export class InventoryUi {
       e.style.setProperty('--gui-scale', String(scale));
     });
 
+    // Armour slots use the four blank cells already painted into the Beta GUI.
+    this.equipmentSlots.forEach((e, i) => {
+      e.style.left = `${8 * scale}px`;
+      e.style.top = `${(8 + i * 18) * scale}px`;
+      e.style.width = `${16 * scale}px`;
+      e.style.height = `${16 * scale}px`;
+      e.style.setProperty('--gui-scale', String(scale));
+    });
+
     // Crafting input slots 0..3 (2x2 grid)
     this.craftingSlots.forEach((e, i) => {
       const col = i % 2;
@@ -195,6 +214,7 @@ export class InventoryUi {
 
   public render(
     stacks: readonly (ItemStack | null)[],
+    equipmentStacks: readonly (ItemStack | null)[],
     craftingStacks: readonly (ItemStack | null)[],
     resultStack: ItemStack | null,
     renderer: SlotContentRenderer
@@ -205,6 +225,13 @@ export class InventoryUi {
       if (e) {
         const content = e.querySelector<HTMLElement>('.stage1-slot-content');
         if (content) renderer.renderSlot(content, stacks[i] ?? null);
+      }
+    }
+    for (let i = 0; i < ARMOUR_SLOTS.length; i++) {
+      const e = this.equipmentSlots[i];
+      if (e) {
+        const content = e.querySelector<HTMLElement>('.stage1-slot-content');
+        if (content) renderer.renderSlot(content, equipmentStacks[i] ?? null);
       }
     }
     for (let i = 0; i < 4; i++) {
@@ -222,6 +249,10 @@ export class InventoryUi {
 
   public getSlots(): ReadonlyArray<HTMLDivElement> {
     return this.slots;
+  }
+
+  public getEquipmentSlots(): ReadonlyArray<HTMLDivElement> {
+    return this.equipmentSlots;
   }
 
   public getCraftingSlots(): ReadonlyArray<HTMLDivElement> {

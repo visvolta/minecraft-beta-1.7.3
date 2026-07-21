@@ -64,7 +64,8 @@ export class CraftingGrid {
             c.containerReturn.identity.type,
             c.containerReturn.identity.id,
             c.containerReturn.count,
-            c.containerReturn.metadata
+            c.containerReturn.metadata,
+            c.containerReturn.damage
           );
           if (accepted < c.containerReturn.count) {
             const eyeY = player.position.y + 1.62;
@@ -76,7 +77,8 @@ export class CraftingGrid {
                 type: c.containerReturn.identity.type,
                 id: c.containerReturn.identity.id,
                 count: c.containerReturn.count - accepted,
-                metadata: c.containerReturn.metadata
+                metadata: c.containerReturn.metadata,
+                damage: c.containerReturn.damage
               },
               0, 0.2, 0,
               40

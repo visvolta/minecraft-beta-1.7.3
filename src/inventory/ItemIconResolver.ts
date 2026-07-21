@@ -60,6 +60,27 @@ const ITEM_ALIASES: Record<string, string> = {
   '285': 'gold_pickaxe',
   '286': 'gold_axe',
   '294': 'gold_hoe',
+  // Beta armour item ids
+  '298': 'leather_helmet',
+  '299': 'leather_chestplate',
+  '300': 'leather_leggings',
+  '301': 'leather_boots',
+  '302': 'chainmail_helmet',
+  '303': 'chainmail_chestplate',
+  '304': 'chainmail_leggings',
+  '305': 'chainmail_boots',
+  '306': 'iron_helmet',
+  '307': 'iron_chestplate',
+  '308': 'iron_leggings',
+  '309': 'iron_boots',
+  '310': 'diamond_helmet',
+  '311': 'diamond_chestplate',
+  '312': 'diamond_leggings',
+  '313': 'diamond_boots',
+  '314': 'gold_helmet',
+  '315': 'gold_chestplate',
+  '316': 'gold_leggings',
+  '317': 'gold_boots',
 };
 
 const BLOCK_TEXTURE_FALLBACKS: Record<string, string> = {

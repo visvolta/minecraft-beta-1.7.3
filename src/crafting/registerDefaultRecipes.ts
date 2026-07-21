@@ -184,6 +184,35 @@ export function registerDefaultRecipes(
     { id: 'bowl' }, { id: BlockIds.BrownMushroom }, { id: BlockIds.RedMushroom }
   ], new ItemStack('mushroom_stew', 'item', 1, 0));
 
+  // Beta armour recipes. Chain definitions exist, but the fire-block recipes are intentionally omitted.
+  const armourMaterials: ReadonlyArray<readonly [string, string]> = [
+    ['leather', 'leather'],
+    ['iron_ingot', 'iron'],
+    ['diamond', 'diamond'],
+    ['gold_ingot', 'gold'],
+  ];
+  for (const [ingredientId, material] of armourMaterials) {
+    const ingredient = { id: ingredientId };
+    tryRegisterShaped(`${material}_helmet`, 3, 2, [
+      ingredient, ingredient, ingredient,
+      ingredient, null, ingredient,
+    ], new ItemStack(`${material}_helmet`, 'item', 1), false);
+    tryRegisterShaped(`${material}_chestplate`, 3, 3, [
+      ingredient, null, ingredient,
+      ingredient, ingredient, ingredient,
+      ingredient, ingredient, ingredient,
+    ], new ItemStack(`${material}_chestplate`, 'item', 1), false);
+    tryRegisterShaped(`${material}_leggings`, 3, 3, [
+      ingredient, ingredient, ingredient,
+      ingredient, null, ingredient,
+      ingredient, null, ingredient,
+    ], new ItemStack(`${material}_leggings`, 'item', 1), false);
+    tryRegisterShaped(`${material}_boots`, 3, 2, [
+      ingredient, null, ingredient,
+      ingredient, null, ingredient,
+    ], new ItemStack(`${material}_boots`, 'item', 1), false);
+  }
+
   // Tools & Weapons across materials
   const toolMaterials: ReadonlyArray<readonly [string | number, string, string, string, string, string]> = [
     // [ingredientId, pickaxe, axe, shovel, sword, hoe]

@@ -542,7 +542,10 @@ export class Engine {
     this.lightningRenderer = new LightningRenderer(this.renderer.scene);
 
     this.inventory = new Inventory();
-    InventorySerializer.deserialize(this.inventory, metadata.inventory);
+    InventorySerializer.deserialize(this.inventory, metadata.inventory, metadata.armour);
+    const playerEquipment = this.inventory.getEquipment();
+    if (playerEquipment === undefined) throw new Error('Player inventory equipment was not initialized');
+    this.player.setEquipment(playerEquipment);
     this.selectedSlot = metadata.selectedHotbarSlot ?? 0;
 
     this.itemEntityManager = new ItemEntityManager(
@@ -550,6 +553,9 @@ export class Engine {
       this.inventory,
       blockRegistry,
     );
+    playerEquipment.setBreakHandler(() => {
+      this.itemEntityManager.emitItemBreak(this.player.position.x, this.player.position.y, this.player.position.z);
+    });
     this.lastTotalTicks = this.worldTime.getTotalTicks();
 
     const animalInteractions=new AnimalInteractionService(this.inventory,this.itemEntityManager);this.foodUseController=new FoodUseController(this.player,this.inventory,this.input,()=>this.selectedSlot,this.mobSoundSink);
@@ -585,7 +591,7 @@ export class Engine {
       blockRegistry,
       this.inventory,
     );
-    this.hudRenderer=new HudRenderer(this.hotbarHudRenderer,this.player);
+    this.hudRenderer=new HudRenderer(this.hotbarHudRenderer,this.player,playerEquipment);
     this.inventoryUi = new InventoryUi();
     this.inventoryTooltip = new InventoryTooltip();
     this.cursorHeldRenderer = new CursorHeldItemRenderer();
@@ -790,6 +796,7 @@ export class Engine {
                   id: s.identity.id,
                   count: s.count,
                   metadata: s.metadata,
+                  damage: s.damage,
                 },
                 0, 0.2, 0,
                 40
@@ -1659,6 +1666,7 @@ export class Engine {
         thunderTime: weather.thunderTime
       },
       inventory: serialized.inventory,
+      armour: serialized.armour,
       selectedHotbarSlot: serialized.selectedHotbarSlot,
       furnaces: this.furnaceManager.serialize(),
       chests: this.chestManager.serialize(),

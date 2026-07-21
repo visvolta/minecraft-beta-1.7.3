@@ -4,7 +4,8 @@ export class ItemStack{public readonly identity:ItemIdentity;public count:number
  public constructor(id:number|string,type:'block'|'item',count:number,metadata=0,damage=0,definitions:ItemDefinitionRegistry=DEFAULT_ITEM_DEFINITIONS){this.identity={id,type};this.count=count;this.metadata=metadata;const max=type==='item'?definitions.get(id)?.durability:undefined;this.damage=max!==undefined?Math.max(0,Math.min(max-1,Math.floor(damage))):0;}
  public clone():ItemStack{return new ItemStack(this.identity.id,this.identity.type,this.count,this.metadata,this.damage);}
  public matches(other:ItemStack):boolean{return this.identity.id===other.identity.id&&this.identity.type===other.identity.type&&this.metadata===other.metadata&&this.damage===other.damage;}
- public getMaxDurability(definitions:ItemDefinitionRegistry=DEFAULT_ITEM_DEFINITIONS):number{return this.identity.type==='item'?definitions.get(this.identity.id)?.durability??0:0;}
+ public getDefinition(definitions:ItemDefinitionRegistry=DEFAULT_ITEM_DEFINITIONS){return this.identity.type==='item'?definitions.get(this.identity.id):undefined;}
+ public getMaxDurability(definitions:ItemDefinitionRegistry=DEFAULT_ITEM_DEFINITIONS):number{return this.getDefinition(definitions)?.durability??0;}
  public isDamageable(definitions:ItemDefinitionRegistry=DEFAULT_ITEM_DEFINITIONS):boolean{return this.getMaxDurability(definitions)>0;}
  public getRemainingDurability(definitions:ItemDefinitionRegistry=DEFAULT_ITEM_DEFINITIONS):number{const max=this.getMaxDurability(definitions);return max>0?Math.max(0,max-this.damage):0;}
  public getDurabilityFraction(definitions:ItemDefinitionRegistry=DEFAULT_ITEM_DEFINITIONS):number{const max=this.getMaxDurability(definitions);return max>0?Math.max(0,Math.min(1,(max-this.damage)/max)):1;}

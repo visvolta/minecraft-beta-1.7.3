@@ -1,5 +1,7 @@
+import { ARMOUR_SLOTS, type ArmourSlot } from '../items/ArmourMaterial';
 import type { Inventory } from './Inventory';
 import type { ItemStack } from './ItemStack';
+import type { PlayerEquipment } from './PlayerEquipment';
 import { InventoryTransferService } from './InventoryTransferService';
 import type { InventoryUi } from './InventoryUi';
 import type { InventoryTooltip } from './InventoryTooltip';
@@ -15,6 +17,7 @@ import { CraftingTransferService } from '../crafting/CraftingTransferService';
 export class InventoryController extends BaseContainerController {
   public readonly craftingGrid = new CraftingGrid(2, 2);
   public resultSlotStack: ItemStack | null = null;
+  private readonly equipment: PlayerEquipment;
 
   public constructor(
     inventory: Inventory,
@@ -27,6 +30,9 @@ export class InventoryController extends BaseContainerController {
     private readonly recipeRegistry: RecipeRegistry
   ) {
     super(inventory, tooltip, cursorRenderer, slotRenderer, itemEntityManager, player);
+    const equipment = inventory.getEquipment();
+    if (equipment === undefined) throw new Error('InventoryController requires a Player inventory with equipment');
+    this.equipment = equipment;
     this.setupListeners();
   }
 
@@ -104,6 +110,84 @@ export class InventoryController extends BaseContainerController {
             this.tooltip.update(0, 0, null, this.scale);
           }
         }
+      });
+    });
+
+    // Dedicated armour slots use the same cursor, drag, tooltip and renderer paths.
+    this.ui.getEquipmentSlots().forEach((slotEl, index) => {
+      const armourSlot = ARMOUR_SLOTS[index]!;
+      const hoverIndex = 36 + index;
+
+      slotEl.addEventListener('mouseenter', (e: MouseEvent) => {
+        if (!this.isOpen) return;
+        this.hoveredSlotIndex = hoverIndex;
+        this.ui.setHoverHighlightOnElement(slotEl, this.scale);
+        const stack = this.equipment.getStack(armourSlot);
+        this.tooltip.update(
+          stack !== null && this.cursorStack === null ? e.clientX : 0,
+          stack !== null && this.cursorStack === null ? e.clientY : 0,
+          stack !== null && this.cursorStack === null ? this.getDisplayName(stack) : null,
+          this.scale,
+        );
+
+        if (this.isRightDragging && this.cursorStack !== null && !this.dragSlots.has(hoverIndex)) {
+          this.dragSlots.add(hoverIndex);
+          const result = InventoryTransferService.rightDragEquipmentSlot(
+            this.equipment,
+            armourSlot,
+            this.cursorStack,
+          );
+          this.cursorStack = result.cursorStack;
+          this.renderAll();
+          this.cursorRenderer.update(e.clientX, e.clientY, this.cursorStack, this.slotRenderer, this.scale);
+        }
+      });
+
+      slotEl.addEventListener('mouseleave', () => {
+        if (!this.isOpen || this.hoveredSlotIndex !== hoverIndex) return;
+        this.hoveredSlotIndex = -1;
+        this.ui.hideHoverHighlight();
+        this.tooltip.update(0, 0, null, this.scale);
+      });
+
+      slotEl.addEventListener('mousedown', (e: MouseEvent) => {
+        if (!this.isOpen) return;
+        e.stopPropagation();
+
+        if (e.button === 0) {
+          if (e.shiftKey) {
+            InventoryTransferService.shiftClickEquipmentSlot(this.inventory, this.equipment, armourSlot);
+          } else {
+            const result = InventoryTransferService.leftClickEquipmentSlot(
+              this.equipment,
+              armourSlot,
+              this.cursorStack,
+            );
+            this.cursorStack = result.cursorStack;
+          }
+        } else if (e.button === 2) {
+          this.isRightDragging = true;
+          this.dragSlots.clear();
+          this.dragSlots.add(hoverIndex);
+          const result = InventoryTransferService.rightClickEquipmentSlot(
+            this.equipment,
+            armourSlot,
+            this.cursorStack,
+          );
+          this.cursorStack = result.cursorStack;
+        } else {
+          return;
+        }
+
+        this.renderAll();
+        this.cursorRenderer.update(e.clientX, e.clientY, this.cursorStack, this.slotRenderer, this.scale);
+        const stack = this.equipment.getStack(armourSlot);
+        this.tooltip.update(
+          stack !== null && this.cursorStack === null ? e.clientX : 0,
+          stack !== null && this.cursorStack === null ? e.clientY : 0,
+          stack !== null && this.cursorStack === null ? this.getDisplayName(stack) : null,
+          this.scale,
+        );
       });
     });
 
@@ -281,7 +365,18 @@ export class InventoryController extends BaseContainerController {
 
   protected getHoveredStack(slotIndex: number): ItemStack | null {
     if (slotIndex >= 0 && slotIndex < 36) return this.inventory.getStack(slotIndex);
+    if (slotIndex >= 36 && slotIndex < 40) return this.equipment.getStack(ARMOUR_SLOTS[slotIndex - 36]!);
     return null;
+  }
+
+  public override handleNumberKey(digit: number): void {
+    if (this.isOpen && this.hoveredSlotIndex >= 36 && this.hoveredSlotIndex < 40) {
+      const slot: ArmourSlot = ARMOUR_SLOTS[this.hoveredSlotIndex - 36]!;
+      InventoryTransferService.numberKeySwapEquipment(this.inventory, this.equipment, slot, digit - 1);
+      this.renderAll();
+      return;
+    }
+    super.handleNumberKey(digit);
   }
 
   protected onInventorySlotModified(): void {
@@ -325,7 +420,13 @@ export class InventoryController extends BaseContainerController {
   }
 
   public renderAll(): void {
-    this.ui.render(this.inventory.getSlots(), this.craftingGrid.getSlots(), this.resultSlotStack, this.slotRenderer);
+    this.ui.render(
+      this.inventory.getSlots(),
+      this.equipment.getStacks(),
+      this.craftingGrid.getSlots(),
+      this.resultSlotStack,
+      this.slotRenderer,
+    );
   }
 
   public dispose(): void {

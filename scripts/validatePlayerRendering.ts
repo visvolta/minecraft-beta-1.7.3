@@ -15,6 +15,8 @@ import { BreakingController } from '../src/player/BreakingController.ts';
 import { BlockIds } from '../src/blocks/BlockId.ts';
 import { Inventory } from '../src/inventory/Inventory.ts';
 import { InventorySerializer } from '../src/inventory/InventorySerializer.ts';
+import { AABB } from '../src/physics/AABB.ts';
+import type { RaycastHit } from '../src/world/Raycaster.ts';
 
 function assert(v: boolean, m: string) {
   if (!v) {
@@ -177,42 +179,52 @@ function testBreakingController() {
 
   const breaking = new BreakingController(player, chunkManager, blockRegistry, world, mockItemManager);
 
-  const bedrockHit = {
+  const hit = (blockId: number): RaycastHit => ({
     blockPos: { x: 0, y: 64, z: 0 },
     face: { x: 0, y: 1, z: 0 },
     distance: 1.0,
-  } as any;
+    blockDefinition: blockRegistry.getById(blockId)!,
+    hitAabb: new AABB(0, 64, 0, 1, 65, 1),
+  });
 
-  breaking.update(bedrockHit, true, 0.05); // 1 tick (0.05s)
+  breaking.update(hit(BlockIds.Bedrock), true, 0.05);
+  breaking.tick();
   assert(breaking.getProgress() === 0.0, 'Bedrock cannot be cracked or broken');
 
   // Grass
   world.setBlock(0, 64, 0, BlockIds.Grass, { reason: 'player', notifyNeighbours: false, updateLighting: false });
   breaking.reset();
+  const grassHit = hit(BlockIds.Grass);
 
   for (let i = 0; i < 17; i++) {
-    breaking.update(bedrockHit, true, 0.05);
+    breaking.update(grassHit, true, 0.05);
+    breaking.tick();
   }
   assert(breaking.getProgress() < 1.0 && breaking.getProgress() > 0.0, 'Grass not broken in 17 ticks');
 
-  breaking.update(bedrockHit, true, 0.05);
+  breaking.update(grassHit, true, 0.05);
+  breaking.tick();
   assert(world.getBlock(0, 64, 0) === BlockIds.Air, 'Grass broken at 18 ticks');
 
   // Wait out the 5-tick cooldown
   for (let i = 0; i < 5; i++) {
     breaking.update(undefined, false, 0.05);
+    breaking.tick();
   }
 
   // Stone
   world.setBlock(0, 64, 0, BlockIds.Stone, { reason: 'player', notifyNeighbours: false, updateLighting: false });
   breaking.reset();
+  const stoneHit = hit(BlockIds.Stone);
 
   for (let i = 0; i < 149; i++) {
-    breaking.update(bedrockHit, true, 0.05);
+    breaking.update(stoneHit, true, 0.05);
+    breaking.tick();
   }
   assert(breaking.getProgress() < 1.0 && breaking.getProgress() > 0.0, 'Stone not broken in 149 ticks');
 
-  breaking.update(bedrockHit, true, 0.05);
+  breaking.update(stoneHit, true, 0.05);
+  breaking.tick();
   assert(world.getBlock(0, 64, 0) === BlockIds.Air, 'Stone broken at 150 ticks');
 }
 
