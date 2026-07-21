@@ -102,6 +102,15 @@ export class Inventory {
     }
   }
 
+  /** Damages a non-stackable tool; metadata is accumulated durability damage. */
+  public damageToolInSlot(slotIndex: number, amount: number, maxDurability: number): boolean {
+    const stack = this.getStack(slotIndex);
+    if (stack === null || stack.count !== 1) return false;
+    stack.metadata += amount;
+    if (stack.metadata >= maxDurability) this.setStack(slotIndex, null);
+    return true;
+  }
+
   public getSlots(): (ItemStack | null)[] {
     return this.slots;
   }

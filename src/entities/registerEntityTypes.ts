@@ -6,6 +6,11 @@ import { PigEntity } from './living/PigEntity';
 import { CowEntity } from './living/CowEntity';
 import { SheepEntity } from './living/SheepEntity';
 import { ChickenEntity } from './living/ChickenEntity';
+import { ZombieEntity } from './hostile/ZombieEntity';
+import { SkeletonEntity } from './hostile/SkeletonEntity';
+import { SpiderEntity } from './hostile/SpiderEntity';
+import { CreeperEntity } from './hostile/CreeperEntity';
+import { ArrowEntity } from './projectiles/ArrowEntity';
 
 /**
  * Registers every entity type's string id, numeric id and deserialiser with
@@ -22,4 +27,9 @@ export function registerEntityTypes(registry: EntityTypeRegistry): void {
   registry.register(EntityTypeIds.Cow, 'Cow', CowEntity.deserialize);
   registry.register(EntityTypeIds.Sheep, 'Sheep', SheepEntity.deserialize);
   registry.register(EntityTypeIds.Chicken, 'Chicken', ChickenEntity.deserialize);
+  registry.register(EntityTypeIds.Zombie, 'Zombie', ZombieEntity.deserialize);
+  registry.register(EntityTypeIds.Skeleton, 'Skeleton', SkeletonEntity.deserialize);
+  registry.register(EntityTypeIds.Spider, 'Spider', SpiderEntity.deserialize);
+  registry.register(EntityTypeIds.Creeper, 'Creeper', CreeperEntity.deserialize);
+  registry.register(EntityTypeIds.Arrow, 'Arrow', ArrowEntity.deserialize);
 }

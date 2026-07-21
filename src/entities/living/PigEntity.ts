@@ -19,10 +19,11 @@ import type { Drop } from '../items/BlockDropResolver';
 export class PigEntity extends QuadrupedEntity {
   public readonly typeId = EntityTypeIds.Pig;
   public readonly typeStringId = 'Pig';
+  public readonly breedingItemId = 'carrot';
 
   public constructor(ctx: EntityWorldContext, x: number, y: number, z: number) {
     super(ctx);
-    this.setSize(0.9, 0.9);
+    this.initializeAnimal(0.9, 0.9);
     this.setPosition(x, y, z);
     this.moveSpeed = 0.7;
     this.maxHealth = 10;
@@ -49,11 +50,15 @@ export class PigEntity extends QuadrupedEntity {
   }
 
   protected writeEntityNbt(map: Map<string, NbtTag>): void {
-    this.writeLivingNbt(map);
+    this.writeAnimalNbt(map);
   }
 
   protected readEntityNbt(data: NbtCompound): void {
-    this.readLivingNbt(data);
+    this.readAnimalNbt(data);
+  }
+
+  protected createChild(x: number, y: number, z: number): PigEntity {
+    return new PigEntity(this.ctx, x, y, z);
   }
 
   /** Factory used by the entity-type registry to load a saved pig. */

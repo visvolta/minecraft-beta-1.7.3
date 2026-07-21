@@ -14,6 +14,7 @@ export type DamageCategory =
   | 'generic'
   | 'player'
   | 'mob'
+  | 'explosion'
   | 'fall'
   | 'fire'
   | 'lava'
@@ -53,6 +54,11 @@ export class DamageSource {
   /** Attack from another mob. */
   public static mob(attacker: DamageAttacker): DamageSource {
     return new DamageSource('mob', 'mob', attacker, true, false, false);
+  }
+
+  /** Explosion damage attributed to its source entity. */
+  public static explosion(attacker: DamageAttacker): DamageSource {
+    return new DamageSource('explosion', 'explosion', attacker, false, false, false);
   }
 
   /** Unattributed generic damage. */

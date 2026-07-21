@@ -25,6 +25,12 @@ export const PLAYER_EYE_HEIGHT = FIRST_PERSON_CAMERA_OFFSET_Y;
  * Beta's own convention and keeping ground/eye-height math simple.
  */
 export class Player {
+  public readonly maxHealth = 20;
+  public health = 20;
+  public hurtResistantTime = 0;
+  public hurtTime = 0;
+  public lastDamageAmount = 0;
+
   /** Feet position (bottom-centre of the hitbox), world space. */
   public readonly position = { x: 0, y: 0, z: 0 };
 
@@ -82,6 +88,40 @@ export class Player {
       this.position.y + PLAYER_HEIGHT,
       this.position.z + halfWidth,
     );
+  }
+
+  public isAlive(): boolean {
+    return this.health > 0;
+  }
+
+  /** Minimal Beta-style incoming mob damage surface; offensive combat stays elsewhere. */
+  public attackFromMob(amount: number, attacker: { position: { x: number; z: number } }): boolean {
+    if (!this.isAlive()) return false;
+    let applied = amount;
+    if (this.hurtResistantTime > 10) {
+      if (amount <= this.lastDamageAmount) return false;
+      applied = amount - this.lastDamageAmount;
+      this.lastDamageAmount = amount;
+    } else {
+      this.lastDamageAmount = amount;
+      this.hurtResistantTime = 20;
+      this.hurtTime = 10;
+      const dx = this.position.x - attacker.position.x;
+      const dz = this.position.z - attacker.position.z;
+      const length = Math.hypot(dx, dz);
+      if (length > 1e-6) {
+        this.velocity.x += dx / length * 8;
+        this.velocity.z += dz / length * 8;
+      }
+      this.velocity.y = Math.max(this.velocity.y, 8);
+    }
+    this.health = Math.max(0, this.health - applied);
+    return true;
+  }
+
+  public tickCombatState(): void {
+    if (this.hurtResistantTime > 0) this.hurtResistantTime -= 1;
+    if (this.hurtTime > 0) this.hurtTime -= 1;
   }
 
   public swingItem(): void {

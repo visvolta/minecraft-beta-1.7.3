@@ -1,5 +1,5 @@
 import type { EntityWorldContext } from '../core/EntityContext';
-import { AnimalEntity } from './AnimalEntity';
+import { AnimalEntity, BABY_SCALE } from './AnimalEntity';
 import type { QuadrupedModel } from './QuadrupedModel';
 
 /** Ticks over which the death-collapse animation plays (matches the linger). */
@@ -28,7 +28,12 @@ export abstract class QuadrupedEntity extends AnimalEntity {
     }
     this.model = this.createModel();
     this.renderObject = this.model.root;
+    this.applyBabyVisualScale(this.isChild() ? BABY_SCALE : 1);
     this.ctx.scene.add(this.model.root);
+  }
+
+  protected override applyBabyVisualScale(scale: number): void {
+    this.model?.root.scale.setScalar(scale);
   }
 
   public override updateRenderInterpolation(alpha: number): void {

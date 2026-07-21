@@ -20,6 +20,8 @@ import { LivingEntity } from '../entities/living/LivingEntity';
 import { DamageSource } from '../entities/damage/DamageSource';
 import { selectMeleeTarget } from './MeleeTargeting';
 import { MELEE_REACH, PLAYER_MELEE_DAMAGE } from './PlayerConstants';
+import { AnimalEntity } from '../entities/living/AnimalEntity';
+import type { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';
 
 /** Maximum block interaction reach, in blocks. */
 export const INTERACTION_REACH = 4.75;
@@ -64,6 +66,7 @@ export class InteractionController {
     inventory: Inventory,
     private readonly behaviourRegistry: BlockBehaviourRegistry,
     private readonly entityManager: EntityManager,
+    private readonly animalInteractions: AnimalInteractionService,
   ) {
     this.input = input;
     this.camera = camera;
@@ -193,6 +196,14 @@ export class InteractionController {
       this.player.swingItem();
       this.attackTargetedEntity(this.targetedEntity);
       return;
+    }
+
+    if (this.input.isMouseButtonJustPressed('right') && this.targetedEntity instanceof AnimalEntity) {
+      const result = this.animalInteractions.interact(this.targetedEntity, this.selectedSlotIndex);
+      if (result !== 'not-applicable') {
+        this.player.swingItem();
+        return;
+      }
     }
 
     if (this.currentHit === undefined) {

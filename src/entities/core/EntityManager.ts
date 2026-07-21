@@ -59,6 +59,8 @@ export class EntityManager {
   public readonly context: EntityWorldContext;
 
   private gameTick = 0;
+  /** Active loaded passive creatures only; parked entities deliberately do not count. */
+  private passiveCreatureCount = 0;
 
   public constructor(options: EntityManagerOptions) {
     this.chunkManager = options.chunkManager;
@@ -84,6 +86,12 @@ export class EntityManager {
       particles: options.particles,
       weather: options.weather,
       playerPosition: options.playerPosition,
+      playerHeldItemId: options.playerHeldItemId,
+      player: options.player,
+      difficulty: options.difficulty,
+      isDaytime: options.isDaytime,
+      skylightSubtracted: options.skylightSubtracted,
+      explode: options.explode,
     };
 
     this.chunkManager.addRemoveListener((chunk) => this.onChunkRemoved(chunk));
@@ -210,6 +218,7 @@ export class EntityManager {
       }
       this.entities.set(entity.id, entity);
       this.byUuid.set(entity.uuid, entity);
+      if (entity.isPassiveCreature) this.passiveCreatureCount += 1;
       this.addToChunkBucket(entity);
       this.markChunkDirty(entity.chunkX, entity.chunkZ);
       entity.onSpawn(ctx);
@@ -227,6 +236,7 @@ export class EntityManager {
       }
       this.entities.delete(id);
       this.byUuid.delete(entity.uuid);
+      if (entity.isPassiveCreature) this.passiveCreatureCount -= 1;
       this.removeFromChunkBucket(entity);
       entity.onRemove();
       this.markChunkDirty(entity.chunkX, entity.chunkZ);
@@ -291,6 +301,7 @@ export class EntityManager {
       }
       this.entities.delete(id);
       this.byUuid.delete(entity.uuid);
+      if (entity.isPassiveCreature) this.passiveCreatureCount -= 1;
       entity.onPark();
       parkedList.push(entity);
     }
@@ -319,6 +330,7 @@ export class EntityManager {
       }
       this.entities.set(entity.id, entity);
       this.byUuid.set(entity.uuid, entity);
+      if (entity.isPassiveCreature) this.passiveCreatureCount += 1;
       entity.onRestore(this.context);
       this.addToChunkBucket(entity);
     }
@@ -394,6 +406,10 @@ export class EntityManager {
 
   public get activeCount(): number {
     return this.entities.size;
+  }
+
+  public get activePassiveCreatureCount(): number {
+    return this.passiveCreatureCount;
   }
 
   public get parkedCount(): number {
@@ -480,6 +496,7 @@ export class EntityManager {
     this.parked.clear();
     this.pendingAdd.length = 0;
     this.pendingRemove.clear();
+    this.passiveCreatureCount = 0;
   }
 
   private tickContext(): EntityTickContext {

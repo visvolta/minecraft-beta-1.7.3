@@ -1,7 +1,7 @@
 import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
 import { EntityTypeIds } from '../core/EntityType';
 import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
-import { AnimalEntity } from './AnimalEntity';
+import { AnimalEntity, BABY_SCALE } from './AnimalEntity';
 import { ChickenModel } from './ChickenModel';
 import { WanderTask } from '../ai/tasks/WanderTask';
 import { IdleLookTask } from '../ai/tasks/IdleLookTask';
@@ -23,6 +23,7 @@ const DEATH_ANIM_TICKS = 20;
 export class ChickenEntity extends AnimalEntity {
   public readonly typeId = EntityTypeIds.Chicken;
   public readonly typeStringId = 'Chicken';
+  public readonly breedingItemId = 'seeds';
 
   private model: ChickenModel | null = null;
 
@@ -42,7 +43,7 @@ export class ChickenEntity extends AnimalEntity {
 
   public constructor(ctx: EntityWorldContext, x: number, y: number, z: number) {
     super(ctx);
-    this.setSize(0.3, 0.4);
+    this.initializeAnimal(0.3, 0.4);
     this.setPosition(x, y, z);
     this.moveSpeed = 0.7;
     this.maxHealth = 4;
@@ -63,7 +64,12 @@ export class ChickenEntity extends AnimalEntity {
     }
     this.model = new ChickenModel();
     this.renderObject = this.model.root;
+    this.applyBabyVisualScale(this.isChild() ? BABY_SCALE : 1);
     this.ctx.scene.add(this.model.root);
+  }
+
+  protected override applyBabyVisualScale(scale: number): void {
+    this.model?.root.scale.setScalar(scale);
   }
 
   public onTick(ctx: EntityTickContext): void {
@@ -112,6 +118,7 @@ export class ChickenEntity extends AnimalEntity {
   }
 
   private updateEggLaying(ctx: EntityTickContext): void {
+    if (this.isChild()) return;
     this.timeUntilNextEgg -= 1;
     if (this.timeUntilNextEgg <= 0) {
       // Lay exactly one egg, then reset the timer.
@@ -172,16 +179,20 @@ export class ChickenEntity extends AnimalEntity {
   }
 
   protected writeEntityNbt(map: Map<string, NbtTag>): void {
-    this.writeLivingNbt(map);
+    this.writeAnimalNbt(map);
     map.set('EggTimer', nbt.int(this.timeUntilNextEgg));
   }
 
   protected readEntityNbt(data: NbtCompound): void {
-    this.readLivingNbt(data);
+    this.readAnimalNbt(data);
     const eggTimer = data.value.get('EggTimer');
     if (eggTimer?.type === 'int' || eggTimer?.type === 'short') {
       this.timeUntilNextEgg = eggTimer.value;
     }
+  }
+
+  protected createChild(x: number, y: number, z: number): ChickenEntity {
+    return new ChickenEntity(this.ctx, x, y, z);
   }
 
   public static deserialize(ctx: EntityWorldContext, data: NbtCompound): ChickenEntity | undefined {

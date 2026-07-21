@@ -22,6 +22,7 @@ import type { Drop } from '../items/BlockDropResolver';
 export class SheepEntity extends QuadrupedEntity {
   public readonly typeId = EntityTypeIds.Sheep;
   public readonly typeStringId = 'Sheep';
+  public readonly breedingItemId = 'wheat';
 
   /** Fleece colour index 0–15 (persisted). */
   public fleeceColor = 0;
@@ -30,7 +31,7 @@ export class SheepEntity extends QuadrupedEntity {
 
   public constructor(ctx: EntityWorldContext, x: number, y: number, z: number) {
     super(ctx);
-    this.setSize(0.9, 1.3);
+    this.initializeAnimal(0.9, 1.3);
     this.setPosition(x, y, z);
     this.moveSpeed = 0.7;
     this.maxHealth = 8;
@@ -54,7 +55,7 @@ export class SheepEntity extends QuadrupedEntity {
   }
 
   /** Re-applies the fleece state to the live model (after load / future shear). */
-  private applyFleeceToModel(): void {
+  public refreshFleeceModel(): void {
     const model = this.model;
     if (model instanceof SheepModel) {
       model.setFleeceColor(this.fleeceColor);
@@ -65,7 +66,7 @@ export class SheepEntity extends QuadrupedEntity {
   /** Regrows the fleece after a successful grazing action. */
   public regrowWool(): void {
     this.sheared = false;
-    this.applyFleeceToModel();
+    this.refreshFleeceModel();
   }
 
   protected override getDropItems(): Drop[] {
@@ -87,13 +88,13 @@ export class SheepEntity extends QuadrupedEntity {
   }
 
   protected writeEntityNbt(map: Map<string, NbtTag>): void {
-    this.writeLivingNbt(map);
+    this.writeAnimalNbt(map);
     map.set('Color', nbt.byte(this.fleeceColor));
     map.set('Sheared', nbt.byte(this.sheared ? 1 : 0));
   }
 
   protected readEntityNbt(data: NbtCompound): void {
-    this.readLivingNbt(data);
+    this.readAnimalNbt(data);
     const map = data.value;
     const color = map.get('Color');
     if (color?.type === 'byte' || color?.type === 'int') {
@@ -103,7 +104,11 @@ export class SheepEntity extends QuadrupedEntity {
     if (sheared?.type === 'byte' || sheared?.type === 'int') {
       this.sheared = sheared.value !== 0;
     }
-    this.applyFleeceToModel();
+    this.refreshFleeceModel();
+  }
+
+  protected createChild(x: number, y: number, z: number): SheepEntity {
+    return new SheepEntity(this.ctx, x, y, z);
   }
 
   public static deserialize(ctx: EntityWorldContext, data: NbtCompound): SheepEntity | undefined {

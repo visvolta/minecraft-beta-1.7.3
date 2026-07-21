@@ -20,11 +20,9 @@ import { EntityManager } from '../entities/core/EntityManager';
 import { createDefaultEntityTypeRegistry } from '../entities/core/EntityType';
 import { registerEntityTypes } from '../entities/registerEntityTypes';
 import { JavaRandom } from '../world/generation/random/JavaRandom';
-import { PigEntity } from '../entities/living/PigEntity';
-import { CowEntity } from '../entities/living/CowEntity';
-import { SheepEntity } from '../entities/living/SheepEntity';
-import { ChickenEntity } from '../entities/living/ChickenEntity';
-import { MobSpawnMenu, type MobType } from '../debug/MobSpawnMenu';
+import { NaturalPassiveSpawner } from '../entities/spawning/NaturalPassiveSpawner';
+import { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';
+import { ExplosionService } from '../entities/explosion/ExplosionService';
 import { SimpleEntityParticleSink } from '../entities/particles/EntityParticleSink';
 import { Inventory } from '../inventory/Inventory';
 import { InventorySerializer } from '../inventory/InventorySerializer';
@@ -188,6 +186,8 @@ export class Engine {
   private readonly itemAtlas: ItemTextureAtlas;
   private readonly itemEntityManager: ItemEntityManager;
   private readonly entityManager: EntityManager;
+  private readonly naturalPassiveSpawner: NaturalPassiveSpawner;
+  private readonly explosionService: ExplosionService;
   private readonly entityParticles: SimpleEntityParticleSink;
   private lastTotalTicks = 0;
   private readonly inventory: Inventory;
@@ -250,7 +250,6 @@ export class Engine {
   // whether PlayerPhysics or DebugController runs each frame); DebugOverlay
   // only ever reads a DebugStats snapshot and never touches game state.
   private readonly debugOverlay: DebugOverlay;
-  private readonly mobSpawnMenu: MobSpawnMenu;
   private readonly debugController: DebugController;
   private readonly debugStatsCollector: DebugStatsCollector;
   private readonly blockTestGrid: BlockTestGrid;
@@ -355,6 +354,7 @@ export class Engine {
     // Shared entity foundation (single authoritative simulation owner, driven
     // by the Engine's 20 Hz clock). Created early so specialised entity
     // systems (falling blocks, items) can be wired against it.
+    const worldRng = new JavaRandom(worldSeed);
     const entityTypeRegistry = createDefaultEntityTypeRegistry();
     registerEntityTypes(entityTypeRegistry);
     this.entityParticles = new SimpleEntityParticleSink(this.renderer.scene);
@@ -369,11 +369,18 @@ export class Engine {
       heldBlockMaterial: this.heldBlockMaterial,
       itemHeldMaterial: this.itemHeldMaterial,
       typeRegistry: entityTypeRegistry,
-      rng: new JavaRandom(worldSeed),
+      rng: worldRng,
       particles: this.entityParticles,
       weather: { isRaining: () => this.weatherController.getState().raining },
       playerPosition: this.player.position,
+      playerHeldItemId: () => this.inventory?.getStack(this.interactionController?.getSelectedSlotIndex())?.identity.id,
+      player: this.player,
+      difficulty: () => metadata.difficulty,
+      isDaytime: () => this.worldTime.getTimeOfDayTicks() < 12000,
+      skylightSubtracted: () => this.worldTime.getSkylightSubtracted(),
+      explode: (source, x, y, z, strength, flaming) => this.explosionService.explode(source, x, y, z, strength, flaming),
     });
+    this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng);
 
     // Persist each chunk's owned entities on save and restore them on load.
     this.chunkPersistenceQueue.setEntityHooks({
@@ -486,6 +493,18 @@ export class Engine {
 
     // Stage 18: weather. WeatherController already created above for fire.
     this.climateSampler = new ClimateSampler(worldSeed);
+    this.naturalPassiveSpawner = new NaturalPassiveSpawner({
+      chunkManager: this.chunkManager,
+      entityManager: this.entityManager,
+      blockRegistry: this.blockRegistry,
+      behaviourRegistry: this.blockBehaviourRegistry,
+      world: this.blockUpdateWorld,
+      climateSampler: this.climateSampler,
+      rng: worldRng,
+      player: this.player,
+      worldSpawn: metadata.spawn,
+      getSkylightSubtracted: () => this.worldTime.getSkylightSubtracted(),
+    });
     this.precipitationRenderer = new PrecipitationRenderer(
       this.renderer.scene,
       this.chunkManager,
@@ -512,6 +531,7 @@ export class Engine {
     );
     this.lastTotalTicks = this.worldTime.getTotalTicks();
 
+    const animalInteractions = new AnimalInteractionService(this.inventory, this.itemEntityManager);
     this.interactionController = new InteractionController(
       this.input,
       this.renderer.camera,
@@ -523,6 +543,7 @@ export class Engine {
       this.inventory,
       this.blockBehaviourRegistry,
       this.entityManager,
+      animalInteractions,
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
     this.destroyOverlayRenderer = new DestroyOverlayRenderer(
@@ -795,7 +816,6 @@ export class Engine {
     this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
 
     this.debugOverlay = new DebugOverlay();
-    this.mobSpawnMenu = new MobSpawnMenu((type) => this.spawnMob(type));
     this.debugController = new DebugController(
       this.input,
       this.cameraController,
@@ -1007,7 +1027,6 @@ export class Engine {
 
     document.body.appendChild(this.renderer.domElement);
     this.debugOverlay.mount();
-    this.mobSpawnMenu.mount();
     this.input.start();
     this.renderer.start();
     this.running = true;
@@ -1029,7 +1048,6 @@ export class Engine {
     this.renderer.stop();
     this.input.stop();
     this.debugOverlay.dispose();
-    this.mobSpawnMenu.dispose();
     this.blockHighlight.dispose();
     this.destroyOverlayRenderer.dispose();
     this.hotbarHudRenderer.dispose();
@@ -1181,6 +1199,8 @@ export class Engine {
         // entities, resolves player↔mob pushing (through the player's velocity,
         // so the player's own physics still resolves terrain), then runs the
         // item-pickup pass (which needs the player).
+        this.player.tickCombatState();
+        this.naturalPassiveSpawner.tick();
         this.entityManager.tick();
         this.entityManager.collideWithPlayer(this.player);
         this.itemEntityManager.tickPickups(this.player);
@@ -1215,7 +1235,7 @@ export class Engine {
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
 
     // 4. Update camera look
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && !this.mobSpawnMenu.isOpen()) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
       this.cameraController.update();
     }
 
@@ -1230,7 +1250,7 @@ export class Engine {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
-        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && !this.mobSpawnMenu.isOpen()) {
+        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
           this.playerController.update();
         } else {
           this.player.wishVelocity.x = 0;
@@ -1378,7 +1398,7 @@ export class Engine {
     );
 
     // 10. Update interaction (raycast targeting + break/place edits)
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && !this.mobSpawnMenu.isOpen()) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
       this.interactionController.update(deltaSeconds);
     }
 
@@ -1735,26 +1755,6 @@ export class Engine {
     geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geom.computeVertexNormals();
     return geom;
-  }
-
-  /** Spawns a validation pig a couple of blocks in front of the player. */
-  /** Spawns the selected passive mob a couple of blocks in front of the player (debug only). */
-  private spawnMob(type: MobType): void {
-    const yawRad = (this.cameraController.getYaw() * Math.PI) / 180;
-    const forwardX = -Math.sin(yawRad);
-    const forwardZ = Math.cos(yawRad);
-    const x = this.player.position.x + forwardX * 2;
-    const z = this.player.position.z + forwardZ * 2;
-    const y = this.player.position.y + 0.5;
-    const ctx = this.entityManager.context;
-    const mob =
-      type === 'cow' ? new CowEntity(ctx, x, y, z)
-      : type === 'sheep' ? new SheepEntity(ctx, x, y, z)
-      : type === 'chicken' ? new ChickenEntity(ctx, x, y, z)
-      : new PigEntity(ctx, x, y, z);
-    mob.yaw = this.cameraController.getYaw();
-    this.entityManager.add(mob);
-    console.log(`[Debug] Spawned ${type} at (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)})`);
   }
 
 }

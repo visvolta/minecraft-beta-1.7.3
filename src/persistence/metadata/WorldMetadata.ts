@@ -1,5 +1,6 @@
 import type { SerializedFurnace } from '../../furnace/FurnaceManager';
 import type { SerializedChest } from '../../chest/ChestContainer';
+import { Difficulty, isDifficulty } from '../../world/Difficulty';
 
 export const WORLD_METADATA_VERSION = 1;
 
@@ -19,6 +20,7 @@ export interface WorldMetadata {
   /** Current player transform; distinct from configured world spawn. */
   readonly player: { readonly x: number; readonly y: number; readonly z: number; readonly yaw: number; readonly pitch: number };
   readonly timeTicks: number;
+  readonly difficulty: Difficulty;
   readonly weather: { readonly raining: boolean; readonly thundering: boolean; readonly rainTime: number; readonly thunderTime: number };
   readonly autosave: { readonly enabled: boolean; readonly intervalSeconds: number };
   readonly lastPlayedMs: number;
@@ -36,6 +38,8 @@ export function validateWorldMetadata(value: unknown): WorldMetadata {
   const spawn=req('spawn') as Record<string,unknown>;
   // Version-1 metadata written before player state existed is migrated from spawn.
   if (!('player' in data)) data.player = { x: spawn.x, y: spawn.y, z: spawn.z, yaw: 0, pitch: 0 };
+  if (!('difficulty' in data)) data.difficulty = Difficulty.Normal;
+  if (!isDifficulty(data.difficulty)) throw new Error('World difficulty is invalid');
   const player=data.player as Record<string,unknown>; const weather=req('weather') as Record<string,unknown>; const autosave=req('autosave') as Record<string,unknown>;
   for(const value of [spawn?.x,spawn?.y,spawn?.z,data.timeTicks,weather?.rainTime,weather?.thunderTime,data.lastPlayedMs,autosave?.intervalSeconds])if(typeof value!=='number'||!Number.isFinite(value))throw new Error('World metadata numeric field is invalid');
   if(typeof weather?.raining!=='boolean'||typeof weather?.thundering!=='boolean'||typeof autosave?.enabled!=='boolean')throw new Error('World metadata state is invalid');

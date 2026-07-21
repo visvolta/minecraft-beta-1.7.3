@@ -18,10 +18,11 @@ import type { Drop } from '../items/BlockDropResolver';
 export class CowEntity extends QuadrupedEntity {
   public readonly typeId = EntityTypeIds.Cow;
   public readonly typeStringId = 'Cow';
+  public readonly breedingItemId = 'wheat';
 
   public constructor(ctx: EntityWorldContext, x: number, y: number, z: number) {
     super(ctx);
-    this.setSize(0.9, 1.3);
+    this.initializeAnimal(0.9, 1.3);
     this.setPosition(x, y, z);
     this.moveSpeed = 0.7;
     this.maxHealth = 10;
@@ -54,11 +55,15 @@ export class CowEntity extends QuadrupedEntity {
   }
 
   protected writeEntityNbt(map: Map<string, NbtTag>): void {
-    this.writeLivingNbt(map);
+    this.writeAnimalNbt(map);
   }
 
   protected readEntityNbt(data: NbtCompound): void {
-    this.readLivingNbt(data);
+    this.readAnimalNbt(data);
+  }
+
+  protected createChild(x: number, y: number, z: number): CowEntity {
+    return new CowEntity(this.ctx, x, y, z);
   }
 
   public static deserialize(ctx: EntityWorldContext, data: NbtCompound): CowEntity | undefined {

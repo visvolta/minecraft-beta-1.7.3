@@ -9,6 +9,9 @@ import type { JavaRandom } from '../../world/generation/random/JavaRandom';
 import type { EntityManager } from './EntityManager';
 import type { EntityPhysics } from './EntityPhysics';
 import type { EntityParticleSink } from '../particles/EntityParticleSink';
+import type { Player } from '../../player/Player';
+import type { Difficulty } from '../../world/Difficulty';
+import type { Entity } from './Entity';
 
 /**
  * Long-lived service context handed to entities and entity factories.
@@ -44,6 +47,15 @@ export interface EntityWorldContext {
   readonly weather?: { isRaining(): boolean } | undefined;
   /** Live player position reference (for look-at-player etc.); updated as the player moves. */
   readonly playerPosition?: { x: number; y: number; z: number } | undefined;
+  /** Transient held-item query used by food-attraction AI. */
+  readonly playerHeldItemId?: (() => number | string | undefined) | undefined;
+  /** Single authoritative combat-capable player; transient, never entity NBT. */
+  readonly player?: Player | undefined;
+  readonly difficulty?: (() => Difficulty) | undefined;
+  readonly isDaytime?: (() => boolean) | undefined;
+  readonly skylightSubtracted?: (() => number) | undefined;
+  /** Shared world explosion service entry point (Creeper/TNT-safe). */
+  readonly explode?: ((source: Entity, x: number, y: number, z: number, strength: number, flaming?: boolean) => void) | undefined;
 }
 
 /**

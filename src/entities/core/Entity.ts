@@ -186,6 +186,11 @@ export abstract class Entity {
     return false;
   }
 
+  /** Passive-creature category marker used by EntityManager's maintained cap count. */
+  public get isPassiveCreature(): boolean {
+    return false;
+  }
+
   /**
    * Whether this entity can be targeted/interacted with by a raycast (Beta
    * `canBeCollidedWith`). Default false; living entities override while alive.

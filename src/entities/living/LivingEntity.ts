@@ -687,8 +687,14 @@ export abstract class LivingEntity extends Entity {
     return [];
   }
 
+  /** Subclasses may suppress loot for non-dropping life stages. */
+  protected shouldDropLoot(): boolean {
+    return true;
+  }
+
   /** Spawns this entity's drops through the shared item system (exactly once). */
   protected dropLoot(): void {
+    if (!this.shouldDropLoot()) return;
     for (const drop of this.getDropItems()) {
       const item = new DroppedItemEntity(
         this.ctx,

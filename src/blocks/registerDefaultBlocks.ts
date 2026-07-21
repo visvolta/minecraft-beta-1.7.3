@@ -1,6 +1,21 @@
 import type { BlockRegistry } from './BlockRegistry';
 import { BlockIds } from './BlockId';
-import type { TintColor } from './BlockDefinition';
+import type { BlockDefinition, TintColor } from './BlockDefinition';
+
+
+const BETA_EXPLOSION_RESISTANCE: Readonly<Record<string, number>> = {
+  air: 0, stone: 6, grass: 0.6, dirt: 0.5, cobblestone: 6,
+  bedrock: 3_600_000, sand: 0.5, gravel: 0.6, clay: 0.6,
+  flowing_water: 100, still_water: 100, flowing_lava: 100, still_lava: 100,
+  obsidian: 1_200, glass: 0.3, log: 2, planks: 3, leaves: 0.2,
+};
+
+function registerBlock(registry: BlockRegistry, definition: BlockDefinition): void {
+  registry.register({
+    ...definition,
+    explosionResistance: definition.explosionResistance ?? BETA_EXPLOSION_RESISTANCE[definition.name] ?? (definition.solid ? 1 : 0),
+  });
+}
 
 /**
  * Beta-style flat grass tint (~#79C05A), applied to the grayscale
@@ -19,7 +34,7 @@ const LEAF_TINT: TintColor = [0x4e / 255, 0xe0 / 255, 0x31 / 255];
  * Registers the initial Beta 1.7.3 blocks required for this stage.
  */
 export function registerDefaultBlocks(registry: BlockRegistry): void {
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Air,
     name: 'air',
     displayName: 'Air',
@@ -31,7 +46,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'fluid',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Stone,
     name: 'stone',
     displayName: 'Stone',
@@ -43,7 +58,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Grass,
     name: 'grass',
     displayName: 'Grass Block',
@@ -62,7 +77,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Dirt,
     name: 'dirt',
     displayName: 'Dirt',
@@ -74,7 +89,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Cobblestone,
     name: 'cobblestone',
     displayName: 'Cobblestone',
@@ -86,7 +101,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Bedrock,
     name: 'bedrock',
     displayName: 'Bedrock',
@@ -98,7 +113,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Sand,
     name: 'sand',
     displayName: 'Sand',
@@ -110,7 +125,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Gravel,
     name: 'gravel',
     displayName: 'Gravel',
@@ -122,7 +137,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Clay,
     name: 'clay',
     displayName: 'Clay',
@@ -134,7 +149,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Podzol,
     name: 'podzol',
     displayName: 'Podzol',
@@ -150,7 +165,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.WaterFlowing,
     name: 'flowing_water',
     displayName: 'Flowing Water',
@@ -164,7 +179,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     lightOpacity: 3,
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.WaterStill,
     name: 'water',
     displayName: 'Water',
@@ -178,7 +193,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     lightOpacity: 3,
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.LavaFlowing,
     name: 'flowing_lava',
     displayName: 'Flowing Lava',
@@ -193,7 +208,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     lightEmission: 15,
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Log,
     name: 'log',
     displayName: 'Oak Log',
@@ -209,7 +224,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Leaves,
     name: 'leaves',
     displayName: 'Oak Leaves',
@@ -230,7 +245,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     contributesAmbientOcclusion: false,
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.SpruceLog,
     name: 'spruce_log',
     displayName: 'Spruce Log',
@@ -246,7 +261,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.SpruceLeaves,
     name: 'spruce_leaves',
     displayName: 'Spruce Leaves',
@@ -268,7 +283,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   });
 
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Obsidian,
     name: 'obsidian',
     displayName: 'Obsidian',
@@ -281,7 +296,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   });
 
   // Ores and other Blocks added for Stage 12D
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.MossyCobblestone,
     name: 'mossy_cobbled',
     displayName: 'Mossy Cobblestone',
@@ -293,7 +308,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.CoalOre,
     name: 'coal_ore',
     displayName: 'Coal Ore',
@@ -305,7 +320,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.IronOre,
     name: 'iron_ore',
     displayName: 'Iron Ore',
@@ -317,7 +332,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.GoldOre,
     name: 'gold_ore',
     displayName: 'Gold Ore',
@@ -329,7 +344,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.RedstoneOre,
     name: 'redstone_ore',
     displayName: 'Redstone Ore',
@@ -341,7 +356,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.DiamondOre,
     name: 'diamond_ore',
     displayName: 'Diamond Ore',
@@ -353,7 +368,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.LapisOre,
     name: 'lapis_ore',
     displayName: 'Lapis Lazuli Ore',
@@ -365,7 +380,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Chest,
     name: 'chest',
     displayName: 'Chest',
@@ -382,7 +397,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'chest',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Spawner,
     name: 'spawner',
     displayName: 'Mob Spawner',
@@ -395,7 +410,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'cutout',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Dandelion,
     name: 'dandelion',
     displayName: 'Dandelion',
@@ -407,7 +422,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'cross',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Rose,
     name: 'rose',
     displayName: 'Rose',
@@ -419,7 +434,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'cross',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.BrownMushroom,
     name: 'brown_mushroom',
     displayName: 'Brown Mushroom',
@@ -431,7 +446,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'cross',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.RedMushroom,
     name: 'red_mushroom',
     displayName: 'Red Mushroom',
@@ -443,7 +458,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'cross',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.TallGrass,
     name: 'tall_grass',
     displayName: 'Tall Grass',
@@ -460,7 +475,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'cross',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.DeadBush,
     name: 'dead_bush',
     displayName: 'Dead Bush',
@@ -472,7 +487,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'cross',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Reed,
     name: 'reed',
     displayName: 'Sugar Cane',
@@ -484,7 +499,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'cross',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Pumpkin,
     name: 'pumpkin',
     displayName: 'Pumpkin',
@@ -500,7 +515,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     renderType: 'opaque',
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.Cactus,
     name: 'cactus',
     displayName: 'Cactus',
@@ -517,7 +532,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   });
 
   // Stationary Lava block used by Lakes
-  registry.register({
+  registerBlock(registry, {
     id: BlockIds.LavaStill,
     name: 'lava_still',
     displayName: 'Still Lava',
@@ -533,7 +548,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   });
 
   const registerSimple = (id: number, name: string, displayName: string, textures: { all?: string; top?: string; bottom?: string; side?: string; front?: string }, options: { solid: boolean; transparent: boolean; replaceable: boolean; renderType: 'opaque' | 'cutout' | 'cross' | 'cactus' | 'snow' | 'ice'; blocksWeather?: boolean; lightOpacity?: number; lightEmission?: number }): void => {
-    registry.register({ id, name, displayName, textures, ...options });
+    registerBlock(registry, { id, name, displayName, textures, ...options });
   };
 
   registerSimple(BlockIds.Sapling, 'sapling', 'Sapling', { all: 'sapling_oak' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross' });
@@ -553,7 +568,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
 
   // Birch species (temp IDs) for Stage 5 leaf decay validation — textures exist in Beta
   // Birch Leaves: same properties as Oak/Spruce leaves, cutout, blocksWeather true, foliage tint handled via definition if needed
-  registry.register({
+  registerBlock(registry, {
     id: (BlockIds as any).BirchLeaves ?? 250,
     name: 'birch_leaves',
     displayName: 'Birch Leaves',
@@ -574,7 +589,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     contributesAmbientOcclusion: false,
   });
 
-  registry.register({
+  registerBlock(registry, {
     id: (BlockIds as any).BirchLog ?? 251,
     name: 'birch_log',
     displayName: 'Birch Log',

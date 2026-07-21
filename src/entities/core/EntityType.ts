@@ -17,6 +17,11 @@ export const EntityTypeIds = {
   Cow: 4,
   Sheep: 5,
   Chicken: 6,
+  Zombie: 7,
+  Skeleton: 8,
+  Spider: 9,
+  Creeper: 10,
+  Arrow: 11,
 } as const;
 
 export type EntityTypeId = (typeof EntityTypeIds)[keyof typeof EntityTypeIds];

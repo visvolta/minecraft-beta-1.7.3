@@ -14,6 +14,21 @@ import type { BlockId } from '../../../blocks/BlockId';
  * resolves to Desert, Tundra, or another biome. It is real, registered
  * dead data in Beta itself, not a biome this project should track.
  */
+export type PassiveMobKind = 'pig' | 'cow' | 'sheep' | 'chicken';
+
+export interface PassiveSpawnEntry {
+  readonly kind: PassiveMobKind;
+  readonly weight: number;
+}
+
+/** Beta BiomeGenBase's default Overworld creature list (shared by all reachable Overworld biomes). */
+export const BETA_PASSIVE_SPAWNS: readonly PassiveSpawnEntry[] = [
+  { kind: 'sheep', weight: 12 },
+  { kind: 'pig', weight: 10 },
+  { kind: 'chicken', weight: 10 },
+  { kind: 'cow', weight: 8 },
+];
+
 export type BiomeId =
   | 'rainforest'
   | 'swampland'
@@ -48,6 +63,8 @@ export interface BiomeDefinition {
    * False for all other biomes.
    */
   readonly enableSnow: boolean;
+  /** Beta creature-category spawn entries and exact selection weights. */
+  readonly passiveSpawns: readonly PassiveSpawnEntry[];
   /** Configurable final-look inputs; no original Beta colourizer tables. */
   readonly vegetationTints: Readonly<Record<'grass' | 'oakLeaves' | 'birchLeaves' | 'spruceLeaves', readonly [number, number, number]>>;
   readonly vegetationTintStrengths: Readonly<Record<'grass' | 'oakLeaves' | 'birchLeaves' | 'spruceLeaves', number>>;
@@ -68,6 +85,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: 5,
     treeGenerators: [{ kind: 'bigOak', weight: 1 }, { kind: 'oak', weight: 2 }],
     enableSnow: false,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
   swampland: {
     id: 'swampland',
@@ -80,6 +98,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: 0,
     treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
   seasonalForest: {
     id: 'seasonalForest',
@@ -92,6 +111,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: 2,
     treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
   forest: {
     id: 'forest',
@@ -104,6 +124,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: 5,
     treeGenerators: [{ kind: 'birch', weight: 3 }, { kind: 'bigOak', weight: 4 }, { kind: 'oak', weight: 8 }],
     enableSnow: false,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
   savanna: {
     id: 'savanna',
@@ -116,6 +137,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: 0,
     treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
   shrubland: {
     id: 'shrubland',
@@ -128,6 +150,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: 0,
     treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
   taiga: {
     id: 'taiga',
@@ -140,6 +163,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: 5,
     treeGenerators: [{ kind: 'tallSpruce', weight: 1 }, { kind: 'spruce', weight: 2 }],
     enableSnow: true,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
   desert: {
     id: 'desert',
@@ -152,6 +176,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: -20,
     treeGenerators: [],
     enableSnow: false,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
   plains: {
     id: 'plains',
@@ -164,6 +189,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: -20,
     treeGenerators: [],
     enableSnow: false,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
   tundra: {
     id: 'tundra',
@@ -176,5 +202,6 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeDensity: -20,
     treeGenerators: [],
     enableSnow: true,
+    passiveSpawns: BETA_PASSIVE_SPAWNS,
   },
 };
