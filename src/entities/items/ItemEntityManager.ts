@@ -47,7 +47,8 @@ export class ItemEntityManager {
    * step. Uses a chunk-first AABB query (never scans all entities), matching
    * Beta's expanded player pickup box (×1.0 horizontal, ×0.5 vertical).
    */
-  public tickPickups(player: Player): void {
+  public tickPickups(player:Player):void{
+    if(!player.isAlive())return;
     const pickupBox = player.getAABB().expand(1.0, 0.5, 1.0);
 
     const candidates = this.entityManager.getEntitiesInAABB(

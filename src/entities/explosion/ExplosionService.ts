@@ -55,7 +55,7 @@ export class ExplosionService {
       if (distance <= 1) {
         const impact = 1 - distance;
         const damage = Math.floor((impact * impact + impact) / 2 * 8 * radius + 1);
-        if (this.player.attackFromMob(damage, source) && distance > 1e-6) {
+        if (this.player.attackEntityFrom(DamageSource.explosion(source),damage) && distance > 1e-6) {
           this.player.velocity.x += dx / (distance * radius) * impact * 20;
           this.player.velocity.z += dz / (distance * radius) * impact * 20;
         }

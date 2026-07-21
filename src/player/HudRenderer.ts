@@ -1,0 +1,3 @@
+import type { HotbarHudRenderer } from '../inventory/HotbarHudRenderer';import type { Player } from './Player';import { HealthHudRenderer } from './HealthHudRenderer';
+/** Extensible HUD composition root for hotbar, health and future survival bars. */
+export class HudRenderer{public readonly health:HealthHudRenderer;public constructor(public readonly hotbar:HotbarHudRenderer,player:Player){this.health=new HealthHudRenderer(player);}public update(selected:number):void{this.hotbar.update(selected);this.health.update(this.hotbar.getLayout());}public render():void{this.hotbar.render();}public dispose():void{this.health.dispose();this.hotbar.dispose();}}

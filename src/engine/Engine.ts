@@ -24,6 +24,12 @@ import { NaturalMobSpawner } from '../entities/spawning/NaturalMobSpawner';
 import { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';
 import { ExplosionService } from '../entities/explosion/ExplosionService';
 import { NullMobSoundSink } from '../entities/sound/MobSoundSink';
+import { PlayerSurvivalController } from '../player/PlayerSurvivalController';
+import { PlayerDeathController } from '../player/PlayerDeathController';
+import { RespawnController } from '../player/RespawnController';
+import { DeathScreen } from '../player/DeathScreen';
+import { CameraHurtController } from '../player/CameraHurtController';
+import { HudRenderer } from '../player/HudRenderer';
 import type { EntityTextureAssets } from '../assets/EntityTextureAssets';
 import { SimpleEntityParticleSink } from '../entities/particles/EntityParticleSink';
 import { Inventory } from '../inventory/Inventory';
@@ -182,6 +188,11 @@ export class Engine {
   private readonly player: Player;
   private readonly playerController: PlayerController;
   private readonly playerPhysics: PlayerPhysics;
+  private readonly playerSurvivalController:PlayerSurvivalController;
+  private readonly playerDeathController:PlayerDeathController;
+  private readonly respawnController:RespawnController;
+  private readonly deathScreen:DeathScreen;
+  private readonly cameraHurtController=new CameraHurtController();
   private readonly interactionController: InteractionController;
   private readonly blockHighlight: BlockHighlight;
   private readonly destroyOverlayRenderer: DestroyOverlayRenderer;
@@ -193,7 +204,8 @@ export class Engine {
   private readonly entityParticles: SimpleEntityParticleSink;
   private lastTotalTicks = 0;
   private readonly inventory: Inventory;
-  private readonly hotbarHudRenderer: HotbarHudRenderer;
+  private readonly hotbarHudRenderer:HotbarHudRenderer;
+  private readonly hudRenderer:HudRenderer;
   private readonly inventoryUi: InventoryUi;
   private readonly inventoryTooltip: InventoryTooltip;
   private readonly cursorHeldRenderer: CursorHeldItemRenderer;
@@ -266,7 +278,8 @@ export class Engine {
   private readonly chunkPersistenceQueue: ChunkPersistenceQueue;
   private lastFrameTimeMs: number | null = null;
   private lastMetadataAutosaveMs = 0;
-  private metadataSaveInFlight: Promise<void> | null = null;
+  private metadataSaveInFlight:Promise<void>|null=null;
+  private deathSavePending=false;
   private readonly playerModel: PlayerModel;
   private readonly playerAnimator: PlayerAnimator;
   private readonly firstPersonArmRenderer: FirstPersonArmRenderer;
@@ -315,7 +328,7 @@ export class Engine {
     );
     this.cameraController.setRotation(metadata.player.yaw, metadata.player.pitch);
 
-    this.player = new Player(metadata.player.x, metadata.player.y, metadata.player.z);
+    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);
     this.playerController = new PlayerController(
       this.input,
       this.cameraController,
@@ -325,7 +338,8 @@ export class Engine {
 
     this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
-    this.playerPhysics = new PlayerPhysics(blockRegistry, this.blockBehaviourRegistry, this.blockUpdateWorld);
+    this.playerPhysics=new PlayerPhysics(blockRegistry,this.blockBehaviourRegistry,this.blockUpdateWorld);
+    this.playerSurvivalController=new PlayerSurvivalController(this.player,this.blockUpdateWorld,blockRegistry);
     this.cameraModeController = new CameraModeController(this.input, this.blockUpdateWorld, blockRegistry);
     this.playerModel = new PlayerModel();
     this.playerAnimator = new PlayerAnimator();
@@ -570,6 +584,7 @@ export class Engine {
       blockRegistry,
       this.inventory,
     );
+    this.hudRenderer=new HudRenderer(this.hotbarHudRenderer,this.player);
     this.inventoryUi = new InventoryUi();
     this.inventoryTooltip = new InventoryTooltip();
     this.cursorHeldRenderer = new CursorHeldItemRenderer();
@@ -807,6 +822,9 @@ export class Engine {
       this.chunkPersistenceQueue,
       (chunk) => this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk)
     );
+    this.deathScreen=new DeathScreen(()=>this.respawnController.request());
+    this.playerDeathController=new PlayerDeathController(this.player,this.inventory,this.itemEntityManager,worldRng,this.deathScreen,()=>{this.deathSavePending=true;});
+    this.respawnController=new RespawnController(this.player,this.chunkManager,this.chunkStreamer,this.blockUpdateWorld,blockRegistry,metadata.spawn,this.deathScreen,this.playerDeathController,()=>{this.cameraHurtController.reset(this.renderer.camera);void this.saveMetadata(true);});
 
     this.chestRenderer = new ChestRenderer(
       this.renderer.scene,
@@ -1038,6 +1056,7 @@ export class Engine {
     this.input.start();
     this.renderer.start();
     this.running = true;
+    this.playerDeathController.update();
     this.lastFrameTimeMs = null;
     this.animationFrameId = requestAnimationFrame(this.tick);
   }
@@ -1058,7 +1077,8 @@ export class Engine {
     this.debugOverlay.dispose();
     this.blockHighlight.dispose();
     this.destroyOverlayRenderer.dispose();
-    this.hotbarHudRenderer.dispose();
+    this.hudRenderer.dispose();
+    this.deathScreen.dispose();
     this.inventoryInputController.dispose();
     this.inventoryController.dispose();
     this.craftingTableInputController.dispose();
@@ -1209,10 +1229,14 @@ export class Engine {
         // so the player's own physics still resolves terrain), then runs the
         // item-pickup pass (which needs the player).
         this.player.tickCombatState();
+        this.playerSurvivalController.tick();
+        this.playerDeathController.update();
+        this.respawnController.update();
         this.naturalMobSpawner.tick();
         this.entityManager.tick();
         this.entityManager.collideWithPlayer(this.player);
         this.itemEntityManager.tickPickups(this.player);
+        if(this.deathSavePending){this.deathSavePending=false;void this.saveMetadata(true);}
       }
     }
     const now = performance.now();
@@ -1244,7 +1268,7 @@ export class Engine {
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
 
     // 4. Update camera look
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
       this.cameraController.update();
     }
 
@@ -1253,19 +1277,22 @@ export class Engine {
     // PlayerPhysics (gravity, player collision, block collision) so
     // none of it runs while no-clip is active, per this stage's
     // requirements.
-    if (this.noClipEnabled) {
+    if(!this.player.isAlive()){this.player.wishVelocity.x=this.player.wishVelocity.z=0;}
+    else if (this.noClipEnabled) {
+      this.player.fallDistance=0;
       this.debugController.update(deltaSeconds);
     } else {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
-        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
+        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
           this.playerController.update();
         } else {
           this.player.wishVelocity.x = 0;
           this.player.wishVelocity.z = 0;
         }
-        this.playerPhysics.update(this.player, deltaSeconds, this.input.isActionActive('jump'));
+        const movement=this.playerPhysics.update(this.player,deltaSeconds,this.input.isActionActive('jump'));
+        this.playerSurvivalController.recordMovement(movement);
       } else {
         // Pause physics if the containing chunk is not yet loaded
         // Ensure streamer knows this is the highest priority chunk
@@ -1283,6 +1310,7 @@ export class Engine {
       this.cameraController.getYaw(),
       this.cameraController.getPitch()
     );
+    this.cameraHurtController.update(camera,this.player,deltaSeconds);
 
     // 7a. Update Player Model and Visibility Rules
     if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
@@ -1407,7 +1435,7 @@ export class Engine {
     );
 
     // 10. Update interaction (raycast targeting + break/place edits)
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
       this.interactionController.update(deltaSeconds);
     }
 
@@ -1583,7 +1611,7 @@ export class Engine {
     }
 
     // Render WebGL HUD slots icons pass cleanly on top of everything
-    this.hotbarHudRenderer.update(this.selectedSlot);
+    this.hudRenderer.update(this.selectedSlot);
     const layoutScale = this.hotbarHudRenderer.getLayout().scale;
     this.inventoryController.updateScale(layoutScale);
     this.craftingTableController.updateScale(layoutScale);
@@ -1601,7 +1629,7 @@ export class Engine {
     if (this.chestController.isOpen) {
       this.chestController.renderAll();
     }
-    this.hotbarHudRenderer.render();
+    this.hudRenderer.render();
 
     this.performanceProfiler.endRender();
     this.performanceProfiler.endFrame();
@@ -1620,6 +1648,7 @@ export class Engine {
         yaw: this.cameraController.getYaw(),
         pitch: this.cameraController.getPitch()
       },
+      playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},
       timeTicks: this.worldTime.getTotalTicks(),
       weather: {
         raining: weather.raining,

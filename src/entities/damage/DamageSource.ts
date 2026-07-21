@@ -20,6 +20,8 @@ export type DamageCategory =
   | 'lava'
   | 'drown'
   | 'suffocate'
+  | 'cactus'
+  | 'environment'
   | 'void';
 
 /**
@@ -90,6 +92,9 @@ export class DamageSource {
   public static suffocate(): DamageSource {
     return new DamageSource('suffocate', 'suffocate', undefined, false, false, false);
   }
+
+  public static cactus(): DamageSource { return new DamageSource('cactus','cactus',undefined,false,false,false); }
+  public static environment(): DamageSource { return new DamageSource('environment','environment',undefined,false,false,false); }
 
   /** Out-of-world / void damage; bypasses invulnerability. */
   public static outOfWorld(): DamageSource {

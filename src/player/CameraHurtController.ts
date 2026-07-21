@@ -1,0 +1,2 @@
+import type * as THREE from 'three';import type { Player } from './Player';
+export class CameraHurtController{private roll=0;public update(camera:THREE.PerspectiveCamera,player:Player,deltaSeconds:number):void{const target=player.hurtTime>0&&player.isAlive()?Math.sin((1-player.hurtTime/10)*Math.PI)*.12*Math.cos(player.attackedAtYaw):0;this.roll+=(target-this.roll)*Math.min(1,deltaSeconds*14);camera.rotation.z=this.roll;}public reset(camera?:THREE.PerspectiveCamera):void{this.roll=0;if(camera)camera.rotation.z=0;}public get currentRoll():number{return this.roll;}}

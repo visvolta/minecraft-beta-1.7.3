@@ -37,6 +37,7 @@ const COLLISION_AXIS_ORDER: readonly ('x' | 'y' | 'z')[] = ['y', 'x', 'z'];
  * Queries solid geometry through ChunkManager + BlockRegistry only; does
  * not touch rendering, input, or camera state.
  */
+export interface PlayerMovementResult{readonly previousY:number;readonly currentY:number;readonly wasGrounded:boolean;readonly grounded:boolean;readonly climbing:boolean;}
 export class PlayerPhysics {
   public constructor(
     
@@ -50,7 +51,8 @@ export class PlayerPhysics {
    * against solid blocks. Jumping itself is applied by PlayerController
    * before this runs; this only reacts to whatever velocity.y already is.
    */
-  public update(player: Player, deltaSeconds: number, isJumpPressed = false): void {
+  public update(player:Player,deltaSeconds:number,isJumpPressed=false):PlayerMovementResult{
+    const previousY=player.position.y,wasGrounded=player.grounded;
     const playerBox = player.getAABB();
     const climbRange = this.blockRangeCoveringBox(playerBox);
     let isClimbing = false;
@@ -105,7 +107,8 @@ export class PlayerPhysics {
 
     const averageVelocityY = (velocityYBeforeGravity + player.velocity.y) / 2;
 
-    this.moveAndCollide(player, deltaSeconds, averageVelocityY);
+    this.moveAndCollide(player,deltaSeconds,averageVelocityY);
+    return{previousY,currentY:player.position.y,wasGrounded,grounded:player.grounded,climbing:isClimbing};
   }
 
   private applyHorizontalAcceleration(player: Player, deltaSeconds: number): void {

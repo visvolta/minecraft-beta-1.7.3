@@ -19,6 +19,7 @@ export interface WorldMetadata {
   readonly spawn: { readonly x: number; readonly y: number; readonly z: number };
   /** Current player transform; distinct from configured world spawn. */
   readonly player: { readonly x: number; readonly y: number; readonly z: number; readonly yaw: number; readonly pitch: number };
+  readonly playerHealth?: {readonly health:number;readonly maxHealth:number};
   readonly timeTicks: number;
   readonly difficulty: Difficulty;
   readonly weather: { readonly raining: boolean; readonly thundering: boolean; readonly rainTime: number; readonly thunderTime: number };
@@ -40,6 +41,7 @@ export function validateWorldMetadata(value: unknown): WorldMetadata {
   if (!('player' in data)) data.player = { x: spawn.x, y: spawn.y, z: spawn.z, yaw: 0, pitch: 0 };
   if (!('difficulty' in data)) data.difficulty = Difficulty.Normal;
   if (!isDifficulty(data.difficulty)) throw new Error('World difficulty is invalid');
+  if(!('playerHealth'in data))data.playerHealth={health:20,maxHealth:20};const survival=data.playerHealth as Record<string,unknown>;if(!Number.isFinite(survival?.health)||!Number.isFinite(survival?.maxHealth)||(survival.maxHealth as number)<1)throw new Error('Player health metadata is invalid');survival.maxHealth=Math.max(1,Math.floor(survival.maxHealth as number));survival.health=Math.max(0,Math.min(survival.maxHealth as number,survival.health as number));
   const player=data.player as Record<string,unknown>; const weather=req('weather') as Record<string,unknown>; const autosave=req('autosave') as Record<string,unknown>;
   for(const value of [spawn?.x,spawn?.y,spawn?.z,data.timeTicks,weather?.rainTime,weather?.thunderTime,data.lastPlayedMs,autosave?.intervalSeconds])if(typeof value!=='number'||!Number.isFinite(value))throw new Error('World metadata numeric field is invalid');
   if(typeof weather?.raining!=='boolean'||typeof weather?.thundering!=='boolean'||typeof autosave?.enabled!=='boolean')throw new Error('World metadata state is invalid');
