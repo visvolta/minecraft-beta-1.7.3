@@ -23,6 +23,7 @@ const ITEM_ALIASES: Record<string, string> = {
   'crops': 'seeds_wheat',
   // Basic Items / Ores
   '260': 'apple',
+  '262': 'arrow',
   '263': 'coal',
   '264': 'diamond',
   '265': 'iron_ingot',

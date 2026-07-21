@@ -1,17 +1,17 @@
-import { Group } from 'three';
+import { Group, type Texture } from 'three';
 import { EntityModel } from '../../living/EntityModel';
 
 export class CreeperModel extends EntityModel {
   private readonly head = new Group();
   private readonly legs: Group[] = [];
-  public constructor() {
-    super(); const material = this.createMaterial(0x49a83e);
-    this.addBox(this.head, { w: 8, h: 8, d: 8 }, material, 0, 20, 0);
-    this.addBox(this.root, { w: 8, h: 12, d: 4 }, material, 0, 12, 0);
+  public constructor(texture?:Texture) {
+    super(); const material = this.createMaterial(texture?0xffffff:0x49a83e,texture);
+    this.addBox(this.head, { w: 8, h: 8, d: 8 }, material, 0, 20, 0,{u:0,v:0});
+    this.addBox(this.root, { w: 8, h: 12, d: 4 }, material, 0, 12, 0,{u:16,v:16});
     this.root.add(this.head);
     for (const [x, z] of [[-2, -2], [2, -2], [-2, 2], [2, 2]] as const) {
       const leg = new Group(); leg.position.set(x / 16, 6 / 16, z / 16);
-      this.addBox(leg, { w: 4, h: 6, d: 4 }, material, 0, -3, 0); this.legs.push(leg); this.root.add(leg);
+      this.addBox(leg, { w: 4, h: 6, d: 4 }, material, 0, -3, 0,{u:0,v:16,mirror:x>0}); this.legs.push(leg); this.root.add(leg);
     }
   }
   public updatePose(phase: number, amount: number, headYaw=0, headPitch=0): void {

@@ -48,7 +48,7 @@ export class SheepEntity extends QuadrupedEntity {
   }
 
   protected createModel(): QuadrupedModel {
-    const model = new SheepModel();
+    const model = new SheepModel(this.ctx.entityTextures?.get('sheep'),this.ctx.entityTextures?.get('sheepFur'));
     model.setFleeceColor(this.fleeceColor);
     model.setSheared(this.sheared);
     return model;

@@ -17,7 +17,7 @@ export class ZombieEntity extends BipedHostileEntity {
     if (exposure.canIgnite && this.nextInt(30000) / 1000 < (exposure.brightness - 0.4) * 2) this.setOnFire(300);
     super.onTick(ctx);
   }
-  protected rebuildModel(): void { this.attachBiped(new ZombieModel()); }
+  protected rebuildModel(): void { this.attachBiped(new ZombieModel(this.ctx.entityTextures?.get('zombie'))); }
   protected override getDropItems(): Drop[] { const count=this.nextInt(3); return count ? [{type:'item',id:'feather',count,metadata:0}] : []; }
   protected override getAmbientSoundId(): string { return 'mob.zombie'; }
   protected override getHurtSoundId(): string { return 'mob.zombiehurt'; }

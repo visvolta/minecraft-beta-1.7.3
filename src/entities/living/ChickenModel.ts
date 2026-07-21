@@ -1,4 +1,4 @@
-import { Group, MeshBasicMaterial } from 'three';
+import { Group, MeshBasicMaterial, type Texture } from 'three';
 import { EntityModel, clamp01 } from './EntityModel';
 
 const WHITE = 0xf5f5f5;
@@ -24,20 +24,22 @@ export class ChickenModel extends EntityModel {
   private readonly leftWing = new Group();
 
   private readonly bodyMat: MeshBasicMaterial;
+  private readonly texture:Texture|undefined;
 
-  public constructor() {
+  public constructor(texture?:Texture) {
     super();
-    this.bodyMat = this.createMaterial(WHITE);
-    const orangeMat = this.createMaterial(ORANGE);
-    const wattleMat = this.createMaterial(WATTLE);
+    this.texture=texture;
+    this.bodyMat = this.createMaterial(WHITE,texture);
+    const orangeMat = this.createMaterial(texture?WHITE:ORANGE,texture);
+    const wattleMat = this.createMaterial(texture?WHITE:WATTLE,texture);
 
     // Body (effective 6×6×8), centred at y=8.
-    this.addBox(this.bodyYawGroup, { w: 6, h: 6, d: 8 }, this.bodyMat, 0, 8, 0);
+    this.addBox(this.bodyYawGroup, { w: 6, h: 6, d: 8 }, this.bodyMat, 0, 8, 0,{u:0,v:9,sourceW:6,sourceH:8,sourceD:6});
 
     // Head + bill + wattle (bill/wattle follow the head group).
-    this.addBox(this.headGroup, { w: 4, h: 6, d: 3 }, this.bodyMat, 0, 3, 0.5);
-    this.addBox(this.headGroup, { w: 4, h: 2, d: 2 }, orangeMat, 0, 3, 3);
-    this.addBox(this.headGroup, { w: 2, h: 2, d: 2 }, wattleMat, 0, 1, 2);
+    this.addBox(this.headGroup, { w: 4, h: 6, d: 3 }, this.bodyMat, 0, 3, 0.5,{u:0,v:0});
+    this.addBox(this.headGroup, { w: 4, h: 2, d: 2 }, orangeMat, 0, 3, 3,{u:14,v:0});
+    this.addBox(this.headGroup, { w: 2, h: 2, d: 2 }, wattleMat, 0, 1, 2,{u:14,v:4});
     this.headGroup.position.set(0, 9 * (1 / 16), 4 * (1 / 16));
     this.bodyYawGroup.add(this.headGroup);
 
@@ -53,14 +55,14 @@ export class ChickenModel extends EntityModel {
   }
 
   private buildLeg(group: Group, xPixels: number): void {
-    const orangeMat = this.createMaterial(ORANGE);
-    this.addBox(group, { w: 3, h: 5, d: 3 }, orangeMat, 0, -2.5, 0);
+    const orangeMat = this.createMaterial(this.texture?WHITE:ORANGE,this.texture);
+    this.addBox(group, { w: 3, h: 5, d: 3 }, orangeMat, 0, -2.5, 0,{u:26,v:0,mirror:xPixels>0});
     group.position.set(xPixels * (1 / 16), 5 * (1 / 16), -1 * (1 / 16));
     this.bodyYawGroup.add(group);
   }
 
   private buildWing(group: Group, xPixels: number): void {
-    this.addBox(group, { w: 1, h: 4, d: 6 }, this.bodyMat, xPixels < 0 ? 0.5 : -0.5, -2, 0);
+    this.addBox(group, { w: 1, h: 4, d: 6 }, this.bodyMat, xPixels < 0 ? 0.5 : -0.5, -2, 0,{u:24,v:13,mirror:xPixels>0});
     group.position.set(xPixels * (1 / 16), 11 * (1 / 16), 0);
     this.bodyYawGroup.add(group);
   }
@@ -73,13 +75,12 @@ export class ChickenModel extends EntityModel {
   public updatePose(
     legYaw: number,
     legSwing: number,
-    bodyYawDeg: number,
+    _bodyYawDeg: number,
     headRelYawDeg: number,
     headPitchDeg: number,
     wingRotation: number,
     wingSpread: number,
   ): void {
-    this.bodyYawGroup.rotation.y = -deg2rad(bodyYawDeg);
     this.headGroup.rotation.y = -deg2rad(headRelYawDeg);
     this.headGroup.rotation.x = deg2rad(headPitchDeg);
 

@@ -39,7 +39,7 @@ export class PigEntity extends QuadrupedEntity {
   }
 
   protected createModel(): QuadrupedModel {
-    return new PigModel();
+    return new PigModel(this.ctx.entityTextures?.get('pig'));
   }
 
   protected override getDropItems(): Drop[] {

@@ -14,15 +14,15 @@ async function bootstrap(): Promise<void> {
   // Nothing renders until the block texture atlas has finished loading.
   const atlas = await AssetManager.loadBlockAtlas(blockRegistry);
 
-  // Load flat items texture atlas asynchronously before startup
-  const itemAtlas = await ItemTextureAtlas.load();
+  // Standalone entity skins/projectile/bow frames remain outside the atlases.
+  const [itemAtlas, entityTextures] = await Promise.all([ItemTextureAtlas.load(), AssetManager.loadEntityTextures()]);
 
   // Instantiate and preload the player skin
   const skinManager = new PlayerSkinManager();
   await skinManager.loadSkin();
 
   const { coordinator: saveCoordinator, storage } = await openDefaultWorld();
-  const engine = new Engine(blockRegistry, atlas, itemAtlas, saveCoordinator, storage, skinManager);
+  const engine = new Engine(blockRegistry, atlas, itemAtlas, entityTextures, saveCoordinator, storage, skinManager);
   engine.start();
 }
 

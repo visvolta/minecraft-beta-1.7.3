@@ -32,7 +32,7 @@ export class CreeperEntity extends HostileEntity {
   protected override getDropItems(): Drop[] { const count=this.nextInt(3); return count ? [{type:'item',id:'gunpowder',count,metadata:0}] : []; }
   protected override getHurtSoundId(): string { return 'mob.creeper'; }
   protected override getDeathSoundId(): string { return 'mob.creeperdeath'; }
-  private buildModel(): void { this.model?.dispose(); this.model = new CreeperModel(); this.renderObject = this.model.root; this.ctx.scene.add(this.model.root); }
+  private buildModel(): void { this.model?.dispose(); this.model = new CreeperModel(this.ctx.entityTextures?.get('creeper')); this.renderObject = this.model.root; this.ctx.scene.add(this.model.root); }
   public override updateRenderInterpolation(alpha: number): void {
     super.updateRenderInterpolation(alpha); if (!this.model) return;
     const body=interpolateLivingBodyYaw(this.prevRenderYawOffset,this.renderYawOffset,alpha);const head=this.prevHeadYaw+wrapDegrees(this.headYaw-this.prevHeadYaw)*alpha;

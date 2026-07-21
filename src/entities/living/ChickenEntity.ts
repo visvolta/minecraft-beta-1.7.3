@@ -63,7 +63,7 @@ export class ChickenEntity extends AnimalEntity {
     if (this.model !== null) {
       this.model.dispose();
     }
-    this.model = new ChickenModel();
+    this.model = new ChickenModel(this.ctx.entityTextures?.get('chicken'));
     this.renderObject = this.model.root;
     this.applyBabyVisualScale(this.isChild() ? BABY_SCALE : 1);
     this.ctx.scene.add(this.model.root);

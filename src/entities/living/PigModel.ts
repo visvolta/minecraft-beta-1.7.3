@@ -1,3 +1,4 @@
+import type { Texture } from 'three';
 import { QuadrupedModel, type QuadrupedConfig } from './QuadrupedModel';
 
 const PINK = 0xefa6a0;
@@ -25,7 +26,7 @@ const PIG_CONFIG: QuadrupedConfig = {
 
 /** Pig model: the shared {@link QuadrupedModel} with Beta pig proportions. */
 export class PigModel extends QuadrupedModel {
-  public constructor() {
-    super(PIG_CONFIG);
+  public constructor(texture?:Texture) {
+    super({...PIG_CONFIG,...(texture?{texture}:{}),headUv:{u:0,v:0},bodyUv:{u:28,v:8,sourceW:10,sourceH:16,sourceD:8},legUv:{u:0,v:16}});
   }
 }

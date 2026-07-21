@@ -1,5 +1,6 @@
 import { BoxGeometry, Color, Group, Mesh, MeshBasicMaterial } from 'three';
 import { attachEntityLighting } from '../../rendering/ChunkRenderer';
+import { applyLegacyBoxUv, type LegacyUvBox } from './LegacyModelUv';
 
 /** Model space: 16 pixels per block, y up, origin at the entity's feet. */
 export const PX = 1 / 16;
@@ -39,8 +40,8 @@ export abstract class EntityModel {
    * Creates an entity-lit material and registers it for the hurt flash and
    * disposal. Every model part should obtain its material through here.
    */
-  protected createMaterial(color: number): MeshBasicMaterial {
-    const material = new MeshBasicMaterial({ color });
+  protected createMaterial(color:number,texture?:import('three').Texture,transparent=false):MeshBasicMaterial{
+    const material=new MeshBasicMaterial({color,map:texture??null,transparent,alphaTest:0.1});
     attachEntityLighting(material);
     this.flashMaterials.push({ material, baseColor: material.color.clone() });
     return material;
@@ -54,8 +55,10 @@ export abstract class EntityModel {
     xPixels: number,
     yPixels: number,
     zPixels: number,
+    uv?: Omit<LegacyUvBox,'w'|'h'|'d'>,
   ): Mesh {
     const geometry = new BoxGeometry(spec.w * PX, spec.h * PX, spec.d * PX);
+    if(uv)applyLegacyBoxUv(geometry,{...uv,w:spec.w,h:spec.h,d:spec.d});
     this.geometries.push(geometry);
     const mesh = new Mesh(geometry, material);
     mesh.position.set(xPixels * PX, yPixels * PX, zPixels * PX);

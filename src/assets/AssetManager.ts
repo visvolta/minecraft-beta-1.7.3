@@ -1,6 +1,7 @@
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import { loadBlockTextureImages } from './TextureLoader';
 import { TextureAtlas } from './TextureAtlas';
+import { EntityTextureAssets } from './EntityTextureAssets';
 
 /**
  * Orchestrates the asset-loading pipeline: figures out which block
@@ -10,6 +11,8 @@ import { TextureAtlas } from './TextureAtlas';
  * it never loads images or knows about the asset pipeline.
  */
 export class AssetManager {
+  public static loadEntityTextures(): Promise<EntityTextureAssets> { return EntityTextureAssets.load(); }
+
   /**
    * Collects every distinct texture name referenced by the registry's
    * block definitions (across all/top/bottom/side), loads them, and

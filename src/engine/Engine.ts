@@ -24,6 +24,7 @@ import { NaturalMobSpawner } from '../entities/spawning/NaturalMobSpawner';
 import { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';
 import { ExplosionService } from '../entities/explosion/ExplosionService';
 import { NullMobSoundSink } from '../entities/sound/MobSoundSink';
+import type { EntityTextureAssets } from '../assets/EntityTextureAssets';
 import { SimpleEntityParticleSink } from '../entities/particles/EntityParticleSink';
 import { Inventory } from '../inventory/Inventory';
 import { InventorySerializer } from '../inventory/InventorySerializer';
@@ -286,6 +287,7 @@ export class Engine {
     blockRegistry: BlockRegistry,
     atlas: TextureAtlas,
     itemAtlas: ItemTextureAtlas,
+    private readonly entityTextures: EntityTextureAssets,
     private readonly saveCoordinator: WorldSaveCoordinator,
     private readonly storage: WorldStorage,
     skinManager: PlayerSkinManager
@@ -380,6 +382,7 @@ export class Engine {
       isDaytime: () => this.worldTime.getTimeOfDayTicks() < 12000,
       skylightSubtracted: () => this.worldTime.getSkylightSubtracted(),
       explode: (source, x, y, z, strength, flaming) => this.explosionService.explode(source, x, y, z, strength, flaming),
+      entityTextures: this.entityTextures,
       sounds: new NullMobSoundSink(),
     });
     this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng);
@@ -584,6 +587,7 @@ export class Engine {
       this.recipeRegistry
     );
     const displayNameResolver = (stack: { identity: { type: string; id: string | number } }) => {
+      if(stack.identity.type==='item'&&(stack.identity.id===262||stack.identity.id==='262'||stack.identity.id==='arrow'))return 'Arrow';
       if (stack.identity.type === 'block') {
         const def = blockRegistry.getById(stack.identity.id);
         if (def && def.displayName) return def.displayName;
@@ -1078,6 +1082,7 @@ export class Engine {
     this.fluidAnimationSystem.dispose();
     this.fireAnimationSystem.dispose();
     this.atlas.dispose();
+    this.entityTextures.dispose();
     this.chunkManager.clear();
     this.renderer.domElement.remove();
     this.running = false;

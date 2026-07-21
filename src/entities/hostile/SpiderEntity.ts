@@ -41,7 +41,7 @@ export class SpiderEntity extends HostileEntity {
   protected override getAmbientSoundId(): string { return 'mob.spider'; }
   protected override getHurtSoundId(): string { return 'mob.spider'; }
   protected override getDeathSoundId(): string { return 'mob.spiderdeath'; }
-  private buildModel(): void { this.model?.dispose(); this.model = new SpiderModel(); this.renderObject = this.model.root; this.ctx.scene.add(this.model.root); }
+  private buildModel(): void { this.model?.dispose(); this.model = new SpiderModel(this.ctx.entityTextures?.get('spider'),this.ctx.entityTextures?.get('spiderEyes')); this.renderObject = this.model.root; this.ctx.scene.add(this.model.root); }
   public override updateRenderInterpolation(alpha: number): void {
     super.updateRenderInterpolation(alpha); if (!this.model) return;
     const body=interpolateLivingBodyYaw(this.prevRenderYawOffset,this.renderYawOffset,alpha);

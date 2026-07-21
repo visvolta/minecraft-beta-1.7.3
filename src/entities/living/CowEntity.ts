@@ -37,7 +37,7 @@ export class CowEntity extends QuadrupedEntity {
   }
 
   protected createModel(): QuadrupedModel {
-    return new CowModel();
+    return new CowModel(this.ctx.entityTextures?.get('cow'));
   }
 
   protected override getDropItems(): Drop[] {

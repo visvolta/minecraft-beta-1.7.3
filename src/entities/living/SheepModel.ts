@@ -1,4 +1,4 @@
-import { Group, Mesh, MeshBasicMaterial } from 'three';
+import { Group, Mesh, MeshBasicMaterial, type Texture } from 'three';
 import { QuadrupedModel, type QuadrupedConfig } from './QuadrupedModel';
 
 const SHEEP_SKIN = 0xe0d0c0;
@@ -42,23 +42,23 @@ export class SheepModel extends QuadrupedModel {
   private readonly woolLegMeshes: Mesh[] = [];
   private woolHeadMesh: Mesh | null = null;
 
-  public constructor() {
-    super(SHEEP_BASE_CONFIG);
+  public constructor(baseTexture?:Texture,woolTexture?:Texture) {
+    super({...SHEEP_BASE_CONFIG,...(baseTexture?{texture:baseTexture}:{}),headUv:{u:0,v:0},bodyUv:{u:28,v:8,sourceW:8,sourceH:16,sourceD:6},legUv:{u:0,v:16}});
 
-    this.woolMaterial = this.createMaterial(FLEECE_COLORS[0]!);
+    this.woolMaterial=this.createMaterial(FLEECE_COLORS[0]!,woolTexture,true);
 
     // Wool body (inflated 8×16×6 + 1.75 → effective 11.5 × 9.5 × 19.5).
-    this.addBox(this.woolGroup, { w: 11.5, h: 9.5, d: 19.5 }, this.woolMaterial, 0, 15, 0);
+    this.addBox(this.woolGroup, { w: 11.5, h: 9.5, d: 19.5 }, this.woolMaterial, 0, 15, 0,{u:28,v:8,sourceW:8,sourceH:16,sourceD:6});
     this.bodyYawGroup.add(this.woolGroup);
 
     // Wool head (inflated 6×6×6 + 0.6 → 7.2³), parented to the head group so
     // it turns with the head; positioned at the head offset.
-    this.woolHeadMesh = this.addBox(this.headGroup, { w: 7.2, h: 7.2, d: 7.2 }, this.woolMaterial, 0, 1, 1);
+    this.woolHeadMesh = this.addBox(this.headGroup, { w: 7.2, h: 7.2, d: 7.2 }, this.woolMaterial, 0, 1, 1,{u:0,v:0,sourceW:6,sourceH:6,sourceD:6});
 
     // Wool legs (inflated 4×6×4 + 0.5 → 5×7×5) parented to each leg group so
     // they swing with the legs; they cover the upper part of the base legs.
     for (const legGroup of this.legGroups) {
-      const woolLeg = this.addBox(legGroup, { w: 5, h: 7, d: 5 }, this.woolMaterial, 0, -3.5, 0);
+      const woolLeg = this.addBox(legGroup, { w: 5, h: 7, d: 5 }, this.woolMaterial, 0, -3.5, 0,{u:0,v:16,sourceW:4,sourceH:6,sourceD:4});
       this.woolLegMeshes.push(woolLeg);
     }
   }

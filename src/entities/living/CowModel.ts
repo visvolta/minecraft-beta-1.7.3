@@ -1,3 +1,4 @@
+import type { Texture } from 'three';
 import { QuadrupedModel, type QuadrupedConfig } from './QuadrupedModel';
 
 const COW_BROWN = 0x5b4030;
@@ -29,17 +30,17 @@ const COW_CONFIG: QuadrupedConfig = {
  * (parented to the head so they follow the head look) and an udder.
  */
 export class CowModel extends QuadrupedModel {
-  public constructor() {
-    super(COW_CONFIG);
+  public constructor(texture?:Texture) {
+    super({...COW_CONFIG,...(texture?{texture}:{}),headUv:{u:0,v:0},bodyUv:{u:18,v:4,sourceW:12,sourceH:18,sourceD:10},legUv:{u:0,v:16}});
 
     // Horns on the top sides of the head (follow the head group).
-    const hornMaterial = this.createMaterial(HORN);
-    this.addBox(this.headGroup, { w: 1, h: 3, d: 1 }, hornMaterial, -3.5, 4.5, 2.5);
-    this.addBox(this.headGroup, { w: 1, h: 3, d: 1 }, hornMaterial, 3.5, 4.5, 2.5);
+    const hornMaterial=this.createMaterial(texture?0xffffff:HORN,texture);
+    this.addBox(this.headGroup, { w: 1, h: 3, d: 1 }, hornMaterial, -3.5, 4.5, 2.5,{u:22,v:0});
+    this.addBox(this.headGroup, { w: 1, h: 3, d: 1 }, hornMaterial, 3.5, 4.5, 2.5,{u:22,v:0,mirror:true});
 
     // Udder beneath the rear of the body (rendered-equivalent of Beta's
     // 4×6×2 box rotated 90° about X → effective 4 wide × 2 tall × 6 long).
-    const udderMaterial = this.createMaterial(UDDER);
-    this.addBox(this.bodyYawGroup, { w: 4, h: 2, d: 6 }, udderMaterial, 0, 11, -6);
+    const udderMaterial=this.createMaterial(texture?0xffffff:UDDER,texture);
+    this.addBox(this.bodyYawGroup, { w: 4, h: 2, d: 6 }, udderMaterial, 0, 11, -6,{u:52,v:0,sourceW:4,sourceH:6,sourceD:2});
   }
 }

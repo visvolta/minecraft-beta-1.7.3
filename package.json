@@ -32,7 +32,8 @@
     "validate:projectiles": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateProjectiles.js",
     "validate:explosions": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateExplosions.js",
     "validate:hostile-spawning": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateHostileSpawning.js",
-    "validate:mob-parity": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateMobParity.js"
+    "validate:mob-parity": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateMobParity.js",
+    "validate:mob-textures": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateMobTextures.js"
   },
   "dependencies": {
     "three": "^0.185.1"

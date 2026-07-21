@@ -93,6 +93,7 @@ export class EntityManager {
       isDaytime: options.isDaytime,
       skylightSubtracted: options.skylightSubtracted,
       explode: options.explode,
+      entityTextures: options.entityTextures,
       sounds: options.sounds,
     };
 

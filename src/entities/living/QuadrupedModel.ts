@@ -1,4 +1,4 @@
-import { Group, MeshBasicMaterial } from 'three';
+import { Group, MeshBasicMaterial, type Texture } from 'three';
 import { EntityModel, PX, type BoxSpec } from './EntityModel';
 
 function deg2rad(degrees: number): number {
@@ -25,6 +25,10 @@ export interface QuadrupedConfig {
   readonly legs: readonly { x: number; z: number }[];
   /** Base body colour. */
   readonly bodyColor: number;
+  readonly texture?: Texture;
+  readonly bodyUv?: {readonly u:number;readonly v:number;readonly sourceW?:number;readonly sourceH?:number;readonly sourceD?:number};
+  readonly headUv?: {readonly u:number;readonly v:number;readonly sourceW?:number;readonly sourceH?:number;readonly sourceD?:number};
+  readonly legUv?: {readonly u:number;readonly v:number;readonly sourceW?:number;readonly sourceH?:number;readonly sourceD?:number};
   /** Walk-cycle leg swing amplitude (Beta = 1.4 radians). */
   readonly legSwingAmplitude?: number;
 }
@@ -54,21 +58,21 @@ export abstract class QuadrupedModel extends EntityModel {
     super();
     this.swingAmplitude = config.legSwingAmplitude ?? 1.4;
 
-    this.bodyMat = this.createMaterial(config.bodyColor);
+    this.bodyMat=this.createMaterial(config.texture?0xffffff:config.bodyColor,config.texture);
 
     // Body.
-    this.addBox(this.bodyYawGroup, config.body, this.bodyMat, 0, config.body.y, 0);
+    this.addBox(this.bodyYawGroup, config.body, this.bodyMat, 0, config.body.y, 0,config.bodyUv);
 
     // Head (centred at the head pivot plus the head offset).
     const ho = config.headOffset ?? { x: 0, y: 0, z: 0 };
-    this.addBox(this.headGroup, config.head, this.bodyMat, ho.x, ho.y, ho.z);
+    this.addBox(this.headGroup, config.head, this.bodyMat, ho.x, ho.y, ho.z,config.headUv);
     this.headGroup.position.set(0, config.head.pivotY * PX, config.head.pivotZ * PX);
     this.bodyYawGroup.add(this.headGroup);
 
     // Four hip-pivoted legs (front toward +Z).
     for (const leg of config.legs) {
       const group = new Group();
-      this.addBox(group, config.leg, this.bodyMat, 0, -config.leg.h / 2, 0);
+      this.addBox(group, config.leg, this.bodyMat, 0, -config.leg.h / 2, 0,config.legUv?{...config.legUv,mirror:leg.x>0}:undefined);
       group.position.set(leg.x * PX, config.legPivotY * PX, leg.z * PX);
       this.legGroups.push(group);
       this.bodyYawGroup.add(group);
