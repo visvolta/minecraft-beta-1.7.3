@@ -29,7 +29,7 @@ import { PlayerDeathController } from '../player/PlayerDeathController';
 import { RespawnController } from '../player/RespawnController';
 import { DeathScreen } from '../player/DeathScreen';
 import { CameraHurtController } from '../player/CameraHurtController';
-import { HudRenderer } from '../player/HudRenderer';
+import { HudRenderer } from '../player/HudRenderer';import { FoodUseController } from '../player/FoodUseController';import { SprintFovController } from '../player/SprintFovController';
 import type { EntityTextureAssets } from '../assets/EntityTextureAssets';
 import { SimpleEntityParticleSink } from '../entities/particles/EntityParticleSink';
 import { Inventory } from '../inventory/Inventory';
@@ -192,7 +192,7 @@ export class Engine {
   private readonly playerDeathController:PlayerDeathController;
   private readonly respawnController:RespawnController;
   private readonly deathScreen:DeathScreen;
-  private readonly cameraHurtController=new CameraHurtController();
+  private readonly cameraHurtController=new CameraHurtController();private readonly sprintFovController=new SprintFovController();private readonly mobSoundSink=new NullMobSoundSink();private readonly foodUseController:FoodUseController;
   private readonly interactionController: InteractionController;
   private readonly blockHighlight: BlockHighlight;
   private readonly destroyOverlayRenderer: DestroyOverlayRenderer;
@@ -328,7 +328,7 @@ export class Engine {
     );
     this.cameraController.setRotation(metadata.player.yaw, metadata.player.pitch);
 
-    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);
+    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
     this.playerController = new PlayerController(
       this.input,
       this.cameraController,
@@ -339,7 +339,7 @@ export class Engine {
     this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
     this.playerPhysics=new PlayerPhysics(blockRegistry,this.blockBehaviourRegistry,this.blockUpdateWorld);
-    this.playerSurvivalController=new PlayerSurvivalController(this.player,this.blockUpdateWorld,blockRegistry);
+    this.playerSurvivalController=new PlayerSurvivalController(this.player,this.blockUpdateWorld,blockRegistry,()=>metadata.difficulty);
     this.cameraModeController = new CameraModeController(this.input, this.blockUpdateWorld, blockRegistry);
     this.playerModel = new PlayerModel();
     this.playerAnimator = new PlayerAnimator();
@@ -397,7 +397,7 @@ export class Engine {
       skylightSubtracted: () => this.worldTime.getSkylightSubtracted(),
       explode: (source, x, y, z, strength, flaming) => this.explosionService.explode(source, x, y, z, strength, flaming),
       entityTextures: this.entityTextures,
-      sounds: new NullMobSoundSink(),
+      sounds:this.mobSoundSink,
     });
     this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng);
 
@@ -552,7 +552,7 @@ export class Engine {
     );
     this.lastTotalTicks = this.worldTime.getTotalTicks();
 
-    const animalInteractions = new AnimalInteractionService(this.inventory, this.itemEntityManager);
+    const animalInteractions=new AnimalInteractionService(this.inventory,this.itemEntityManager);this.foodUseController=new FoodUseController(this.player,this.inventory,this.input,()=>this.selectedSlot,this.mobSoundSink);
     this.interactionController = new InteractionController(
       this.input,
       this.renderer.camera,
@@ -565,6 +565,7 @@ export class Engine {
       this.blockBehaviourRegistry,
       this.entityManager,
       animalInteractions,
+      this.foodUseController,
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
     this.destroyOverlayRenderer = new DestroyOverlayRenderer(
@@ -759,7 +760,7 @@ export class Engine {
       }
     });
 
-    this.interactionController.breakingController.setOnBlockBrokenHandler((blockId, x, y, z) => {
+    this.interactionController.breakingController.setOnBlockBrokenHandler((blockId,x,y,z)=>{this.player.addExhaustion(.025);
       if (blockId === BlockIds.Chest) {
         if (this.chestController.isOpen) {
           const isActive = this.chestController.activeContainers.some(c => c.x === x && c.y === y && c.z === z);
@@ -824,7 +825,7 @@ export class Engine {
     );
     this.deathScreen=new DeathScreen(()=>this.respawnController.request());
     this.playerDeathController=new PlayerDeathController(this.player,this.inventory,this.itemEntityManager,worldRng,this.deathScreen,()=>{this.deathSavePending=true;});
-    this.respawnController=new RespawnController(this.player,this.chunkManager,this.chunkStreamer,this.blockUpdateWorld,blockRegistry,metadata.spawn,this.deathScreen,this.playerDeathController,()=>{this.cameraHurtController.reset(this.renderer.camera);void this.saveMetadata(true);});
+    this.respawnController=new RespawnController(this.player,this.chunkManager,this.chunkStreamer,this.blockUpdateWorld,blockRegistry,metadata.spawn,this.deathScreen,this.playerDeathController,()=>{this.cameraHurtController.reset(this.renderer.camera);this.sprintFovController.reset(this.renderer.camera);this.foodUseController.cancel();void this.saveMetadata(true);});
 
     this.chestRenderer = new ChestRenderer(
       this.renderer.scene,
@@ -1228,7 +1229,7 @@ export class Engine {
         // entities, resolves player↔mob pushing (through the player's velocity,
         // so the player's own physics still resolves terrain), then runs the
         // item-pickup pass (which needs the player).
-        this.player.tickCombatState();
+        this.player.tickCombatState();this.playerController.tickSprintWindow();this.foodUseController.tick();
         this.playerSurvivalController.tick();
         this.playerDeathController.update();
         this.respawnController.update();
@@ -1310,7 +1311,7 @@ export class Engine {
       this.cameraController.getYaw(),
       this.cameraController.getPitch()
     );
-    this.cameraHurtController.update(camera,this.player,deltaSeconds);
+    this.cameraHurtController.update(camera,this.player,deltaSeconds);const survivalUiSuppressed=this.inventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;if(survivalUiSuppressed){this.player.isSprinting=false;this.foodUseController.cancel();}this.sprintFovController.update(camera,this.player,deltaSeconds,survivalUiSuppressed);
 
     // 7a. Update Player Model and Visibility Rules
     if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
@@ -1648,7 +1649,7 @@ export class Engine {
         yaw: this.cameraController.getYaw(),
         pitch: this.cameraController.getPitch()
       },
-      playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},
+      playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion},
       timeTicks: this.worldTime.getTotalTicks(),
       weather: {
         raining: weather.raining,

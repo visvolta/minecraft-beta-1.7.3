@@ -22,6 +22,7 @@ export const JUMP_VELOCITY = Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
  * PlayerPhysics consumes wishVelocity and integrates/resolves movement.
  */
 export class PlayerController {
+  private sprintTapWindow=0;
   private readonly input: Input;
   private readonly camera: CameraController;
   private readonly player: Player;
@@ -32,6 +33,8 @@ export class PlayerController {
     this.player = player;
   }
 
+  public tickSprintWindow():void{if(this.sprintTapWindow>0)this.sprintTapWindow--;}
+  public updateSprintState(forwardHeld:boolean,shiftHeld:boolean,forwardPressed:boolean):void{if(forwardPressed){if(this.sprintTapWindow>0&&this.player.canSprint()){this.player.isSprinting=true;this.sprintTapWindow=0;}else this.sprintTapWindow=7;}if(shiftHeld&&forwardHeld&&this.player.canSprint())this.player.isSprinting=true;if(!forwardHeld||!this.player.canSprint()||this.player.collidedHorizontally)this.player.isSprinting=false;}
   /** Reads input and updates the player's wish velocity; applies jumps immediately. */
   public update(): void {
     const yaw = this.camera.getYaw();
@@ -42,10 +45,10 @@ export class PlayerController {
     const rightX = Math.cos(yaw);
     const rightZ = -Math.sin(yaw);
 
-    let moveX = 0;
-    let moveZ = 0;
+    let moveX=0,moveZ=0;const forwardHeld=this.input.isActionActive('forward');
+    this.updateSprintState(forwardHeld,this.input.isActionActive('sprint'),this.input.isActionJustPressed('forward'));
 
-    if (this.input.isActionActive('forward')) {
+    if (forwardHeld) {
       moveX += forwardX;
       moveZ += forwardZ;
     }
@@ -69,8 +72,7 @@ export class PlayerController {
 
     if (lengthSq > 0) {
       const length = Math.sqrt(lengthSq);
-      this.player.wishVelocity.x = (moveX / length) * WALK_SPEED;
-      this.player.wishVelocity.z = (moveZ / length) * WALK_SPEED;
+      const speed=WALK_SPEED*(this.player.isSprinting?1.3:1);this.player.wishVelocity.x=moveX/length*speed;this.player.wishVelocity.z=moveZ/length*speed;
     } else {
       this.player.wishVelocity.x = 0;
       this.player.wishVelocity.z = 0;
@@ -80,8 +82,7 @@ export class PlayerController {
     // ever set by PlayerPhysics's collision resolution from the previous
     // physics step (this runs before physics in the frame order).
     if (this.input.isActionActive('jump') && this.player.grounded) {
-      this.player.velocity.y = JUMP_VELOCITY;
-      this.player.grounded = false;
+      this.player.velocity.y=JUMP_VELOCITY;if(this.player.isSprinting){this.player.velocity.x+=forwardX*1.5;this.player.velocity.z+=forwardZ*1.5;this.player.addExhaustion(.8);}else this.player.addExhaustion(.2);this.player.grounded=false;
     }
   }
 }

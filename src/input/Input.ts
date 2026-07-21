@@ -7,7 +7,8 @@ export type InputAction =
   | 'back'
   | 'left'
   | 'right'
-  | 'jump';
+  | 'jump'
+  | 'sprint';
 
 /** Default keyboard bindings. Replace this map later for configurable keybinds. */
 const DEFAULT_BINDINGS: Record<InputAction, readonly string[]> = {
@@ -16,6 +17,7 @@ const DEFAULT_BINDINGS: Record<InputAction, readonly string[]> = {
   left: ['KeyA'],
   right: ['KeyD'],
   jump: ['Space'],
+  sprint:['ShiftLeft','ShiftRight'],
 };
 
 /** Mouse buttons the game can query, by their MouseEvent.button index. */
@@ -351,9 +353,8 @@ export class Input {
    * Returns true only on the frame the given KeyboardEvent.code was just
    * pressed (edge-triggered, ignores OS key-repeat).
    */
-  public isKeyJustPressed(code: string): boolean {
-    return this.frameKeyPresses.has(code);
-  }
+  public isKeyJustPressed(code:string):boolean{return this.frameKeyPresses.has(code);}
+  public isActionJustPressed(action:InputAction):boolean{return this.bindings[action].some(code=>this.frameKeyPresses.has(code));}
 
   /**
    * Returns this frame's mouse movement (from beginFrame), then clears it.

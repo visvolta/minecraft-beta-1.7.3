@@ -21,7 +21,7 @@ import { DamageSource } from '../entities/damage/DamageSource';
 import { selectMeleeTarget } from './MeleeTargeting';
 import { MELEE_REACH, PLAYER_MELEE_DAMAGE } from './PlayerConstants';
 import { AnimalEntity } from '../entities/living/AnimalEntity';
-import type { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';
+import type { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';import type { FoodUseController } from './FoodUseController';
 
 /** Maximum block interaction reach, in blocks. */
 export const INTERACTION_REACH = 4.75;
@@ -66,7 +66,8 @@ export class InteractionController {
     inventory: Inventory,
     private readonly behaviourRegistry: BlockBehaviourRegistry,
     private readonly entityManager: EntityManager,
-    private readonly animalInteractions: AnimalInteractionService,
+    private readonly animalInteractions:AnimalInteractionService,
+    private readonly foodUse:FoodUseController,
   ) {
     this.input = input;
     this.camera = camera;
@@ -134,7 +135,7 @@ export class InteractionController {
 
   /** Applies a player melee hit through the shared living-entity damage flow. */
   private attackTargetedEntity(entity: LivingEntity): void {
-    entity.attackEntityFrom(DamageSource.player(this.player), PLAYER_MELEE_DAMAGE);
+    if(entity.attackEntityFrom(DamageSource.player(this.player),PLAYER_MELEE_DAMAGE))this.player.addExhaustion(.3);
   }
 
   public getSelectedSlotIndex(): number {
@@ -198,6 +199,7 @@ export class InteractionController {
       return;
     }
 
+    if(this.input.isMouseButtonJustPressed('right')&&this.foodUse.tryBegin(this.selectedSlotIndex)){this.player.swingItem();return;}
     if (this.input.isMouseButtonJustPressed('right') && this.targetedEntity instanceof AnimalEntity) {
       const result = this.animalInteractions.interact(this.targetedEntity, this.selectedSlotIndex);
       if (result !== 'not-applicable') {

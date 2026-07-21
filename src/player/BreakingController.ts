@@ -109,10 +109,7 @@ export class BreakingController {
     }
 
     const def = this.blockRegistry.getById(blockId);
-    if (def === undefined) {
-      this.reset();
-      return;
-    }
+    if(def===undefined||def.isBreakable===false){this.reset();return;}
 
     const hardness = def.hardness !== undefined ? def.hardness : 1.0;
 

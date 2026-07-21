@@ -1,0 +1,1 @@
+export type ItemUseAction='none'|'eat'|'drink';export interface ItemDefinition{readonly id:string;readonly stackSize:number;readonly durability?:number;readonly foodValue?:number;readonly saturationValue?:number;readonly useAction:ItemUseAction;readonly containerItem?:string;}

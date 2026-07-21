@@ -112,7 +112,7 @@ export class Raycaster {
       if (blockId !== AIR_BLOCK_ID) {
         const blockDefinition = this.blockRegistry.getById(blockId);
 
-        if (blockDefinition !== undefined) {
+        if (blockDefinition !== undefined&&blockDefinition.isTargetable!==false) {
           const aabbs = getBlockBounds(this.blockRegistry, this.behaviourRegistry, this.blockUpdateWorld, voxelX, voxelY, voxelZ, 'interaction');
           let bestHit: { distance: number, face: FaceNormal, hitAabb: AABB } | undefined = undefined;
 

@@ -61,6 +61,8 @@ export interface BlockDefinition {
   readonly blocksWeather?: boolean;
   /** Beta Material-style liquid flag, used by weather blocking and future fluids. */
   readonly isLiquid?: boolean;
+  readonly isTargetable?:boolean;
+  readonly isBreakable?:boolean;
   readonly receivesAmbientOcclusion?: boolean;
   readonly contributesAmbientOcclusion?: boolean;
   /**

@@ -5,7 +5,7 @@ import type { Player } from '../player/Player';
 import { AABB } from './AABB';
 import type { BlockBehaviourRegistry } from '../world/BlockBehaviour';
 import { getBlockBounds } from '../world/BlockBehaviour';
-import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
+import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';import { isLavaInAABB,isWaterInAABB } from '../entities/living/HazardDetection';import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 
 /**
  * How quickly horizontal velocity is steered toward wishVelocity while
@@ -37,7 +37,7 @@ const COLLISION_AXIS_ORDER: readonly ('x' | 'y' | 'z')[] = ['y', 'x', 'z'];
  * Queries solid geometry through ChunkManager + BlockRegistry only; does
  * not touch rendering, input, or camera state.
  */
-export interface PlayerMovementResult{readonly previousY:number;readonly currentY:number;readonly wasGrounded:boolean;readonly grounded:boolean;readonly climbing:boolean;}
+export interface PlayerMovementResult{readonly previousX?:number;readonly previousY:number;readonly previousZ?:number;readonly currentX?:number;readonly currentY:number;readonly currentZ?:number;readonly wasGrounded:boolean;readonly grounded:boolean;readonly climbing:boolean;readonly inWater?:boolean;readonly inLava?:boolean;}
 export class PlayerPhysics {
   public constructor(
     
@@ -52,7 +52,7 @@ export class PlayerPhysics {
    * before this runs; this only reacts to whatever velocity.y already is.
    */
   public update(player:Player,deltaSeconds:number,isJumpPressed=false):PlayerMovementResult{
-    const previousY=player.position.y,wasGrounded=player.grounded;
+    const previousX=player.position.x,previousY=player.position.y,previousZ=player.position.z,wasGrounded=player.grounded;
     const playerBox = player.getAABB();
     const climbRange = this.blockRangeCoveringBox(playerBox);
     let isClimbing = false;
@@ -98,18 +98,12 @@ export class PlayerPhysics {
       }
     }
 
-    this.applyHorizontalAcceleration(player, deltaSeconds);
-
-    const velocityYBeforeGravity = player.velocity.y;
-    if (!isClimbing) {
-      this.applyGravity(player, deltaSeconds);
-    }
-
-    const averageVelocityY = (velocityYBeforeGravity + player.velocity.y) / 2;
-
-    this.moveAndCollide(player,deltaSeconds,averageVelocityY);
-    return{previousY,currentY:player.position.y,wasGrounded,grounded:player.grounded,climbing:isClimbing};
+    const inWater=isWaterInAABB(this.blockUpdateWorld,playerBox),inLava=isLavaInAABB(this.blockUpdateWorld,playerBox);player.inWater=inWater;player.inLava=inLava;if(inLava)player.isSprinting=false;
+    if(inWater||inLava){this.applyFluidAcceleration(player,deltaSeconds,inLava?0.2:0.38);const fx=Math.floor(player.position.x),fy=Math.floor(player.position.y),fz=Math.floor(player.position.z),fluidId=this.blockUpdateWorld.getBlock(fx,fy,fz),flow=computeFluidFlowVector({getBlock:(x,y,z)=>this.blockUpdateWorld.getBlock(x,y,z),getMetadata:(x,y,z)=>this.blockUpdateWorld.getBlockMetadata(x,y,z),isSolid:id=>this.blockRegistry.getById(id)?.solid??false},fx,fy,fz,fluidId);player.velocity.x+=flow.x*deltaSeconds*.8;player.velocity.z+=flow.z*deltaSeconds*.8;const before=player.velocity.y;if(isJumpPressed)player.velocity.y+=deltaSeconds*(inLava?2:4);else player.velocity.y-=deltaSeconds*(inLava?2.5:1.5);this.moveAndCollide(player,deltaSeconds,(before+player.velocity.y)/2);const drag=Math.pow(inLava?0.5:0.8,deltaSeconds*20);player.velocity.x*=drag;player.velocity.y*=drag;player.velocity.z*=drag;}else{this.applyHorizontalAcceleration(player,deltaSeconds);const velocityYBeforeGravity=player.velocity.y;if(!isClimbing)this.applyGravity(player,deltaSeconds);this.moveAndCollide(player,deltaSeconds,(velocityYBeforeGravity+player.velocity.y)/2);}
+    return{previousX,previousY,previousZ,currentX:player.position.x,currentY:player.position.y,currentZ:player.position.z,wasGrounded,grounded:player.grounded,climbing:isClimbing,inWater,inLava};
   }
+
+  private applyFluidAcceleration(player:Player,deltaSeconds:number,speedFactor:number):void{const maxStep=3*deltaSeconds;player.velocity.x=this.stepToward(player.velocity.x,player.wishVelocity.x*speedFactor,maxStep);player.velocity.z=this.stepToward(player.velocity.z,player.wishVelocity.z*speedFactor,maxStep);}
 
   private applyHorizontalAcceleration(player: Player, deltaSeconds: number): void {
     const acceleration = player.grounded ? GROUND_ACCELERATION : AIR_ACCELERATION;
@@ -159,7 +153,7 @@ export class PlayerPhysics {
       z: player.velocity.z * deltaSeconds,
     };
 
-    let grounded = false;
+    let grounded=false,collidedHorizontally=false;
 
     for (const axis of COLLISION_AXIS_ORDER) {
       const box = player.getAABB();
@@ -168,12 +162,12 @@ export class PlayerPhysics {
       if (axis === 'x') {
         player.position.x += resolved;
         if (resolved !== delta.x) {
-          player.velocity.x = 0;
+          collidedHorizontally=true;player.velocity.x = 0;
         }
       } else if (axis === 'z') {
         player.position.z += resolved;
         if (resolved !== delta.z) {
-          player.velocity.z = 0;
+          collidedHorizontally=true;player.velocity.z = 0;
         }
       } else {
         player.position.y += resolved;
@@ -189,7 +183,7 @@ export class PlayerPhysics {
       }
     }
 
-    player.grounded = grounded;
+    player.grounded=grounded;player.collidedHorizontally=collidedHorizontally;
   }
 
   /**

@@ -40,7 +40,10 @@ export class Player {
   public attackedAtYaw = 0;
   public deathSequence = 0;
   public recentHealth = 20;
-  public healthFlashTicks = 0;
+  public healthFlashTicks=0;
+  public hunger=20;public saturation=5;public exhaustion=0;public foodTimer=0;public starvationTimer=0;
+  public isEating=false;public foodUseTicks=0;public foodUseSlot=-1;public foodUseItem:string|number|undefined;
+  public isSprinting=false;public inWater=false;public inLava=false;public collidedHorizontally=false;
 
   /** Feet position (bottom-centre of the hitbox), world space. */
   public readonly position = { x: 0, y: 0, z: 0 };
@@ -105,6 +108,10 @@ export class Player {
   public get isDead():boolean{return this.health<=0;}
 
   public setHealth(value:number):void{this.health=Math.max(0,Math.min(this.maxHealth,value));}
+  public setFoodState(hunger:number,saturation:number,exhaustion=0):void{this.hunger=Math.max(0,Math.min(20,hunger));this.saturation=Math.max(0,Math.min(this.hunger,saturation));this.exhaustion=Math.max(0,exhaustion);}
+  public addFood(food:number,saturationModifier:number):void{this.hunger=Math.min(20,this.hunger+food);this.saturation=Math.min(this.hunger,this.saturation+food*saturationModifier*2);}
+  public addExhaustion(amount:number):void{this.exhaustion=Math.min(40,this.exhaustion+Math.max(0,amount));}
+  public canSprint():boolean{return this.isAlive()&&this.hunger>6&&!this.isEating&&!this.inLava;}
   public setMaxHealth(value:number):void{this.maxHealth=Math.max(1,Math.floor(value));this.setHealth(this.health);}
 
   /** Single authoritative entry point for every Player damage source. */
@@ -114,11 +121,11 @@ export class Player {
     if(!source.bypassesInvulnerability&&this.hurtResistantTime>10){if(amount<=this.lastDamageAmount)return false;applied=amount-this.lastDamageAmount;this.lastDamageAmount=amount;fullHit=false;}else{this.lastDamageAmount=amount;if(!source.bypassesInvulnerability)this.hurtResistantTime=20;this.hurtTime=10;}
     this.lastDamageSource=source;this.lastAttacker=source.attacker;this.recentHealth=this.health;this.healthFlashTicks=20;
     if(fullHit&&source.appliesKnockback&&source.attacker){const dx=this.position.x-source.attacker.position.x,dz=this.position.z-source.attacker.position.z,length=Math.hypot(dx,dz);if(length>1e-6){this.velocity.x+=dx/length*8;this.velocity.z+=dz/length*8;}this.velocity.y=Math.max(this.velocity.y,8);this.attackedAtYaw=Math.atan2(dz,dx)-this.bodyYaw;}
-    this.setHealth(this.health-applied);if(this.health===0)this.deathSequence++;return true;
+    this.setHealth(this.health-applied);this.addExhaustion(.3);if(this.health===0)this.deathSequence++;return true;
   }
   public attackFromMob(amount:number,attacker:DamageAttacker):boolean{return this.attackEntityFrom(DamageSource.mob(attacker),amount);}
 
-  public resetForRespawn(x:number,y:number,z:number):void{this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;}
+  public resetForRespawn(x:number,y:number,z:number):void{this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.inLava=this.collidedHorizontally=false;}
 
   public tickCombatState(): void {
     if (this.hurtResistantTime > 0) this.hurtResistantTime -= 1;
