@@ -42,6 +42,8 @@ export interface EntityWorldContext {
   readonly particles?: EntityParticleSink | undefined;
   /** Optional decoupled weather query (for rain extinguishing). */
   readonly weather?: { isRaining(): boolean } | undefined;
+  /** Live player position reference (for look-at-player etc.); updated as the player moves. */
+  readonly playerPosition?: { x: number; y: number; z: number } | undefined;
 }
 
 /**

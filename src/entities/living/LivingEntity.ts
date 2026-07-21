@@ -4,6 +4,7 @@ import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
 import { Pathfinder } from '../nav/Pathfinder';
 import { Navigation } from '../nav/Navigation';
 import { AiController } from '../ai/AiController';
+import type { EntityManager } from '../core/EntityManager';
 import { BlockIds } from '../../blocks/BlockId';
 import { DamageSource } from '../damage/DamageSource';
 import type { ParticleOrigin } from '../particles/EntityParticleSink';
@@ -110,6 +111,9 @@ export abstract class LivingEntity extends Entity {
   /** Head orientation; independent of the body (idle-looking turns this). */
   public headYaw = 0;
   public prevHeadYaw = 0;
+  /** Head pitch in degrees (e.g. lowered while grazing); 0 = level. */
+  public headPitch = 0;
+  public prevHeadPitch = 0;
   /** Recoil angle from the last hit (transient; drives the hurt flinch). */
   public attackedAtYaw = 0;
 
@@ -183,6 +187,16 @@ export abstract class LivingEntity extends Entity {
     return this.ctx.rng.nextInt(bound);
   }
 
+  /** The owning entity manager (for tasks that query nearby entities). */
+  public get entityManager(): EntityManager {
+    return this.ctx.manager;
+  }
+
+  /** The live player position, if available (for look-at-player tasks). */
+  public get playerPosition(): { x: number; y: number; z: number } | undefined {
+    return this.ctx.playerPosition;
+  }
+
   /** Wander-destination weight (Beta `EntityCreature` default 0; animals override). */
   public getBlockPathWeight(_x: number, _y: number, _z: number): number {
     return 0;
@@ -210,6 +224,7 @@ export abstract class LivingEntity extends Entity {
     // then integrate motion.
     this.aiController.update(this);
     this.navigation.update(this);
+    this.onPreMove(ctx);
     this.moveLiving(ctx, this.moveStrafing, this.moveForward);
     this.isJumping = false;
 
@@ -217,6 +232,16 @@ export abstract class LivingEntity extends Entity {
     this.applyEnvironmentDamage(ctx);
 
     this.updateLivingAnimation();
+  }
+
+  /**
+   * Hook run immediately before movement and fall-distance processing. Default
+   * no-op; the chicken overrides it to damp falling velocity (slow fall) so the
+   * damped value — not the undamped one — drives this tick's movement and fall
+   * distance.
+   */
+  protected onPreMove(_ctx: EntityTickContext): void {
+    // Subclasses override.
   }
 
   /**
@@ -481,6 +506,7 @@ export abstract class LivingEntity extends Entity {
     this.prevLegYaw = this.legYaw;
     this.prevRenderYawOffset = this.renderYawOffset;
     this.prevHeadYaw = this.headYaw;
+    this.prevHeadPitch = this.headPitch;
 
     const dx = this.position.x - this.previousPosition.x;
     const dz = this.position.z - this.previousPosition.z;

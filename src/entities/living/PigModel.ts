@@ -1,142 +1,31 @@
-import { BoxGeometry, Color, Group, Mesh, MeshBasicMaterial } from 'three';
-import { attachEntityLighting } from '../../rendering/ChunkRenderer';
+import { QuadrupedModel, type QuadrupedConfig } from './QuadrupedModel';
 
-/** Model space: 16 pixels per block, y up, origin at the entity's feet. */
-const PX = 1 / 16;
 const PINK = 0xefa6a0;
-const SNOUT_PINK = 0xd98a86;
-/** Target colour for the hurt flash (reused; no per-frame allocation). */
-const HURT_FLASH_RED = new Color(1, 0, 0);
-
-function deg2rad(degrees: number): number {
-  return (degrees * Math.PI) / 180;
-}
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
 
 /**
- * Procedural box-built pig model (Beta pig proportions), reusing the same
- * entity-lit material pipeline as the player model — no external artwork and
- * no second rendering architecture. The model faces +Z at yaw 0, matching the
- * living-movement heading convention.
- *
- * Hierarchy: `root` (feet position) → `bodyYawGroup` (body heading) → body
- * mesh, `headGroup` (relative head turn) and four hip-pivoted leg groups for
- * the walk cycle.
+ * Beta pig proportions (ModelPig = ModelQuadruped(6, 0)), expressed in the
+ * shared world-16th convention. The body uses the rendered-equivalent box of
+ * Beta's 10×16×8 body rotated 90° about X (effective 10 wide × 8 tall × 16
+ * long). Beta's pig snout is texture-only, so there is no geometric snout.
  */
-export class PigModel {
-  public readonly root = new Group();
+const PIG_CONFIG: QuadrupedConfig = {
+  body: { w: 10, h: 8, d: 16, y: 10 },
+  head: { w: 8, h: 8, d: 8, pivotY: 12, pivotZ: 6 },
+  headOffset: { x: 0, y: 0, z: 4 },
+  leg: { w: 4, h: 6, d: 4 },
+  legPivotY: 6,
+  legs: [
+    { x: -3, z: 5 }, // front-left
+    { x: 3, z: 5 }, // front-right
+    { x: -3, z: -7 }, // back-left
+    { x: 3, z: -7 }, // back-right
+  ],
+  bodyColor: PINK,
+};
 
-  private readonly bodyYawGroup = new Group();
-  private readonly headGroup = new Group();
-  private readonly frontLeftLeg = new Group();
-  private readonly frontRightLeg = new Group();
-  private readonly backLeftLeg = new Group();
-  private readonly backRightLeg = new Group();
-
-  private readonly material: MeshBasicMaterial;
-  private readonly snoutMaterial: MeshBasicMaterial;
-  private readonly baseBodyColor: Color;
-  private readonly baseSnoutColor: Color;
-  private readonly geometries: BoxGeometry[] = [];
-
+/** Pig model: the shared {@link QuadrupedModel} with Beta pig proportions. */
+export class PigModel extends QuadrupedModel {
   public constructor() {
-    this.material = new MeshBasicMaterial({ color: PINK });
-    attachEntityLighting(this.material);
-    this.snoutMaterial = new MeshBasicMaterial({ color: SNOUT_PINK });
-    attachEntityLighting(this.snoutMaterial);
-    // Capture the true (colour-managed) base colours so the hurt flash can
-    // restore them exactly when it fades.
-    this.baseBodyColor = this.material.color.clone();
-    this.baseSnoutColor = this.snoutMaterial.color.clone();
-
-    // Body: chunky torso above the legs.
-    const bodyMesh = this.box(8, 8, 14, this.material);
-    bodyMesh.position.set(0, 9 * PX, 0);
-    this.bodyYawGroup.add(bodyMesh);
-
-    // Head (front, +Z) with a snout.
-    const headMesh = this.box(8, 8, 8, this.material);
-    this.headGroup.add(headMesh);
-    const snoutMesh = this.box(4, 3, 2, this.snoutMaterial);
-    snoutMesh.position.set(0, -1 * PX, 5 * PX);
-    this.headGroup.add(snoutMesh);
-    this.headGroup.position.set(0, 12 * PX, 10 * PX);
-    this.bodyYawGroup.add(this.headGroup);
-
-    // Four legs, pivoted at the hip (top), front legs toward +Z.
-    this.buildLeg(this.frontLeftLeg, -3, 5);
-    this.buildLeg(this.frontRightLeg, 3, 5);
-    this.buildLeg(this.backLeftLeg, -3, -5);
-    this.buildLeg(this.backRightLeg, 3, -5);
-    this.bodyYawGroup.add(this.frontLeftLeg, this.frontRightLeg, this.backLeftLeg, this.backRightLeg);
-
-    this.root.add(this.bodyYawGroup);
-  }
-
-  private box(w: number, h: number, d: number, material: MeshBasicMaterial): Mesh {
-    const geometry = new BoxGeometry(w * PX, h * PX, d * PX);
-    this.geometries.push(geometry);
-    return new Mesh(geometry, material);
-  }
-
-  private buildLeg(group: Group, xPixels: number, zPixels: number): void {
-    const legMesh = this.box(3, 6, 3, this.material);
-    legMesh.position.set(0, -3 * PX, 0); // hang below the hip pivot
-    group.add(legMesh);
-    group.position.set(xPixels * PX, 6 * PX, zPixels * PX);
-  }
-
-  /**
-   * Applies the animated pose. `legYaw`/`legSwing` drive the walk cycle;
-   * `bodyYawDeg` is the body heading and `headRelYawDeg` the head turn
-   * relative to the body (both in degrees).
-   */
-  public updatePose(legYaw: number, legSwing: number, bodyYawDeg: number, headRelYawDeg: number): void {
-    this.bodyYawGroup.rotation.y = -deg2rad(bodyYawDeg);
-    this.headGroup.rotation.y = -deg2rad(headRelYawDeg);
-
-    const swing = Math.cos(legYaw) * legSwing * 1.2;
-    this.frontLeftLeg.rotation.x = swing;
-    this.backRightLeg.rotation.x = swing;
-    this.frontRightLeg.rotation.x = -swing;
-    this.backLeftLeg.rotation.x = -swing;
-  }
-
-  /**
-   * Tints the model toward red for the hurt flash. `amount` is 0 (base colour,
-   * no flash) to 1 (full red). Mutates the existing materials' colour only — no
-   * new material is created and the base colour is fully restored at amount 0.
-   */
-  public setHurtFlash(amount: number): void {
-    const a = clamp01(amount);
-    // Lerp in place from the stored base colour toward red (no allocation),
-    // restoring the exact base colour at amount 0.
-    this.material.color.copy(this.baseBodyColor).lerp(HURT_FLASH_RED, a);
-    this.snoutMaterial.color.copy(this.baseSnoutColor).lerp(HURT_FLASH_RED, a);
-  }
-
-  /**
-   * Death collapse: rolls the body onto its side as `progress` goes 0 → 1.
-   * Applied on an independent axis so it composes with the body-yaw rotation.
-   */
-  public setDeathProgress(progress: number): void {
-    this.bodyYawGroup.rotation.z = clamp01(progress) * (Math.PI / 2);
-  }
-
-  /** The shared body material (exposed so the hurt flash can be inspected). */
-  public get bodyMaterial(): MeshBasicMaterial {
-    return this.material;
-  }
-
-  public dispose(): void {
-    for (const geometry of this.geometries) {
-      geometry.dispose();
-    }
-    this.geometries.length = 0;
-    this.material.dispose();
-    this.snoutMaterial.dispose();
+    super(PIG_CONFIG);
   }
 }

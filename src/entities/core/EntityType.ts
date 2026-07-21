@@ -14,6 +14,9 @@ export const EntityTypeIds = {
   DroppedItem: 1,
   FallingBlock: 2,
   Pig: 3,
+  Cow: 4,
+  Sheep: 5,
+  Chicken: 6,
 } as const;
 
 export type EntityTypeId = (typeof EntityTypeIds)[keyof typeof EntityTypeIds];

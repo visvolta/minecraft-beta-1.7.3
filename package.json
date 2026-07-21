@@ -23,7 +23,8 @@
     "validate:inventory": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateInventory.js",
     "validate:crafting": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateCrafting.js",
     "validate:nbt": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateNbt.js",
-    "validate:entities": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateEntities.js"
+    "validate:entities": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateEntities.js",
+    "validate:models": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateModels.js"
   },
   "dependencies": {
     "three": "^0.185.1"

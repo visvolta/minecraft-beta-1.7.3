@@ -21,6 +21,10 @@ import { createDefaultEntityTypeRegistry } from '../entities/core/EntityType';
 import { registerEntityTypes } from '../entities/registerEntityTypes';
 import { JavaRandom } from '../world/generation/random/JavaRandom';
 import { PigEntity } from '../entities/living/PigEntity';
+import { CowEntity } from '../entities/living/CowEntity';
+import { SheepEntity } from '../entities/living/SheepEntity';
+import { ChickenEntity } from '../entities/living/ChickenEntity';
+import { MobSpawnMenu, type MobType } from '../debug/MobSpawnMenu';
 import { SimpleEntityParticleSink } from '../entities/particles/EntityParticleSink';
 import { Inventory } from '../inventory/Inventory';
 import { InventorySerializer } from '../inventory/InventorySerializer';
@@ -246,6 +250,7 @@ export class Engine {
   // whether PlayerPhysics or DebugController runs each frame); DebugOverlay
   // only ever reads a DebugStats snapshot and never touches game state.
   private readonly debugOverlay: DebugOverlay;
+  private readonly mobSpawnMenu: MobSpawnMenu;
   private readonly debugController: DebugController;
   private readonly debugStatsCollector: DebugStatsCollector;
   private readonly blockTestGrid: BlockTestGrid;
@@ -367,6 +372,7 @@ export class Engine {
       rng: new JavaRandom(worldSeed),
       particles: this.entityParticles,
       weather: { isRaining: () => this.weatherController.getState().raining },
+      playerPosition: this.player.position,
     });
 
     // Persist each chunk's owned entities on save and restore them on load.
@@ -789,6 +795,7 @@ export class Engine {
     this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
 
     this.debugOverlay = new DebugOverlay();
+    this.mobSpawnMenu = new MobSpawnMenu((type) => this.spawnMob(type));
     this.debugController = new DebugController(
       this.input,
       this.cameraController,
@@ -825,7 +832,6 @@ export class Engine {
       isWorldDirty: () => this.saveCoordinator.isDirty(),
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
       validateMeshWorkers: () => validationHarness.validateMeshWorker(),
-      spawnPig: () => this.spawnDebugPig(),
       getTargetedEntity: () => this.interactionController.getTargetedEntity(),
       getEntityMetrics: () => ({
         active: this.entityManager.activeCount,
@@ -1001,6 +1007,7 @@ export class Engine {
 
     document.body.appendChild(this.renderer.domElement);
     this.debugOverlay.mount();
+    this.mobSpawnMenu.mount();
     this.input.start();
     this.renderer.start();
     this.running = true;
@@ -1022,6 +1029,7 @@ export class Engine {
     this.renderer.stop();
     this.input.stop();
     this.debugOverlay.dispose();
+    this.mobSpawnMenu.dispose();
     this.blockHighlight.dispose();
     this.destroyOverlayRenderer.dispose();
     this.hotbarHudRenderer.dispose();
@@ -1145,18 +1153,6 @@ export class Engine {
       this.weatherController.forceMode('thunder');
     }
 
-    // Stage 1 entity validation: spawn a pig in front of the player (no modal open).
-    if (
-      this.input.isKeyJustPressed('KeyP') &&
-      !this.inventoryController.isOpen &&
-      !this.craftingTableController.isOpen &&
-      !this.furnaceController.isOpen &&
-      !this.chestController.isOpen &&
-      !this.signController.isOpen
-    ) {
-      this.spawnDebugPig();
-    }
-
     // Basic time controls.
     if (this.input.isKeyJustPressed('ArrowLeft')) {
       this.worldTime.addTicks(-1000);
@@ -1219,7 +1215,7 @@ export class Engine {
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
 
     // 4. Update camera look
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && !this.mobSpawnMenu.isOpen()) {
       this.cameraController.update();
     }
 
@@ -1234,7 +1230,7 @@ export class Engine {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
-        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
+        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && !this.mobSpawnMenu.isOpen()) {
           this.playerController.update();
         } else {
           this.player.wishVelocity.x = 0;
@@ -1382,7 +1378,7 @@ export class Engine {
     );
 
     // 10. Update interaction (raycast targeting + break/place edits)
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen) {
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && !this.mobSpawnMenu.isOpen()) {
       this.interactionController.update(deltaSeconds);
     }
 
@@ -1742,17 +1738,23 @@ export class Engine {
   }
 
   /** Spawns a validation pig a couple of blocks in front of the player. */
-  private spawnDebugPig(): void {
+  /** Spawns the selected passive mob a couple of blocks in front of the player (debug only). */
+  private spawnMob(type: MobType): void {
     const yawRad = (this.cameraController.getYaw() * Math.PI) / 180;
     const forwardX = -Math.sin(yawRad);
     const forwardZ = Math.cos(yawRad);
     const x = this.player.position.x + forwardX * 2;
     const z = this.player.position.z + forwardZ * 2;
     const y = this.player.position.y + 0.5;
-    const pig = new PigEntity(this.entityManager.context, x, y, z);
-    pig.yaw = this.cameraController.getYaw();
-    this.entityManager.add(pig);
-    console.log(`[Debug] Spawned pig at (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)})`);
+    const ctx = this.entityManager.context;
+    const mob =
+      type === 'cow' ? new CowEntity(ctx, x, y, z)
+      : type === 'sheep' ? new SheepEntity(ctx, x, y, z)
+      : type === 'chicken' ? new ChickenEntity(ctx, x, y, z)
+      : new PigEntity(ctx, x, y, z);
+    mob.yaw = this.cameraController.getYaw();
+    this.entityManager.add(mob);
+    console.log(`[Debug] Spawned ${type} at (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)})`);
   }
 
 }

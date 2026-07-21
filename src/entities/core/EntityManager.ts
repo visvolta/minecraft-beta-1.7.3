@@ -83,6 +83,7 @@ export class EntityManager {
       rng: options.rng,
       particles: options.particles,
       weather: options.weather,
+      playerPosition: options.playerPosition,
     };
 
     this.chunkManager.addRemoveListener((chunk) => this.onChunkRemoved(chunk));

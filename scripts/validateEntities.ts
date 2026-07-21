@@ -21,6 +21,9 @@ import { CountingParticleSink } from '../src/entities/particles/EntityParticleSi
 import { selectMeleeTarget } from '../src/player/MeleeTargeting.ts';
 import { MELEE_REACH } from '../src/player/PlayerConstants.ts';
 import { VOID_MIN_Y } from '../src/world/chunkConstants.ts';
+import { CowEntity } from '../src/entities/living/CowEntity.ts';
+import { SheepEntity } from '../src/entities/living/SheepEntity.ts';
+import { ChickenEntity } from '../src/entities/living/ChickenEntity.ts';
 import { PigModel } from '../src/entities/living/PigModel.ts';
 
 function assert(condition: boolean, message: string): void {
@@ -1004,6 +1007,138 @@ function countPork(entities: EntityManager): number {
   assert(loaded!.fire === 150, 'fire timer persists across save/load');
   assert(loaded!.air === 120, 'air supply persists across save/load');
   assert(loaded!.inWater === false && loaded!.inLava === false, 'transient medium state is cleared on load');
+}
+
+// ============================================================
+// 8A helpers
+// ============================================================
+function countDrop(entities: EntityManager, id: string | number): number {
+  let total = 0;
+  entities.forEachActive((entity) => {
+    if (entity instanceof DroppedItemEntity && entity.drop.id === id) {
+      total += entity.drop.count;
+    }
+  });
+  return total;
+}
+
+// ============================================================
+// 8A: pig model regression (visual refactor into QuadrupedModel must not change it)
+// ============================================================
+{
+  const fresh = new PigModel();
+  const flashed = new PigModel();
+  flashed.setHurtFlash(1);
+  flashed.setHurtFlash(0);
+  assert(flashed.bodyMaterial.color.equals(fresh.bodyMaterial.color), 'pig hurt flash resets exactly after migration');
+  // Pose / death must apply without error and dispose cleanly.
+  fresh.updatePose(0.5, 0.5, 30, 10);
+  fresh.setDeathProgress(1);
+  fresh.dispose();
+  flashed.dispose();
+}
+
+// ============================================================
+// 8A: cow — spawn, damage, death, drops (leather + beef), save/load, cleanup
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const cow = new CowEntity(w.entities.context, 0.5, 11, 0.5);
+  w.entities.add(cow);
+  w.entities.tick();
+  assert(cow.isAlive() && cow.health === 10, 'cow spawns alive with 10 health');
+
+  cow.hurtResistantTime = 0;
+  cow.attackEntityFrom(DamageSource.generic(), 99); // lethal
+  w.entities.tick();
+  assert(cow.isDead(), 'cow dies from lethal damage');
+  const beef = countDrop(w.entities, 'beef_raw');
+  assert(beef >= 1 && beef <= 3, `cow drops 1–3 raw beef (got ${beef})`);
+  // leather is 0–2 (may be 0); just assert it is within range
+  const leather = countDrop(w.entities, 'leather');
+  assert(leather >= 0 && leather <= 2, `cow drops 0–2 leather (got ${leather})`);
+
+  for (let i = 0; i < 40; i++) w.entities.tick();
+  assert(cow.removed, 'cow cleaned up after death linger');
+
+  // Save/load round-trip preserves health.
+  const c2 = new CowEntity(w.entities.context, 0.5, 11, 0.5);
+  c2.health = 4;
+  const loaded = CowEntity.deserialize(w.entities.context, c2.writeToNbt());
+  assert(loaded !== undefined && loaded.health === 4, 'cow health persists across save/load');
+}
+
+// ============================================================
+// 8A: sheep — fleece colour + sheared persist; drops coloured wool
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  const sheep = new SheepEntity(w.entities.context, 0.5, 11, 0.5);
+  sheep.fleeceColor = 14; // red
+  sheep.sheared = false;
+  w.entities.add(sheep);
+  w.entities.tick();
+  assert(sheep.health === 8, 'sheep has 8 health');
+
+  // Drops one coloured wool (metadata = colour) when not sheared.
+  sheep.hurtResistantTime = 0;
+  sheep.attackEntityFrom(DamageSource.generic(), 99);
+  w.entities.tick();
+  const wool = countDrop(w.entities, BlockIds.Wool);
+  assert(wool === 1, `unsheared sheep drops exactly one wool (got ${wool})`);
+
+  // Colour + sheared persist across save/load.
+  const s2 = new SheepEntity(w.entities.context, 0.5, 11, 0.5);
+  s2.fleeceColor = 11; // blue
+  s2.sheared = true;
+  const loaded = SheepEntity.deserialize(w.entities.context, s2.writeToNbt());
+  assert(loaded !== undefined, 'sheep deserialises');
+  assert(loaded!.fleeceColor === 11, 'sheep fleece colour persists');
+  assert(loaded!.sheared === true, 'sheep sheared state persists');
+  // A sheared sheep drops no wool.
+  loaded!.hurtResistantTime = 0;
+  loaded!.attackEntityFrom(DamageSource.generic(), 99);
+  w.entities.tick();
+  assert(countDrop(w.entities, BlockIds.Wool) === 1, 'sheared sheep drops no wool (count unchanged)');
+}
+
+// ============================================================
+// 8A: chicken — slow fall (no fall damage), egg laying, drops, egg-timer persist
+// ============================================================
+{
+  const w = buildWorld(2);
+  layGrassFloor(w, 10);
+  // Slow fall: drop from height; the chicken descends slowly and takes no fall damage.
+  const chicken = new ChickenEntity(w.entities.context, 0.5, 40, 0.5);
+  w.entities.add(chicken);
+  for (let i = 0; i < 200; i++) w.entities.tick();
+  assert(chicken.isAlive(), 'chicken survives a long fall (slow fall + no fall damage)');
+  assert(chicken.onGround, 'chicken lands on the ground');
+
+  // Egg laying: force the timer to expire → exactly one egg, timer resets.
+  chicken.timeUntilNextEgg = 1;
+  const eggsBefore = countDrop(w.entities, 'egg');
+  w.entities.tick(); // egg spawned (queued)
+  w.entities.tick(); // egg becomes active
+  const eggsAfter = countDrop(w.entities, 'egg');
+  assert(eggsAfter === eggsBefore + 1, 'egg timer expiry lays exactly one egg');
+  assert(chicken.timeUntilNextEgg > 1, 'egg timer resets after laying');
+
+  // Drops feather (0–2) + raw chicken (1) on death.
+  chicken.hurtResistantTime = 0;
+  chicken.attackEntityFrom(DamageSource.generic(), 99);
+  w.entities.tick();
+  assert(countDrop(w.entities, 'chicken_raw') >= 1, 'chicken drops raw chicken');
+  const feather = countDrop(w.entities, 'feather');
+  assert(feather >= 0 && feather <= 2, `chicken drops 0–2 feather (got ${feather})`);
+
+  // Egg timer persists exactly across save/load.
+  const c2 = new ChickenEntity(w.entities.context, 0.5, 11, 0.5);
+  c2.timeUntilNextEgg = 4321;
+  const loaded = ChickenEntity.deserialize(w.entities.context, c2.writeToNbt());
+  assert(loaded !== undefined && loaded.timeUntilNextEgg === 4321, 'chicken egg timer persists exactly');
 }
 
 console.log('Entity system validation passed.');

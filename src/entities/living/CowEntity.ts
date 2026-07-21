@@ -2,33 +2,31 @@ import type { EntityWorldContext } from '../core/EntityContext';
 import { EntityTypeIds } from '../core/EntityType';
 import type { NbtCompound, NbtTag } from '../../persistence/nbt/Nbt';
 import { QuadrupedEntity } from './QuadrupedEntity';
-import { PigModel } from './PigModel';
+import { CowModel } from './CowModel';
 import type { QuadrupedModel } from './QuadrupedModel';
 import { WanderTask } from '../ai/tasks/WanderTask';
 import { IdleLookTask } from '../ai/tasks/IdleLookTask';
-import { LookAtPlayerTask } from '../ai/tasks/LookAtPlayerTask';
 import { PanicTask } from '../ai/tasks/PanicTask';
+import { LookAtPlayerTask } from '../ai/tasks/LookAtPlayerTask';
 import type { Drop } from '../items/BlockDropResolver';
 
 /**
- * A pig (Beta `EntityPig`), built on the shared {@link QuadrupedEntity} base.
- * Dimensions 0.9×0.9. Drops 1–3 raw pork (Stage-7B decision). Validates the
- * full living-entity pipeline (spawning, rendering, AI, physics, hazards,
- * panic, persistence, chunk streaming).
+ * A cow (Beta `EntityCow`), built on the shared {@link QuadrupedEntity} base.
+ * Dimensions 0.9×1.3, health 10. Reuses the shared AI/movement/hazard/panic/
+ * persistence systems. No milking. Sound hooks only (no audio system yet).
  */
-export class PigEntity extends QuadrupedEntity {
-  public readonly typeId = EntityTypeIds.Pig;
-  public readonly typeStringId = 'Pig';
+export class CowEntity extends QuadrupedEntity {
+  public readonly typeId = EntityTypeIds.Cow;
+  public readonly typeStringId = 'Cow';
 
   public constructor(ctx: EntityWorldContext, x: number, y: number, z: number) {
     super(ctx);
-    this.setSize(0.9, 0.9);
+    this.setSize(0.9, 1.3);
     this.setPosition(x, y, z);
     this.moveSpeed = 0.7;
     this.maxHealth = 10;
     this.health = 10;
 
-    // Panic (priority 20) overrides wandering (10) and idle-looking (5).
     this.aiController.addTask(new PanicTask());
     this.aiController.addTask(new WanderTask());
     this.aiController.addTask(new LookAtPlayerTask());
@@ -38,14 +36,21 @@ export class PigEntity extends QuadrupedEntity {
   }
 
   protected createModel(): QuadrupedModel {
-    return new PigModel();
+    return new CowModel();
   }
 
   protected override getDropItems(): Drop[] {
-    // 1–3 raw pork (Stage-7B decision). The base dropLoot() spawns these via
-    // the shared item system, exactly once.
-    const count = 1 + this.nextInt(3);
-    return [{ type: 'item', id: 'porkchop_raw', count, metadata: 0 }];
+    const drops: Drop[] = [];
+    // Beta: 0–2 leather (getDropItemId=leather via inherited dropFewItems).
+    const leather = this.nextInt(3);
+    if (leather > 0) {
+      drops.push({ type: 'item', id: 'leather', count: leather, metadata: 0 });
+    }
+    // Raw beef 1–3 — an intentional post-Beta addition (Beta 1.7.3's source does
+    // not drop beef here); documented as a deviation.
+    const beef = 1 + this.nextInt(3);
+    drops.push({ type: 'item', id: 'beef_raw', count: beef, metadata: 0 });
+    return drops;
   }
 
   protected writeEntityNbt(map: Map<string, NbtTag>): void {
@@ -56,9 +61,8 @@ export class PigEntity extends QuadrupedEntity {
     this.readLivingNbt(data);
   }
 
-  /** Factory used by the entity-type registry to load a saved pig. */
-  public static deserialize(ctx: EntityWorldContext, data: NbtCompound): PigEntity | undefined {
-    const entity = new PigEntity(ctx, 0, 0, 0);
+  public static deserialize(ctx: EntityWorldContext, data: NbtCompound): CowEntity | undefined {
+    const entity = new CowEntity(ctx, 0, 0, 0);
     entity.readFromNbt(data);
     return entity;
   }
