@@ -193,7 +193,7 @@ export class ChestManager {
         // Scatter using existing item scatter velocity
         this.itemEntityManager.spawnItem(
           x + 0.5, y + 0.5, z + 0.5,
-          { type: stack.identity.type, id: stack.identity.id, count: stack.count, metadata: stack.metadata }
+          {type:stack.identity.type,id:stack.identity.id,count:stack.count,metadata:stack.metadata,damage:stack.damage}
         );
       }
     }

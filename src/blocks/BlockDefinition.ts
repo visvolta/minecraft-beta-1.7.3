@@ -1,4 +1,4 @@
-import type { BlockId } from './BlockId';
+import type { BlockId } from './BlockId';import type { ToolClass } from '../items/ItemDefinition';
 
 /**
  * Texture keys resolved against the atlas by name (e.g. "stone", "grass_top").
@@ -79,7 +79,7 @@ export interface BlockDefinition {
    */
   readonly cutout?: boolean;
   /** Beta 1.7.3 hardness value. Unbreakable blocks (like Bedrock) are -1.0. Instant break blocks are 0.0. */
-  readonly hardness?: number;
+  readonly hardness?:number;readonly preferredToolClass?:ToolClass;readonly requiresCorrectToolForDrops?:boolean;readonly minimumHarvestLevel?:number;readonly harvestToolClass?:ToolClass;readonly instantBreak?:boolean;readonly unbreakable?:boolean;
   /** Beta block explosion resistance consumed by shared explosion sources. */
   readonly explosionResistance?: number;
   /** True if the block is harvestable with an empty hand (e.g., dirt, sand, wood log/planks). */

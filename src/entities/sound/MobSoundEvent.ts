@@ -1,4 +1,4 @@
-export type MobSoundKind = 'ambient' | 'hurt' | 'death' | 'step' | 'attack' | 'bow' | 'fuse' | 'egg'|'eat';
+export type MobSoundKind = 'ambient' | 'hurt' | 'death' | 'step' | 'attack' | 'bow' | 'fuse' | 'egg'|'eat'|'pickup'|'itemBreak';
 
 export interface MobSoundEvent {
   readonly id: string;

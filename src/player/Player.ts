@@ -43,7 +43,7 @@ export class Player {
   public healthFlashTicks=0;
   public hunger=20;public saturation=5;public exhaustion=0;public foodTimer=0;public starvationTimer=0;
   public isEating=false;public foodUseTicks=0;public foodUseSlot=-1;public foodUseItem:string|number|undefined;
-  public isSprinting=false;public inWater=false;public inLava=false;public collidedHorizontally=false;
+  public isSprinting=false;public inWater=false;public inLava=false;public headUnderwater=false;public collidedHorizontally=false;
 
   /** Feet position (bottom-centre of the hitbox), world space. */
   public readonly position = { x: 0, y: 0, z: 0 };
@@ -66,6 +66,7 @@ export class Player {
   public prevDistanceWalkedModified = 0;
 
   public isSwinging = false;
+  public armAction:'none'|'breaking'|'breakingRecover'='none';public breakingSwingPhase=0;public prevBreakingSwingPhase=0;
   public swingProgressInt = 0;
   public swingProgress = 0;
   public prevSwingProgress = 0;
@@ -125,7 +126,7 @@ export class Player {
   }
   public attackFromMob(amount:number,attacker:DamageAttacker):boolean{return this.attackEntityFrom(DamageSource.mob(attacker),amount);}
 
-  public resetForRespawn(x:number,y:number,z:number):void{this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.inLava=this.collidedHorizontally=false;}
+  public resetForRespawn(x:number,y:number,z:number):void{this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.inLava=this.headUnderwater=this.collidedHorizontally=false;this.stopBreakingAnimation();}
 
   public tickCombatState(): void {
     if (this.hurtResistantTime > 0) this.hurtResistantTime -= 1;
@@ -133,15 +134,15 @@ export class Player {
     if(this.healthFlashTicks>0)this.healthFlashTicks--;
   }
 
-  public swingItem(): void {
-    this.swingTime = 0;
-    this.isSwinging = true;
-  }
+  public swingItem():void{this.swingTime=0;this.isSwinging=true;}
+  public beginBreakingAnimation(restart=false):void{if(restart||this.armAction!=='breaking'){this.breakingSwingPhase=0;this.prevBreakingSwingPhase=0;}this.armAction='breaking';}
+  public finishBreakingAnimation():void{if(this.armAction==='breaking')this.armAction='breakingRecover';}
+  public stopBreakingAnimation():void{this.armAction='none';this.breakingSwingPhase=this.prevBreakingSwingPhase=0;}
 
   public updateAnimationState(deltaSeconds: number): void {
     this.prevLimbSwingPhase = this.limbSwingPhase;
     this.prevLimbSwingAmount = this.limbSwingAmount;
-    this.prevSwingProgress = this.swingProgress;
+    this.prevSwingProgress=this.swingProgress;this.prevBreakingSwingPhase=this.breakingSwingPhase;if(this.armAction==='breaking')this.breakingSwingPhase=(this.breakingSwingPhase+deltaSeconds*3)%1;else if(this.armAction==='breakingRecover'){this.breakingSwingPhase=Math.min(1,this.breakingSwingPhase+deltaSeconds*3);if(this.breakingSwingPhase>=1)this.stopBreakingAnimation();}
     this.prevBodyYaw = this.bodyYaw;
 
     const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);

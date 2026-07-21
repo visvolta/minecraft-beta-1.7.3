@@ -33,6 +33,8 @@ export class BlockRegistry {
     return this.byName.get(id);
   }
 
+  public updateDefinition(id:BlockId,patch:Partial<BlockDefinition>):void{const current=this.byId.get(id);if(!current)return;const updated={...current,...patch};this.byId.set(id,updated);this.byName.set(updated.name,updated);}
+
   public getByName(name: string): BlockDefinition | undefined {
     return this.byName.get(name);
   }

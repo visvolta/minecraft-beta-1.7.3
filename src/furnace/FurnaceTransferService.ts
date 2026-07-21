@@ -40,7 +40,7 @@ export class FurnaceTransferService {
         return { cursorStack }; // Rejects invalid/overflow pickup
       } else {
         // Shift click transactional transfer to player inventory (`Shift-clicking output must be transactional and must not consume or lose items when inventory capacity is insufficient`)
-        const accepted = inventory.insert(outStack.identity.type, outStack.identity.id, outStack.count, outStack.metadata);
+        const accepted = inventory.insert(outStack.identity.type, outStack.identity.id, outStack.count,outStack.metadata,outStack.damage);
         outStack.count -= accepted;
         if (outStack.count <= 0) {
           container.outputSlot = null;
@@ -81,7 +81,7 @@ export class FurnaceTransferService {
           if (cursorStack === null) {
             if (current !== null && current.count > 0) {
               const toTake = Math.ceil(current.count / 2);
-              const newCursor = new ItemStack(current.identity.id, current.identity.type, toTake, current.metadata);
+              const newCursor = new ItemStack(current.identity.id, current.identity.type, toTake,current.metadata,current.damage);
               current.count -= toTake;
               if (current.count <= 0) container.setSlotStack(slotIndex, null);
               return { cursorStack: newCursor };
@@ -89,7 +89,7 @@ export class FurnaceTransferService {
             return { cursorStack: null };
           }
           if (current === null) {
-            container.setSlotStack(slotIndex, new ItemStack(cursorStack.identity.id, cursorStack.identity.type, 1, cursorStack.metadata));
+            container.setSlotStack(slotIndex, new ItemStack(cursorStack.identity.id, cursorStack.identity.type, 1,cursorStack.metadata,cursorStack.damage));
             cursorStack.count--;
             if (cursorStack.count <= 0) return { cursorStack: null };
             return { cursorStack };
@@ -106,7 +106,7 @@ export class FurnaceTransferService {
       } else {
         // Shift click from input/fuel slot to player inventory
         if (current !== null && current.count > 0) {
-          const accepted = inventory.insert(current.identity.type, current.identity.id, current.count, current.metadata);
+          const accepted = inventory.insert(current.identity.type, current.identity.id, current.count,current.metadata,current.damage);
           current.count -= accepted;
           if (current.count <= 0) container.setSlotStack(slotIndex, null);
         }
@@ -163,7 +163,7 @@ export class FurnaceTransferService {
     const maxStack = getMaxStackSize(stack.identity);
     if (current === null) {
       const toAdd = Math.min(maxStack, stack.count);
-      container.setSlotStack(targetSlotIdx, new ItemStack(stack.identity.id, stack.identity.type, toAdd, stack.metadata));
+      container.setSlotStack(targetSlotIdx, new ItemStack(stack.identity.id, stack.identity.type, toAdd,stack.metadata,stack.damage));
       stack.count -= toAdd;
     } else if (current.matches(stack) && current.count < maxStack) {
       const space = maxStack - current.count;
@@ -188,7 +188,7 @@ export class FurnaceTransferService {
       if (slotIndex === 0 || slotIndex === 1) {
         const current = container.getSlotStack(slotIndex);
         if (current === null) {
-          container.setSlotStack(slotIndex, new ItemStack(cursorStack.identity.id, cursorStack.identity.type, 1, cursorStack.metadata));
+          container.setSlotStack(slotIndex, new ItemStack(cursorStack.identity.id, cursorStack.identity.type, 1,cursorStack.metadata,cursorStack.damage));
           cursorStack.count--;
           if (cursorStack.count <= 0) { cursorStack = null; break; }
         } else if (current.matches(cursorStack) && current.count < getMaxStackSize(current.identity)) {
@@ -200,7 +200,7 @@ export class FurnaceTransferService {
         const invIdx = slotIndex - 3;
         const current = inventory.getStack(invIdx);
         if (current === null) {
-          inventory.setStack(invIdx, new ItemStack(cursorStack.identity.id, cursorStack.identity.type, 1, cursorStack.metadata));
+          inventory.setStack(invIdx, new ItemStack(cursorStack.identity.id, cursorStack.identity.type, 1,cursorStack.metadata,cursorStack.damage));
           cursorStack.count--;
           if (cursorStack.count <= 0) { cursorStack = null; break; }
         } else if (current.matches(cursorStack) && current.count < getMaxStackSize(current.identity)) {

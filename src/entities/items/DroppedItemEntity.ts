@@ -324,7 +324,7 @@ export class DroppedItemEntity extends Entity {
     item.set('Type', nbt.string(this.drop.type));
     item.set('Id', nbt.string(String(this.drop.id)));
     item.set('Count', nbt.int(this.drop.count));
-    item.set('Metadata', nbt.int(this.drop.metadata));
+    item.set('Metadata',nbt.int(this.drop.metadata));item.set('Damage',nbt.int(this.drop.damage??0));
     map.set('Item', nbt.compound(item));
   }
 
@@ -362,7 +362,7 @@ export class DroppedItemEntity extends Entity {
     const type = map.get('Type');
     const id = map.get('Id');
     const count = map.get('Count');
-    const metadata = map.get('Metadata');
+    const metadata=map.get('Metadata');const damage=map.get('Damage');
     if (type?.type !== 'string' || id?.type !== 'string') {
       return undefined;
     }
@@ -377,7 +377,7 @@ export class DroppedItemEntity extends Entity {
       type: type.value,
       id: dropId,
       count: count?.type === 'int' ? count.value : (count?.type === 'short' ? count.value : 1),
-      metadata: metadata?.type === 'int' ? metadata.value : (metadata?.type === 'short' ? metadata.value : 0),
+      metadata:metadata?.type==='int'?metadata.value:(metadata?.type==='short'?metadata.value:0),damage:damage?.type==='int'?damage.value:(damage?.type==='short'?damage.value:0),
     };
   }
 

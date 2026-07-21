@@ -7,7 +7,6 @@ import { CowEntity } from '../living/CowEntity';
 import { SheepEntity } from '../living/SheepEntity';
 
 export type AnimalInteractionResult = 'not-applicable' | 'consumed-success' | 'consumed-rejected';
-const SHEARS_DURABILITY = 238;
 
 /** Atomic inventory/entity interactions shared by all passive animals. */
 export class AnimalInteractionService {
@@ -34,7 +33,7 @@ export class AnimalInteractionService {
         drop.velocity.y += animal.nextInt(51) / 1000;
         drop.velocity.z += (animal.nextInt(201) - 100) / 1000;
       }
-      this.inventory.damageToolInSlot(selectedSlot, 1, SHEARS_DURABILITY);
+      this.inventory.damageItemInSlot(selectedSlot,1);
       return 'consumed-success';
     }
 

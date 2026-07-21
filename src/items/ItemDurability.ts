@@ -1,0 +1,3 @@
+import { DEFAULT_ITEM_DEFINITIONS } from './ItemDefinitionRegistry';import type { ItemStack } from '../inventory/ItemStack';
+export function blockBreakDurabilityCost(stack:ItemStack|null):number{if(!stack||stack.identity.type!=='item')return 0;switch(DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id)?.toolClass){case'pickaxe':case'axe':case'shovel':return 1;case'sword':return 2;default:return 0;}}
+export function combatDurabilityCost(stack:ItemStack|null):number{if(!stack||stack.identity.type!=='item')return 0;switch(DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id)?.toolClass){case'sword':return 1;case'pickaxe':case'axe':case'shovel':return 2;default:return 0;}}

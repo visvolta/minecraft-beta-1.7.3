@@ -103,7 +103,7 @@ export class FurnaceManager {
             id: c.inputSlot.identity.id,
             type: c.inputSlot.identity.type,
             count: c.inputSlot.count,
-            metadata: c.inputSlot.metadata,
+            metadata:c.inputSlot.metadata,damage:c.inputSlot.damage,
           }
         : null,
       fuelSlot: c.fuelSlot
@@ -111,7 +111,7 @@ export class FurnaceManager {
             id: c.fuelSlot.identity.id,
             type: c.fuelSlot.identity.type,
             count: c.fuelSlot.count,
-            metadata: c.fuelSlot.metadata,
+            metadata:c.fuelSlot.metadata,damage:c.fuelSlot.damage,
           }
         : null,
       outputSlot: c.outputSlot
@@ -119,7 +119,7 @@ export class FurnaceManager {
             id: c.outputSlot.identity.id,
             type: c.outputSlot.identity.type,
             count: c.outputSlot.count,
-            metadata: c.outputSlot.metadata,
+            metadata:c.outputSlot.metadata,damage:c.outputSlot.damage,
           }
         : null,
     }));
@@ -147,13 +147,13 @@ export class FurnaceManager {
       c.smeltProgress = Number.isFinite(d.smeltProgress) ? Math.max(0, d.smeltProgress) : 0;
 
       if (d.inputSlot && d.inputSlot.id !== undefined && d.inputSlot.count > 0 && d.inputSlot.type) {
-        c.inputSlot = new ItemStack(d.inputSlot.id, d.inputSlot.type, d.inputSlot.count, d.inputSlot.metadata ?? 0);
+        c.inputSlot = new ItemStack(d.inputSlot.id, d.inputSlot.type, d.inputSlot.count, d.inputSlot.metadata??0,d.inputSlot.damage??0);
       }
       if (d.fuelSlot && d.fuelSlot.id !== undefined && d.fuelSlot.count > 0 && d.fuelSlot.type) {
-        c.fuelSlot = new ItemStack(d.fuelSlot.id, d.fuelSlot.type, d.fuelSlot.count, d.fuelSlot.metadata ?? 0);
+        c.fuelSlot = new ItemStack(d.fuelSlot.id, d.fuelSlot.type, d.fuelSlot.count, d.fuelSlot.metadata??0,d.fuelSlot.damage??0);
       }
       if (d.outputSlot && d.outputSlot.id !== undefined && d.outputSlot.count > 0 && d.outputSlot.type) {
-        c.outputSlot = new ItemStack(d.outputSlot.id, d.outputSlot.type, d.outputSlot.count, d.outputSlot.metadata ?? 0);
+        c.outputSlot = new ItemStack(d.outputSlot.id, d.outputSlot.type, d.outputSlot.count, d.outputSlot.metadata??0,d.outputSlot.damage??0);
       }
 
       this.containers.set(this.key(c.x, c.y, c.z), c);

@@ -2,7 +2,7 @@ import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { BlockIconRenderer } from './BlockIconRenderer';
 import { ItemIconResolver } from './ItemIconResolver';
 import { classifyItemRender, isBlock3dCategory } from './ItemRenderClassifier';
-import type { ItemStack } from './ItemStack';
+import type { ItemStack } from './ItemStack';import { renderDurabilityBar } from './DurabilityBarRenderer';
 
 /**
  * Shared icon and stack-count renderer.
@@ -32,6 +32,7 @@ export class SlotContentRenderer {
     if (stack !== null) {
       img.src = this.getIconUrl(stack);
     }
+    renderDurabilityBar(slotEl,stack);
     if (stack !== null && stack.count > 1) {
       count.hidden = false;
       count.textContent = String(stack.count);

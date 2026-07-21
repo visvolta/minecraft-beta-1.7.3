@@ -1230,7 +1230,7 @@ export class Engine {
         // so the player's own physics still resolves terrain), then runs the
         // item-pickup pass (which needs the player).
         this.player.tickCombatState();this.playerController.tickSprintWindow();this.foodUseController.tick();
-        this.playerSurvivalController.tick();
+        this.playerSurvivalController.tick();this.interactionController.breakingController.tick();
         this.playerDeathController.update();
         this.respawnController.update();
         this.naturalMobSpawner.tick();
@@ -1311,7 +1311,7 @@ export class Engine {
       this.cameraController.getYaw(),
       this.cameraController.getPitch()
     );
-    this.cameraHurtController.update(camera,this.player,deltaSeconds);const survivalUiSuppressed=this.inventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;if(survivalUiSuppressed){this.player.isSprinting=false;this.foodUseController.cancel();}this.sprintFovController.update(camera,this.player,deltaSeconds,survivalUiSuppressed);
+    this.cameraHurtController.update(camera,this.player,deltaSeconds);const survivalUiSuppressed=this.inventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;if(survivalUiSuppressed){this.player.isSprinting=false;this.foodUseController.cancel();this.interactionController.breakingController.reset();}this.sprintFovController.update(camera,this.player,deltaSeconds,survivalUiSuppressed);
 
     // 7a. Update Player Model and Visibility Rules
     if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
@@ -1481,7 +1481,8 @@ export class Engine {
           type: stack.identity.type,
           id: stack.identity.id,
           count: 1,
-          metadata: stack.metadata,
+          metadata:stack.metadata,
+          damage:stack.damage,
         };
 
         // Spawn the thrown item with a 40-tick pickup delay (2.0s)

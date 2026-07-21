@@ -1,5 +1,5 @@
 import type { SlotRect } from './HotbarLayout';
-import type { ItemStack } from '../inventory/ItemStack';
+import type { ItemStack } from '../inventory/ItemStack';import { renderDurabilityBar } from './DurabilityBarRenderer';
 
 /** Explicit, single hotbar DOM owner. It receives inventory snapshots only. */
 export class HotbarUi {
@@ -58,6 +58,7 @@ export class HotbarUi {
       if (s) {
         img.src = resolve(s);
       }
+      renderDurabilityBar(e,s);
       if (s && s.count > 1) {
         count.hidden = false;
         count.textContent = String(s.count);

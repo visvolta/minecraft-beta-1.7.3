@@ -19,7 +19,7 @@ import type { EntityManager } from '../entities/core/EntityManager';
 import { LivingEntity } from '../entities/living/LivingEntity';
 import { DamageSource } from '../entities/damage/DamageSource';
 import { selectMeleeTarget } from './MeleeTargeting';
-import { MELEE_REACH, PLAYER_MELEE_DAMAGE } from './PlayerConstants';
+import { MELEE_REACH, PLAYER_MELEE_DAMAGE } from './PlayerConstants';import { combatDurabilityCost } from '../items/ItemDurability';
 import { AnimalEntity } from '../entities/living/AnimalEntity';
 import type { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';import type { FoodUseController } from './FoodUseController';
 
@@ -62,7 +62,7 @@ export class InteractionController {
     chunkManager: ChunkManager,
     blockRegistry: BlockRegistry,
     blockUpdateWorld: BlockUpdateWorld,
-    itemEntityManager: ItemEntityManager,
+    private readonly itemEntityManager:ItemEntityManager,
     inventory: Inventory,
     private readonly behaviourRegistry: BlockBehaviourRegistry,
     private readonly entityManager: EntityManager,
@@ -77,7 +77,7 @@ export class InteractionController {
     this.blockUpdateWorld = blockUpdateWorld;
     this.inventory = inventory;
     this.raycaster = new Raycaster(chunkManager, blockRegistry, behaviourRegistry, blockUpdateWorld);
-    this.breakingController = new BreakingController(player, chunkManager, blockRegistry, blockUpdateWorld, itemEntityManager);
+    this.breakingController=new BreakingController(player,chunkManager,blockRegistry,blockUpdateWorld,itemEntityManager,inventory,()=>this.selectedSlotIndex);
 
     // Listen for mouse wheel to change hotbar slot index with immediate snap
     window.addEventListener('wheel', (event) => {
@@ -135,7 +135,7 @@ export class InteractionController {
 
   /** Applies a player melee hit through the shared living-entity damage flow. */
   private attackTargetedEntity(entity: LivingEntity): void {
-    if(entity.attackEntityFrom(DamageSource.player(this.player),PLAYER_MELEE_DAMAGE))this.player.addExhaustion(.3);
+    if(entity.attackEntityFrom(DamageSource.player(this.player),PLAYER_MELEE_DAMAGE)){this.player.addExhaustion(.3);const slot=this.selectedSlotIndex,cost=combatDurabilityCost(this.inventory.getStack(slot));if(cost>0&&this.inventory.damageItemInSlot(slot,cost)?.status==='broken')this.itemEntityManager.emitItemBreak(this.player.position.x,this.player.position.y,this.player.position.z);}
   }
 
   public getSelectedSlotIndex(): number {

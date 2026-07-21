@@ -7,7 +7,8 @@ export const WORLD_METADATA_VERSION = 1;
 export interface SerializedItemStack {
   readonly id: number | string;
   readonly count: number;
-  readonly metadata: number;
+  readonly metadata:number;
+  readonly damage?:number;
   readonly type: 'block' | 'item';
 }
 

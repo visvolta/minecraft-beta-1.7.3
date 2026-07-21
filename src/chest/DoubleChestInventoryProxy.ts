@@ -47,9 +47,9 @@ export class DoubleChestInventoryProxy extends Inventory {
     }
   }
 
-  public override insert(type: 'block' | 'item', id: number | string, count: number, metadata = 0): number {
+  public override insert(type:'block'|'item',id:number|string,count:number,metadata=0,damage=0):number{
     let remaining = count;
-    const dummyStack = new ItemStack(id, type, 1, metadata);
+    const dummyStack = new ItemStack(id,type,1,metadata,damage);
     const maxStack = getMaxStackSize(dummyStack.identity);
 
     // Step 1: Merge into compatible partial stacks first
@@ -71,7 +71,7 @@ export class DoubleChestInventoryProxy extends Inventory {
     for (let i = 0; i < 54; i++) {
       if (this.getStack(i) === null) {
         const toAdd = Math.min(maxStack, remaining);
-        this.setStack(i, new ItemStack(id, type, toAdd, metadata));
+        this.setStack(i, new ItemStack(id,type,toAdd,metadata,damage));
         remaining -= toAdd;
 
         if (remaining <= 0) {

@@ -28,9 +28,9 @@ export class Inventory {
    * 3. Fill empty main-inventory slots 9-35 (left-to-right).
    * Returns the count of items that were successfully accepted.
    */
-  public insert(type: 'block' | 'item', id: number | string, count: number, metadata = 0): number {
-    let remaining = count;
-    const dummyStack = new ItemStack(id, type, 1, metadata);
+  public insert(type:'block'|'item',id:number|string,count:number,metadata=0,damage=0):number{
+    let remaining=count;
+    const dummyStack=new ItemStack(id,type,1,metadata,damage);
     const maxStack = getMaxStackSize(dummyStack.identity);
 
     // Step 1: Merge into compatible partial stacks first
@@ -53,7 +53,7 @@ export class Inventory {
       for (let i = 0; i < 9; i++) {
         if (this.slots[i] === null) {
           const toAdd = Math.min(maxStack, remaining);
-          this.slots[i] = new ItemStack(id, type, toAdd, metadata);
+          this.slots[i] = new ItemStack(id,type,toAdd,metadata,damage);
           remaining -= toAdd;
 
           if (remaining <= 0) {
@@ -66,7 +66,7 @@ export class Inventory {
       for (let i = 9; i < 36; i++) {
         if (this.slots[i] === null) {
           const toAdd = Math.min(maxStack, remaining);
-          this.slots[i] = new ItemStack(id, type, toAdd, metadata);
+          this.slots[i] = new ItemStack(id,type,toAdd,metadata,damage);
           remaining -= toAdd;
 
           if (remaining <= 0) {
@@ -79,7 +79,7 @@ export class Inventory {
       for (let i = 0; i < this.size; i++) {
         if (this.slots[i] === null) {
           const toAdd = Math.min(maxStack, remaining);
-          this.slots[i] = new ItemStack(id, type, toAdd, metadata);
+          this.slots[i] = new ItemStack(id,type,toAdd,metadata,damage);
           remaining -= toAdd;
 
           if (remaining <= 0) {
@@ -102,14 +102,10 @@ export class Inventory {
     }
   }
 
-  /** Damages a non-stackable tool; metadata is accumulated durability damage. */
-  public damageToolInSlot(slotIndex: number, amount: number, maxDurability: number): boolean {
-    const stack = this.getStack(slotIndex);
-    if (stack === null || stack.count !== 1) return false;
-    stack.metadata += amount;
-    if (stack.metadata >= maxDurability) this.setStack(slotIndex, null);
-    return true;
-  }
+  public damageItemInSlot(slotIndex:number,amount:number):ReturnType<ItemStack['damageItem']>|undefined{const stack=this.getStack(slotIndex);if(!stack)return undefined;const result=stack.damageItem(amount);if(result.status==='broken'){stack.count--;if(stack.count<=0)this.setStack(slotIndex,null);else stack.damage=0;}return result;}
+  /** @deprecated use damageItemInSlot; metadata is never durability. */
+  public damageToolInSlot(slotIndex:number,amount:number,_maxDurability:number):boolean{return this.damageItemInSlot(slotIndex,amount)!==undefined;}
+
 
   public getSlots(): (ItemStack | null)[] {
     return this.slots;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 /** Shared minimum visibility for textured voxel surfaces. */
-export const TEXTURE_MIN_BRIGHTNESS = 0.035;
+export const TEXTURE_MIN_BRIGHTNESS = 0.015;
 
 /** Beta 1.7.3 voxel brightness curve (Chunk.getLightBrightnessTable). */
 export function getLightBrightness(lightLevel: number): number {

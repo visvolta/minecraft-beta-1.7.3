@@ -4,10 +4,12 @@ export interface Drop {
   readonly type: 'block' | 'item';
   readonly id: number | string; // BlockId (for block type) or item texture name (for item type)
   readonly count: number;
-  readonly metadata: number;
+  readonly metadata:number;
+  readonly damage?:number;
 }
 
-export function resolveBlockDrops(blockId: number, blockMetadata = 0): Drop[] {
+export function resolveBlockDrops(blockId:number,blockMetadata=0,canHarvest=true):Drop[]{
+  if(!canHarvest)return[];
   const random = Math.random();
 
   switch (blockId) {
@@ -22,7 +24,8 @@ export function resolveBlockDrops(blockId: number, blockMetadata = 0): Drop[] {
       return []; // Glass and Ice drop nothing in Beta 1.7.3 when broken by hand
 
     case BlockIds.Bedrock:
-      return []; // Bedrock is unbreakable and has no drops
+    case BlockIds.Spawner:
+      return []; // Unobtainable blocks drop nothing
 
     // Leaves have a 5% chance to drop 1 Sapling (with appropriate metadata representing species)
     case BlockIds.Leaves:

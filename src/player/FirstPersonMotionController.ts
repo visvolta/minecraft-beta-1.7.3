@@ -34,7 +34,7 @@ export class FirstPersonMotionController {
     armRenderer: FirstPersonArmRenderer,
     partialTick: number
   ): void {
-    const swingProgress = player.prevSwingProgress + (player.swingProgress - player.prevSwingProgress) * partialTick;
+    const normalSwing=player.prevSwingProgress+(player.swingProgress-player.prevSwingProgress)*partialTick,breaking=(player.prevBreakingSwingPhase+((player.breakingSwingPhase-player.prevBreakingSwingPhase+1)%1)*partialTick)%1,swingProgress=player.armAction!=='none'?breaking:normalSwing;
     const limbSwingPhase = player.prevLimbSwingPhase + (player.limbSwingPhase - player.prevLimbSwingPhase) * partialTick;
     const limbSwingAmount = player.prevLimbSwingAmount + (player.limbSwingAmount - player.prevLimbSwingAmount) * partialTick;
 

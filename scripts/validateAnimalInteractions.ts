@@ -93,7 +93,7 @@ const sheep = new SheepEntity(entities.context, 3, 11, 0); sheep.fleeceColor = 1
 inventory.setStack(1, new ItemStack('shears', 'item', 1, 0));
 const beforeItems = entities.activeCount;
 assert(interactions.interact(sheep, 1) === 'consumed-success' && sheep.sheared, 'shearing succeeds once');
-assert(inventory.getStack(1)?.metadata === 1, 'shears lose one durability');
+assert(inventory.getStack(1)?.damage===1&&inventory.getStack(1)?.metadata===0,'shears use unified damage field and preserve variant metadata');
 entities.tick();
 const woolCount = entities.activeCount - beforeItems;
 assert(woolCount >= 2 && woolCount <= 4, 'shearing drops 2-4 wool entities');

@@ -16,7 +16,8 @@ export class InventorySerializer {
       return {
         id: stack.identity.id,
         count: stack.count,
-        metadata: stack.metadata,
+        metadata:stack.metadata,
+        damage:stack.damage,
         type: stack.identity.type,
       };
     });
@@ -41,7 +42,7 @@ export class InventorySerializer {
     for (let i = 0; i < Math.min(size, serializedInventory.length); i++) {
       const data = serializedInventory[i];
       if (data && data.id !== undefined && data.count > 0 && data.type !== undefined) {
-        inventory.setStack(i, new ItemStack(data.id, data.type, data.count, data.metadata ?? 0));
+        inventory.setStack(i, new ItemStack(data.id,data.type,data.count,data.metadata??0,data.damage??0));
       } else {
         inventory.setStack(i, null);
       }

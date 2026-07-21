@@ -108,7 +108,7 @@ export class CraftingTransferService {
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       if (s !== null && s !== undefined && s.count > 0) {
-        const accepted = inventory.insert(s.identity.type, s.identity.id, s.count, s.metadata);
+        const accepted = inventory.insert(s.identity.type, s.identity.id, s.count,s.metadata,s.damage);
         s.count -= accepted;
         if (s.count > 0) {
           const eyeY = player.position.y + 1.62;

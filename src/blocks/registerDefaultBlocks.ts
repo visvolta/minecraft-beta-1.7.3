@@ -760,9 +760,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Netherrack]: false,
   };
 
-  for (const def of registry.values()) {
-    const mutableDef = def as any;
-    mutableDef.hardness = hardnessMap[def.id] !== undefined ? hardnessMap[def.id] : 1.0;
-    mutableDef.harvestableByHand = handHarvestableMap[def.id] !== undefined ? handHarvestableMap[def.id] : true;
-  }
+  const pickaxePreferred=new Set<number>([BlockIds.Cobblestone,BlockIds.DoubleSlab,BlockIds.Slab,BlockIds.Stone,BlockIds.MossyCobblestone,BlockIds.IronOre,BlockIds.CoalOre,BlockIds.GoldOre,BlockIds.DiamondOre,BlockIds.Ice,BlockIds.Netherrack,BlockIds.LapisOre]);
+  const axePreferred=new Set<number>([BlockIds.Planks,BlockIds.Bookshelf,BlockIds.Log,BlockIds.SpruceLog,251,BlockIds.Chest]);
+  const shovelPreferred=new Set<number>([BlockIds.Grass,BlockIds.Dirt,BlockIds.Sand,BlockIds.Gravel,BlockIds.Snow,BlockIds.SnowBlock,BlockIds.Clay,BlockIds.Farmland]);
+  const pickRequirements=new Map<number,number>([[BlockIds.Stone,0],[BlockIds.Cobblestone,0],[BlockIds.MossyCobblestone,0],[BlockIds.CoalOre,0],[BlockIds.Furnace,0],[BlockIds.FurnaceBurning,0],[BlockIds.Netherrack,0],[BlockIds.Spawner,0],[BlockIds.IronDoor,0],[BlockIds.IronOre,1],[BlockIds.LapisOre,1],[BlockIds.GoldOre,2],[BlockIds.RedstoneOre,2],[BlockIds.DiamondOre,2],[BlockIds.RedstoneBlock,2],[BlockIds.Obsidian,3]]);
+  for(const def of registry.values()){const hardness=hardnessMap[def.id]??1,preferredToolClass=pickaxePreferred.has(def.id)?'pickaxe':axePreferred.has(def.id)?'axe':shovelPreferred.has(def.id)?'shovel':undefined,pickLevel=pickRequirements.get(def.id),snowTool=def.id===BlockIds.Snow||def.id===BlockIds.SnowBlock;registry.updateDefinition(def.id,{hardness,harvestableByHand:handHarvestableMap[def.id]??true,instantBreak:hardness===0,unbreakable:hardness<0,...(preferredToolClass?{preferredToolClass}:{}),...(pickLevel!==undefined?{requiresCorrectToolForDrops:true,minimumHarvestLevel:pickLevel,harvestToolClass:'pickaxe' as const}:snowTool?{requiresCorrectToolForDrops:true,minimumHarvestLevel:0,harvestToolClass:'shovel' as const}:{})});}
 }
