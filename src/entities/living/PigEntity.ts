@@ -43,11 +43,13 @@ export class PigEntity extends QuadrupedEntity {
   }
 
   protected override getDropItems(): Drop[] {
-    // 1–3 raw pork (Stage-7B decision). The base dropLoot() spawns these via
-    // the shared item system, exactly once.
-    const count = 1 + this.nextInt(3);
-    return [{ type: 'item', id: 'porkchop_raw', count, metadata: 0 }];
+    const count = this.nextInt(3);
+    return count === 0 ? [] : [{ type: 'item', id: this.isBurning() ? 'porkchop_cooked' : 'porkchop_raw', count, metadata: 0 }];
   }
+
+  protected override getAmbientSoundId(): string { return 'mob.pig'; }
+  protected override getHurtSoundId(): string { return 'mob.pig'; }
+  protected override getDeathSoundId(): string { return 'mob.pigdeath'; }
 
   protected writeEntityNbt(map: Map<string, NbtTag>): void {
     this.writeAnimalNbt(map);

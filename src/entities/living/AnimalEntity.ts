@@ -21,6 +21,8 @@ export abstract class AnimalEntity extends LivingEntity {
     return true;
   }
 
+  protected override getTalkInterval(): number { return 120; }
+
   public abstract get breedingItemId(): string;
   protected abstract createChild(x: number, y: number, z: number): AnimalEntity;
 

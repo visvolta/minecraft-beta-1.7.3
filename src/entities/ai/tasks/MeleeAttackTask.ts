@@ -15,6 +15,8 @@ export class MeleeAttackTask implements AiTask {
     const hostile = entity as HostileEntity;
     const player = hostile.target;
     if (hostile.attackTime > 0 || player === null || !hostile.validateTarget(false) || !hostile.canSeeTarget() || !this.inReach(hostile)) return;
+    const dx=player.position.x-hostile.position.x,dz=player.position.z-hostile.position.z;
+    hostile.setHeadLookIntent(Math.atan2(dz,dx)*180/Math.PI-90);
     hostile.attackTime = hostile.meleeCooldownTicks;
     player.attackFromMob(hostile.getMeleeDamage(), hostile);
   }

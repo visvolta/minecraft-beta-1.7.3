@@ -191,6 +191,11 @@ export abstract class Entity {
     return false;
   }
 
+  /** Supported hostile category marker; projectiles remain excluded. */
+  public get isHostileMob(): boolean {
+    return false;
+  }
+
   /**
    * Whether this entity can be targeted/interacted with by a raycast (Beta
    * `canBeCollidedWith`). Default false; living entities override while alive.

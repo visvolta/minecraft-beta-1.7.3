@@ -27,7 +27,7 @@ export class TemptTask implements AiTask {
     if (player === undefined) return;
     const dx = player.x - animal.position.x;
     const dz = player.z - animal.position.z;
-    animal.headYaw = Math.atan2(dz, dx) * 180 / Math.PI - 90;
+    animal.setHeadLookIntent(Math.atan2(dz, dx) * 180 / Math.PI - 90);
     if (dx * dx + dz * dz > 2.5 * 2.5 && !animal.navigation.hasPath()) {
       this.moveTowardPlayer(animal);
     } else if (dx * dx + dz * dz <= 2.5 * 2.5) {

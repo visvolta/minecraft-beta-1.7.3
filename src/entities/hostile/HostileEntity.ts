@@ -11,6 +11,8 @@ import { LivingEntity } from '../living/LivingEntity';
 import { evaluateHostileDaylight, type HostileDaylightExposure } from './HostileDaylight';
 
 export abstract class HostileEntity extends LivingEntity {
+  public override get isHostileMob(): boolean { return true; }
+
   public target: Player | null = null;
   public persistenceRequired = false;
 

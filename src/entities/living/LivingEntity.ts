@@ -8,6 +8,9 @@ import type { EntityManager } from '../core/EntityManager';
 import { BlockIds } from '../../blocks/BlockId';
 import { DamageSource } from '../damage/DamageSource';
 import type { ParticleOrigin } from '../particles/EntityParticleSink';
+import { isMovementBackward, updateLimbAnimation, updateLivingYaw, wrapDegrees } from './LivingAnimationMath';
+import type { MobSoundKind } from '../sound/MobSoundEvent';
+import { applyLivingRootYaw } from '../../rendering/LivingRenderTransform';
 import { DroppedItemEntity } from '../items/DroppedItemEntity';
 import type { Drop } from '../items/BlockDropResolver';
 import { VOID_MIN_Y } from '../../world/chunkConstants';
@@ -41,8 +44,6 @@ const MOVE_FLYING_NUMERATOR = 0.16277136;
 const AIR_MOVE_FACTOR = 0.02;
 const DEFAULT_SLIPPERINESS = 0.6;
 const ICE_SLIPPERINESS = 0.98;
-/** Maximum degrees the body may turn toward the heading per tick (smooth turn). */
-const MAX_BODY_TURN_PER_TICK = 10;
 
 // ---- Environmental hazard constants (Beta) ----
 /** Fire damage interval: burn damage lands every N ticks while burning. */
@@ -70,12 +71,6 @@ const FLUID_GRAVITY = 0.02;
 /** Upward swim impulse per tick while jump/swim intent is held in a fluid. */
 const SWIM_UP_IMPULSE = 0.1;
 
-function wrapDegrees(degrees: number): number {
-  let d = degrees % 360;
-  if (d >= 180) d -= 360;
-  if (d < -180) d += 360;
-  return d;
-}
 
 /**
  * Base for all living entities (Beta `EntityLiving`).
@@ -100,6 +95,8 @@ export abstract class LivingEntity extends Entity {
   public hurtResistantTime = 0;
   public deathTime = 0;
   public attackTime = 0;
+  private livingSoundTime = 0;
+  private stepDistance = 0;
 
   /** Limb-swing animation state (Beta `legYaw`/`legSwing`). */
   public legYaw = 0;
@@ -114,6 +111,7 @@ export abstract class LivingEntity extends Entity {
   /** Head pitch in degrees (e.g. lowered while grazing); 0 = level. */
   public headPitch = 0;
   public prevHeadPitch = 0;
+  private hasLookIntentThisTick = false;
   /** Recoil angle from the last hit (transient; drives the hurt flinch). */
   public attackedAtYaw = 0;
 
@@ -159,6 +157,21 @@ export abstract class LivingEntity extends Entity {
     this.aiController = new AiController();
   }
 
+  public override preTick(): void {
+    super.preTick();
+    this.prevLegYaw = this.legYaw;
+    this.prevRenderYawOffset = this.renderYawOffset;
+    this.prevHeadYaw = this.headYaw;
+    this.prevHeadPitch = this.headPitch;
+    this.hasLookIntentThisTick = false;
+  }
+
+  /** AI submits an explicit world-yaw look target; rendering objects remain untouched. */
+  public setHeadLookIntent(targetYaw: number, easing = 1): void {
+    this.headYaw += wrapDegrees(targetYaw - this.headYaw) * easing;
+    this.hasLookIntentThisTick = true;
+  }
+
   /** Living entities can be pushed (Beta `canBePushed`). */
   public override canBePushed(): boolean {
     return true;
@@ -187,6 +200,10 @@ export abstract class LivingEntity extends Entity {
     return this.ctx.rng.nextInt(bound);
   }
 
+  public nextFloat(): number {
+    return this.ctx.rng.nextFloat();
+  }
+
   /** The owning entity manager (for tasks that query nearby entities). */
   public get entityManager(): EntityManager {
     return this.ctx.manager;
@@ -204,6 +221,11 @@ export abstract class LivingEntity extends Entity {
 
   // ---- Simulation --------------------------------------------------------
 
+  public override updateRenderInterpolation(alpha: number): void {
+    super.updateRenderInterpolation(alpha);
+    if (this.renderObject) applyLivingRootYaw(this.renderObject,this.prevRenderYawOffset,this.renderYawOffset,alpha);
+  }
+
   public onTick(ctx: EntityTickContext): void {
     this.age += 1;
 
@@ -215,6 +237,11 @@ export abstract class LivingEntity extends Entity {
     if (this.hurtTime > 0) this.hurtTime -= 1;
     if (this.hurtResistantTime > 0) this.hurtResistantTime -= 1;
     if (this.attackTime > 0) this.attackTime -= 1;
+
+    if (this.nextInt(1000) < this.livingSoundTime++) {
+      this.livingSoundTime = -this.getTalkInterval();
+      this.onLivingSound();
+    }
 
     // Detect environment first (water/lava/fire contact, ignition, rain/water
     // extinguishing) so movement can branch on inWater/inLava.
@@ -495,7 +522,7 @@ export abstract class LivingEntity extends Entity {
   }
 
   protected onDrown(): void {
-    this.spawnHurtParticles();
+    // No generic damage particles; bubbles remain out of this minimal sink.
   }
 
   protected onSuffocate(): void {
@@ -503,26 +530,25 @@ export abstract class LivingEntity extends Entity {
   }
 
   private updateLivingAnimation(): void {
-    this.prevLegYaw = this.legYaw;
-    this.prevRenderYawOffset = this.renderYawOffset;
-    this.prevHeadYaw = this.headYaw;
-    this.prevHeadPitch = this.headPitch;
-
     const dx = this.position.x - this.previousPosition.x;
     const dz = this.position.z - this.previousPosition.z;
-    const moveDistance = Math.sqrt(dx * dx + dz * dz);
-    let speed = moveDistance * 4;
-    if (speed > 1) speed = 1;
-    this.legSwing += (speed - this.legSwing) * 0.4;
-    this.legYaw += this.legSwing;
+    const moveDistance = Math.hypot(dx, dz);
+    const moving = moveDistance > 0.05;
+    const movementYaw = moving ? Math.atan2(dz, dx) * 180 / Math.PI - 90 : this.renderYawOffset;
+    const desiredHeadYaw = this.hasLookIntentThisTick ? this.headYaw : (moving ? movementYaw : this.headYaw);
+    const yaw = updateLivingYaw(this.renderYawOffset, movementYaw, desiredHeadYaw, moving);
+    this.renderYawOffset = yaw.bodyYaw;
+    this.headYaw = yaw.headYaw;
+    const limb = updateLimbAnimation(moveDistance, this.legSwing, isMovementBackward(dx, dz, this.renderYawOffset));
+    this.legSwing = limb.amount;
+    this.legYaw += limb.phaseDelta;
 
-    const bodyDiff = wrapDegrees(this.yaw - this.renderYawOffset);
-    const bodyStep = Math.max(-MAX_BODY_TURN_PER_TICK, Math.min(MAX_BODY_TURN_PER_TICK, bodyDiff * 0.3));
-    this.renderYawOffset += bodyStep;
-
-    if (moveDistance > 0.01) {
-      const headDiff = wrapDegrees(this.yaw - this.headYaw);
-      this.headYaw += headDiff * 0.4;
+    if (this.onGround && moveDistance > 0.01) {
+      this.stepDistance += moveDistance;
+      if (this.stepDistance >= 1) {
+        this.stepDistance -= 1;
+        this.emitSound(this.getStepSoundId(), 'step', 0.15);
+      }
     }
   }
 
@@ -580,6 +606,8 @@ export abstract class LivingEntity extends Entity {
     if (this.health <= 0) {
       this.health = 0;
       this.onDeath(source);
+    } else if (fullHit) {
+      this.onHurtSound();
     }
     return true;
   }
@@ -627,17 +655,16 @@ export abstract class LivingEntity extends Entity {
   private onDeathTick(): void {
     this.deathTime += 1;
     if (this.deathTime >= DEATH_LINGER_TICKS) {
+      this.spawnDeathParticles();
       this.markRemoved();
     }
   }
 
   // ---- Hooks -------------------------------------------------------------
 
-  /** Full-hit feedback: hurt particles, sound, recoil flag, panic trigger. */
+  /** Full-hit feedback: sound, recoil flag, panic trigger. */
   protected onHurt(source: DamageSource): void {
     this.recentlyHurt = true;
-    this.spawnHurtParticles();
-    this.onHurtSound();
     this.onAttackedBy(source);
     if (source.category === 'player') {
       this.onPlayerAttack(source);
@@ -649,12 +676,11 @@ export abstract class LivingEntity extends Entity {
    * death sound + particles, exactly-once loot, and notify the killer.
    */
   protected onDeath(source: DamageSource): void {
-    this.onDeathSound();
-    this.spawnDeathParticles();
     if (!this.lootDropped) {
       this.dropLoot();
       this.lootDropped = true;
     }
+    this.onDeathSound();
     if (source.attacker instanceof LivingEntity) {
       source.attacker.onKillEntity(this);
     }
@@ -708,10 +734,6 @@ export abstract class LivingEntity extends Entity {
     }
   }
 
-  protected spawnHurtParticles(): void {
-    this.ctx.particles?.hurt(this.particleOrigin());
-  }
-
   protected spawnDeathParticles(): void {
     this.ctx.particles?.death(this.particleOrigin());
   }
@@ -726,17 +748,22 @@ export abstract class LivingEntity extends Entity {
     };
   }
 
-  protected onHurtSound(): void {
-    // Sound hook; no audio system yet.
+  protected getAmbientSoundId(): string | undefined { return undefined; }
+  protected getHurtSoundId(): string | undefined { return 'random.hurt'; }
+  protected getDeathSoundId(): string | undefined { return 'random.hurt'; }
+  protected getStepSoundId(): string { return 'step.mob'; }
+  protected getSoundVolume(): number { return 1; }
+  protected getTalkInterval(): number { return 80; }
+
+  protected emitSound(id: string | undefined, kind: MobSoundKind, volume = this.getSoundVolume(), pitch?: number): void {
+    if (id === undefined) return;
+    this.ctx.sounds?.emit({ id, kind, x: this.position.x, y: this.position.y, z: this.position.z,
+      volume, pitch: pitch ?? ((this.nextFloat() - this.nextFloat()) * 0.2 + 1), attenuationDistance: 16 });
   }
 
-  protected onDeathSound(): void {
-    // Sound hook; no audio system yet.
-  }
-
-  protected onLivingSound(): void {
-    // Sound hook; no audio system yet.
-  }
+  protected onHurtSound(): void { this.emitSound(this.getHurtSoundId(), 'hurt'); }
+  protected onDeathSound(): void { this.emitSound(this.getDeathSoundId(), 'death'); }
+  protected onLivingSound(): void { this.emitSound(this.getAmbientSoundId(), 'ambient'); }
 
   // ---- Serialisation -----------------------------------------------------
   //

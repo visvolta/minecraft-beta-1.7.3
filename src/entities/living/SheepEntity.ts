@@ -77,6 +77,10 @@ export class SheepEntity extends QuadrupedEntity {
     return [{ type: 'block', id: BlockIds.Wool, count: 1, metadata: this.fleeceColor }];
   }
 
+  protected override getAmbientSoundId(): string { return 'mob.sheep'; }
+  protected override getHurtSoundId(): string { return 'mob.sheep'; }
+  protected override getDeathSoundId(): string { return 'mob.sheep'; }
+
   /** Beta weighted random fleece colour (mostly white; rare pink). */
   private static randomFleeceColor(nextInt: (bound: number) => number): number {
     const roll = nextInt(100);

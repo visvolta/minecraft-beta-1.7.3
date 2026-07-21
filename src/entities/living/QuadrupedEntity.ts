@@ -1,6 +1,7 @@
 import type { EntityWorldContext } from '../core/EntityContext';
 import { AnimalEntity, BABY_SCALE } from './AnimalEntity';
 import type { QuadrupedModel } from './QuadrupedModel';
+import { wrapDegrees } from './LivingAnimationMath';
 
 /** Ticks over which the death-collapse animation plays (matches the linger). */
 const DEATH_ANIM_TICKS = 20;
@@ -43,13 +44,13 @@ export abstract class QuadrupedEntity extends AnimalEntity {
       return;
     }
     const legYaw = this.prevLegYaw + (this.legYaw - this.prevLegYaw) * alpha;
-    const bodyYaw = this.prevRenderYawOffset + (this.renderYawOffset - this.prevRenderYawOffset) * alpha;
-    const headYaw = this.prevHeadYaw + (this.headYaw - this.prevHeadYaw) * alpha;
+    const bodyYaw = this.prevRenderYawOffset + wrapDegrees(this.renderYawOffset - this.prevRenderYawOffset) * alpha;
+    const headYaw = this.prevHeadYaw + wrapDegrees(this.headYaw - this.prevHeadYaw) * alpha;
     const headPitch = this.prevHeadPitch + (this.headPitch - this.prevHeadPitch) * alpha;
     model.updatePose(legYaw, this.legSwing, bodyYaw, headYaw - bodyYaw, headPitch);
 
     const flash = !this.isDead() && this.maxHurtTime > 0 ? this.hurtTime / this.maxHurtTime : 0;
-    model.setHurtFlash(flash);
+    model.setHurtFlash(Math.max(flash, this.isBurning() ? 0.15 : 0));
     model.setDeathProgress(this.isDead() ? Math.min(this.deathTime / DEATH_ANIM_TICKS, 1) : 0);
   }
 

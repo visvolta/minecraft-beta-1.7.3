@@ -41,18 +41,14 @@ export class CowEntity extends QuadrupedEntity {
   }
 
   protected override getDropItems(): Drop[] {
-    const drops: Drop[] = [];
-    // Beta: 0–2 leather (getDropItemId=leather via inherited dropFewItems).
-    const leather = this.nextInt(3);
-    if (leather > 0) {
-      drops.push({ type: 'item', id: 'leather', count: leather, metadata: 0 });
-    }
-    // Raw beef 1–3 — an intentional post-Beta addition (Beta 1.7.3's source does
-    // not drop beef here); documented as a deviation.
-    const beef = 1 + this.nextInt(3);
-    drops.push({ type: 'item', id: 'beef_raw', count: beef, metadata: 0 });
-    return drops;
+    const count = this.nextInt(3);
+    return count === 0 ? [] : [{ type: 'item', id: 'leather', count, metadata: 0 }];
   }
+
+  protected override getAmbientSoundId(): string { return 'mob.cow'; }
+  protected override getHurtSoundId(): string { return 'mob.cowhurt'; }
+  protected override getDeathSoundId(): string { return 'mob.cowhurt'; }
+  protected override getSoundVolume(): number { return 0.4; }
 
   protected writeEntityNbt(map: Map<string, NbtTag>): void {
     this.writeAnimalNbt(map);

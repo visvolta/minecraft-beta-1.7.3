@@ -7,12 +7,6 @@ const NOTICE_RADIUS = 8;
 /** Distance beyond which the mob loses interest. */
 const LOSE_RADIUS = 10;
 
-function wrapDegrees(degrees: number): number {
-  let d = degrees % 360;
-  if (d >= 180) d -= 360;
-  if (d < -180) d += 360;
-  return d;
-}
 
 /**
  * Reusable task: a passive mob glances at a nearby player by turning its head
@@ -59,7 +53,7 @@ export class LookAtPlayerTask implements AiTask {
     const dx = player.x - entity.position.x;
     const dz = player.z - entity.position.z;
     const targetYaw = (Math.atan2(dz, dx) * 180) / Math.PI - 90;
-    entity.headYaw += wrapDegrees(targetYaw - entity.headYaw) * 0.2;
+    entity.setHeadLookIntent(targetYaw, 0.2);
   }
 
   public stop(_entity: LivingEntity): void {

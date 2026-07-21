@@ -14,7 +14,7 @@ export interface ParticleOrigin {
 }
 
 /**
- * Decoupled hook for hurt/death particle effects (Beta `worldObj.spawnParticle`
+ * Decoupled hook for terminal death particle effects (Beta `worldObj.spawnParticle`
  * calls). `LivingEntity` fires these once at the correct moment; it has no
  * knowledge of how (or whether) particles are rendered.
  *
@@ -23,7 +23,6 @@ export interface ParticleOrigin {
  * (validation), and {@link SimpleEntityParticleSink} (optional minimal visuals).
  */
 export interface EntityParticleSink {
-  hurt(origin: ParticleOrigin): void;
   death(origin: ParticleOrigin): void;
   /** Optional per-frame advance; only visual sinks need it. */
   update?(deltaSeconds: number): void;
@@ -33,9 +32,6 @@ export interface EntityParticleSink {
 
 /** No-op sink; safe default for headless contexts. */
 export class NullParticleSink implements EntityParticleSink {
-  public hurt(_origin: ParticleOrigin): void {
-    // nothing
-  }
   public death(_origin: ParticleOrigin): void {
     // nothing
   }
@@ -46,16 +42,11 @@ export class NullParticleSink implements EntityParticleSink {
  * fire exactly once at the right moment without any rendering.
  */
 export class CountingParticleSink implements EntityParticleSink {
-  public hurtCount = 0;
   public deathCount = 0;
-  public hurt(_origin: ParticleOrigin): void {
-    this.hurtCount += 1;
-  }
   public death(_origin: ParticleOrigin): void {
     this.deathCount += 1;
   }
   public reset(): void {
-    this.hurtCount = 0;
     this.deathCount = 0;
   }
 }
@@ -65,8 +56,7 @@ const GRAVITY = 6.0; // blocks/s² (visual only)
 
 /**
  * Minimal Minecraft-appropriate particle visuals: a single fixed-pool
- * `THREE.Points` (no per-frame allocation, no material churn). Hurt = a few red
- * specks; death = a small white "poof". Self-contained and small by design.
+ * `THREE.Points` (no per-frame allocation, no material churn). Death = a small white "poof". Self-contained and small by design.
  */
 export class SimpleEntityParticleSink implements EntityParticleSink {
   private readonly points: THREE.Points;
@@ -94,12 +84,8 @@ export class SimpleEntityParticleSink implements EntityParticleSink {
     scene.add(this.points);
   }
 
-  public hurt(origin: ParticleOrigin): void {
-    this.burst(origin, 6, 0.9, 0.15, 0.15);
-  }
-
   public death(origin: ParticleOrigin): void {
-    this.burst(origin, 14, 0.85, 0.85, 0.85);
+    this.burst(origin, 20, 0.85, 0.85, 0.85);
   }
 
   private burst(origin: ParticleOrigin, count: number, r: number, g: number, b: number): void {

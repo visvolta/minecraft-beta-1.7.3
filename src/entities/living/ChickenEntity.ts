@@ -9,6 +9,7 @@ import { PanicTask } from '../ai/tasks/PanicTask';
 import { LookAtPlayerTask } from '../ai/tasks/LookAtPlayerTask';
 import { DroppedItemEntity } from '../items/DroppedItemEntity';
 import type { Drop } from '../items/BlockDropResolver';
+import { wrapDegrees } from './LivingAnimationMath';
 
 const DEATH_ANIM_TICKS = 20;
 
@@ -121,6 +122,7 @@ export class ChickenEntity extends AnimalEntity {
     if (this.isChild()) return;
     this.timeUntilNextEgg -= 1;
     if (this.timeUntilNextEgg <= 0) {
+      this.emitSound('mob.chickenplop', 'egg', 1);
       // Lay exactly one egg, then reset the timer.
       const egg = new DroppedItemEntity(
         ctx.world,
@@ -136,16 +138,13 @@ export class ChickenEntity extends AnimalEntity {
   }
 
   protected override getDropItems(): Drop[] {
-    const drops: Drop[] = [];
-    // Beta: 0–2 feather (getDropItemId=feather via inherited dropFewItems).
-    const feather = this.nextInt(3);
-    if (feather > 0) {
-      drops.push({ type: 'item', id: 'feather', count: feather, metadata: 0 });
-    }
-    // Raw chicken (1) — an intentional post-Beta addition; documented as a deviation.
-    drops.push({ type: 'item', id: 'chicken_raw', count: 1, metadata: 0 });
-    return drops;
+    const count = this.nextInt(3);
+    return count === 0 ? [] : [{ type: 'item', id: 'feather', count, metadata: 0 }];
   }
+
+  protected override getAmbientSoundId(): string { return 'mob.chicken'; }
+  protected override getHurtSoundId(): string { return 'mob.chickenhurt'; }
+  protected override getDeathSoundId(): string { return 'mob.chickenhurt'; }
 
   public override updateRenderInterpolation(alpha: number): void {
     super.updateRenderInterpolation(alpha);
@@ -154,8 +153,8 @@ export class ChickenEntity extends AnimalEntity {
       return;
     }
     const legYaw = this.prevLegYaw + (this.legYaw - this.prevLegYaw) * alpha;
-    const bodyYaw = this.prevRenderYawOffset + (this.renderYawOffset - this.prevRenderYawOffset) * alpha;
-    const headYaw = this.prevHeadYaw + (this.headYaw - this.prevHeadYaw) * alpha;
+    const bodyYaw = this.prevRenderYawOffset + wrapDegrees(this.renderYawOffset - this.prevRenderYawOffset) * alpha;
+    const headYaw = this.prevHeadYaw + wrapDegrees(this.headYaw - this.prevHeadYaw) * alpha;
     const wingRotation = this.oFlap + (this.wingRotation - this.oFlap) * alpha;
     const wingSpread = this.oFlapSpeed + (this.destPos - this.oFlapSpeed) * alpha;
     const peckPhase = this.prevPeckPhase + (this.peckPhase - this.prevPeckPhase) * alpha;
@@ -163,7 +162,7 @@ export class ChickenEntity extends AnimalEntity {
     model.updatePose(legYaw, this.legSwing, bodyYaw, headYaw - bodyYaw, headPitch, wingRotation, wingSpread);
 
     const flash = !this.isDead() && this.maxHurtTime > 0 ? this.hurtTime / this.maxHurtTime : 0;
-    model.setHurtFlash(flash);
+    model.setHurtFlash(Math.max(flash, this.isBurning() ? 0.15 : 0));
     model.setDeathProgress(this.isDead() ? Math.min(this.deathTime / DEATH_ANIM_TICKS, 1) : 0);
   }
 

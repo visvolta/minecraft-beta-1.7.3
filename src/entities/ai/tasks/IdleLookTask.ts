@@ -2,12 +2,6 @@ import type { AiTask } from '../AiTask';
 import { ControlFlags } from '../AiTask.ts';
 import type { LivingEntity } from '../../living/LivingEntity';
 
-function wrapDegrees(degrees: number): number {
-  let d = degrees % 360;
-  if (d >= 180) d -= 360;
-  if (d < -180) d += 360;
-  return d;
-}
 
 /**
  * Idle head-turning (Beta mobs occasionally glance around when not moving).
@@ -38,7 +32,7 @@ export class IdleLookTask implements AiTask {
     }
     this.lookTicks -= 1;
     // Turn the head only; the body keeps facing the movement heading.
-    entity.headYaw += wrapDegrees(this.targetYaw - entity.headYaw) * 0.2;
+    entity.setHeadLookIntent(this.targetYaw, 0.2);
   }
 
   public stop(_entity: LivingEntity): void {

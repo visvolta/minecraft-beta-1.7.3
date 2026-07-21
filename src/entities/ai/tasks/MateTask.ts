@@ -36,7 +36,7 @@ export class MateTask implements AiTask {
     this.courtshipTicks += 1;
     const dx = partner.position.x - animal.position.x;
     const dz = partner.position.z - animal.position.z;
-    animal.headYaw = Math.atan2(dz, dx) * 180 / Math.PI - 90;
+    animal.setHeadLookIntent(Math.atan2(dz, dx) * 180 / Math.PI - 90);
     if (!animal.navigation.hasPath()) animal.navigation.moveTo(animal, partner.position);
     const dy = partner.position.y - animal.position.y;
     if (this.courtshipTicks >= COURTSHIP_TICKS && dx * dx + dy * dy + dz * dz < BREED_REACH_SQ) {

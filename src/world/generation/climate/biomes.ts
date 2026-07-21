@@ -29,6 +29,16 @@ export const BETA_PASSIVE_SPAWNS: readonly PassiveSpawnEntry[] = [
   { kind: 'cow', weight: 8 },
 ];
 
+export type HostileMobKind = 'zombie' | 'skeleton' | 'spider' | 'creeper';
+export interface HostileSpawnEntry { readonly kind: HostileMobKind; readonly weight: number; }
+/** Beta default monster list excluding out-of-scope Slime. */
+export const BETA_HOSTILE_SPAWNS: readonly HostileSpawnEntry[] = [
+  { kind: 'spider', weight: 10 },
+  { kind: 'zombie', weight: 10 },
+  { kind: 'skeleton', weight: 10 },
+  { kind: 'creeper', weight: 10 },
+];
+
 export type BiomeId =
   | 'rainforest'
   | 'swampland'
@@ -65,6 +75,7 @@ export interface BiomeDefinition {
   readonly enableSnow: boolean;
   /** Beta creature-category spawn entries and exact selection weights. */
   readonly passiveSpawns: readonly PassiveSpawnEntry[];
+  readonly hostileSpawns: readonly HostileSpawnEntry[];
   /** Configurable final-look inputs; no original Beta colourizer tables. */
   readonly vegetationTints: Readonly<Record<'grass' | 'oakLeaves' | 'birchLeaves' | 'spruceLeaves', readonly [number, number, number]>>;
   readonly vegetationTintStrengths: Readonly<Record<'grass' | 'oakLeaves' | 'birchLeaves' | 'spruceLeaves', number>>;
@@ -86,6 +97,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [{ kind: 'bigOak', weight: 1 }, { kind: 'oak', weight: 2 }],
     enableSnow: false,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
   swampland: {
     id: 'swampland',
@@ -99,6 +111,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
   seasonalForest: {
     id: 'seasonalForest',
@@ -112,6 +125,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
   forest: {
     id: 'forest',
@@ -125,6 +139,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [{ kind: 'birch', weight: 3 }, { kind: 'bigOak', weight: 4 }, { kind: 'oak', weight: 8 }],
     enableSnow: false,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
   savanna: {
     id: 'savanna',
@@ -138,6 +153,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
   shrubland: {
     id: 'shrubland',
@@ -151,6 +167,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [{ kind: 'oak', weight: 1 }],
     enableSnow: false,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
   taiga: {
     id: 'taiga',
@@ -164,6 +181,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [{ kind: 'tallSpruce', weight: 1 }, { kind: 'spruce', weight: 2 }],
     enableSnow: true,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
   desert: {
     id: 'desert',
@@ -177,6 +195,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [],
     enableSnow: false,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
   plains: {
     id: 'plains',
@@ -190,6 +209,7 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [],
     enableSnow: false,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
   tundra: {
     id: 'tundra',
@@ -203,5 +223,6 @@ export const BIOMES: Readonly<Record<BiomeId, BiomeDefinition>> = {
     treeGenerators: [],
     enableSnow: true,
     passiveSpawns: BETA_PASSIVE_SPAWNS,
+    hostileSpawns: BETA_HOSTILE_SPAWNS,
   },
 };

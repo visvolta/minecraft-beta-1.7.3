@@ -20,9 +20,10 @@ import { EntityManager } from '../entities/core/EntityManager';
 import { createDefaultEntityTypeRegistry } from '../entities/core/EntityType';
 import { registerEntityTypes } from '../entities/registerEntityTypes';
 import { JavaRandom } from '../world/generation/random/JavaRandom';
-import { NaturalPassiveSpawner } from '../entities/spawning/NaturalPassiveSpawner';
+import { NaturalMobSpawner } from '../entities/spawning/NaturalMobSpawner';
 import { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';
 import { ExplosionService } from '../entities/explosion/ExplosionService';
+import { NullMobSoundSink } from '../entities/sound/MobSoundSink';
 import { SimpleEntityParticleSink } from '../entities/particles/EntityParticleSink';
 import { Inventory } from '../inventory/Inventory';
 import { InventorySerializer } from '../inventory/InventorySerializer';
@@ -186,7 +187,7 @@ export class Engine {
   private readonly itemAtlas: ItemTextureAtlas;
   private readonly itemEntityManager: ItemEntityManager;
   private readonly entityManager: EntityManager;
-  private readonly naturalPassiveSpawner: NaturalPassiveSpawner;
+  private readonly naturalMobSpawner: NaturalMobSpawner;
   private readonly explosionService: ExplosionService;
   private readonly entityParticles: SimpleEntityParticleSink;
   private lastTotalTicks = 0;
@@ -379,6 +380,7 @@ export class Engine {
       isDaytime: () => this.worldTime.getTimeOfDayTicks() < 12000,
       skylightSubtracted: () => this.worldTime.getSkylightSubtracted(),
       explode: (source, x, y, z, strength, flaming) => this.explosionService.explode(source, x, y, z, strength, flaming),
+      sounds: new NullMobSoundSink(),
     });
     this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng);
 
@@ -493,7 +495,7 @@ export class Engine {
 
     // Stage 18: weather. WeatherController already created above for fire.
     this.climateSampler = new ClimateSampler(worldSeed);
-    this.naturalPassiveSpawner = new NaturalPassiveSpawner({
+    this.naturalMobSpawner = new NaturalMobSpawner({
       chunkManager: this.chunkManager,
       entityManager: this.entityManager,
       blockRegistry: this.blockRegistry,
@@ -504,6 +506,8 @@ export class Engine {
       player: this.player,
       worldSpawn: metadata.spawn,
       getSkylightSubtracted: () => this.worldTime.getSkylightSubtracted(),
+      getDifficulty: () => metadata.difficulty,
+      isThundering: () => this.weatherController.getState().thundering,
     });
     this.precipitationRenderer = new PrecipitationRenderer(
       this.renderer.scene,
@@ -1200,7 +1204,7 @@ export class Engine {
         // so the player's own physics still resolves terrain), then runs the
         // item-pickup pass (which needs the player).
         this.player.tickCombatState();
-        this.naturalPassiveSpawner.tick();
+        this.naturalMobSpawner.tick();
         this.entityManager.tick();
         this.entityManager.collideWithPlayer(this.player);
         this.itemEntityManager.tickPickups(this.player);

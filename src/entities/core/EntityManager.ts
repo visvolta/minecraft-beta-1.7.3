@@ -61,6 +61,7 @@ export class EntityManager {
   private gameTick = 0;
   /** Active loaded passive creatures only; parked entities deliberately do not count. */
   private passiveCreatureCount = 0;
+  private hostileMobCount = 0;
 
   public constructor(options: EntityManagerOptions) {
     this.chunkManager = options.chunkManager;
@@ -92,6 +93,7 @@ export class EntityManager {
       isDaytime: options.isDaytime,
       skylightSubtracted: options.skylightSubtracted,
       explode: options.explode,
+      sounds: options.sounds,
     };
 
     this.chunkManager.addRemoveListener((chunk) => this.onChunkRemoved(chunk));
@@ -219,6 +221,7 @@ export class EntityManager {
       this.entities.set(entity.id, entity);
       this.byUuid.set(entity.uuid, entity);
       if (entity.isPassiveCreature) this.passiveCreatureCount += 1;
+      if (entity.isHostileMob) this.hostileMobCount += 1;
       this.addToChunkBucket(entity);
       this.markChunkDirty(entity.chunkX, entity.chunkZ);
       entity.onSpawn(ctx);
@@ -237,6 +240,7 @@ export class EntityManager {
       this.entities.delete(id);
       this.byUuid.delete(entity.uuid);
       if (entity.isPassiveCreature) this.passiveCreatureCount -= 1;
+      if (entity.isHostileMob) this.hostileMobCount -= 1;
       this.removeFromChunkBucket(entity);
       entity.onRemove();
       this.markChunkDirty(entity.chunkX, entity.chunkZ);
@@ -302,6 +306,7 @@ export class EntityManager {
       this.entities.delete(id);
       this.byUuid.delete(entity.uuid);
       if (entity.isPassiveCreature) this.passiveCreatureCount -= 1;
+      if (entity.isHostileMob) this.hostileMobCount -= 1;
       entity.onPark();
       parkedList.push(entity);
     }
@@ -331,6 +336,7 @@ export class EntityManager {
       this.entities.set(entity.id, entity);
       this.byUuid.set(entity.uuid, entity);
       if (entity.isPassiveCreature) this.passiveCreatureCount += 1;
+      if (entity.isHostileMob) this.hostileMobCount += 1;
       entity.onRestore(this.context);
       this.addToChunkBucket(entity);
     }
@@ -410,6 +416,12 @@ export class EntityManager {
 
   public get activePassiveCreatureCount(): number {
     return this.passiveCreatureCount;
+  }
+
+  public get activeHostileMobCount(): number {
+    let pendingHostileRemovals = 0;
+    for (const id of this.pendingRemove) if (this.entities.get(id)?.isHostileMob) pendingHostileRemovals++;
+    return this.hostileMobCount - pendingHostileRemovals;
   }
 
   public get parkedCount(): number {
@@ -497,6 +509,7 @@ export class EntityManager {
     this.pendingAdd.length = 0;
     this.pendingRemove.clear();
     this.passiveCreatureCount = 0;
+    this.hostileMobCount = 0;
   }
 
   private tickContext(): EntityTickContext {

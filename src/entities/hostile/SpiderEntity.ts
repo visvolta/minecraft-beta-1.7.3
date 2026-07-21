@@ -5,6 +5,9 @@ import { HostileEntity } from './HostileEntity';
 import { SpiderModel } from './models/SpiderModel';
 import { SpiderLeapTask } from '../ai/tasks/SpiderLeapTask';
 import type { Player } from '../../player/Player';
+import type { Drop } from '../items/BlockDropResolver';
+import { wrapDegrees } from '../living/LivingAnimationMath';
+import { interpolateLivingBodyYaw } from '../../rendering/LivingRenderTransform';
 
 export class SpiderEntity extends HostileEntity {
   public readonly typeId = EntityTypeIds.Spider;
@@ -34,11 +37,18 @@ export class SpiderEntity extends HostileEntity {
     if (this.target && this.getDaylightExposure().brightness > 0.5 && this.nextInt(100) === 0) this.clearTarget();
     super.onTick(ctx);
   }
+  protected override getDropItems(): Drop[] { const count=this.nextInt(3); return count ? [{type:'item',id:'string',count,metadata:0}] : []; }
+  protected override getAmbientSoundId(): string { return 'mob.spider'; }
+  protected override getHurtSoundId(): string { return 'mob.spider'; }
+  protected override getDeathSoundId(): string { return 'mob.spiderdeath'; }
   private buildModel(): void { this.model?.dispose(); this.model = new SpiderModel(); this.renderObject = this.model.root; this.ctx.scene.add(this.model.root); }
   public override updateRenderInterpolation(alpha: number): void {
     super.updateRenderInterpolation(alpha); if (!this.model) return;
-    this.model.updatePose(this.legYaw, this.legSwing, this.headYaw - this.renderYawOffset, this.headPitch);
-    this.model.setHurtFlash(!this.isDead() && this.maxHurtTime > 0 ? this.hurtTime / this.maxHurtTime : 0);
+    const body=interpolateLivingBodyYaw(this.prevRenderYawOffset,this.renderYawOffset,alpha);
+    const head=this.prevHeadYaw+wrapDegrees(this.headYaw-this.prevHeadYaw)*alpha;
+    this.model.updatePose(this.prevLegYaw+(this.legYaw-this.prevLegYaw)*alpha, this.legSwing, wrapDegrees(head-body), this.headPitch);
+    const flash=!this.isDead()&&this.maxHurtTime>0?this.hurtTime/this.maxHurtTime:0;
+    this.model.setHurtFlash(Math.max(flash,this.isBurning()?0.15:0));
     this.model.root.rotation.z = this.isDead() ? Math.min(this.deathTime / 20, 1) * Math.PI : 0;
   }
   protected override disposeRender(): void { this.model?.dispose(); this.model = null; }

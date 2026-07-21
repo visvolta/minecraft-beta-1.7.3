@@ -30,7 +30,9 @@
     "validate:hostiles": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateHostileFoundation.js",
     "validate:hostile-mobs": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateHostileMobs.js",
     "validate:projectiles": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateProjectiles.js",
-    "validate:explosions": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateExplosions.js"
+    "validate:explosions": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateExplosions.js",
+    "validate:hostile-spawning": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateHostileSpawning.js",
+    "validate:mob-parity": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateMobParity.js"
   },
   "dependencies": {
     "three": "^0.185.1"

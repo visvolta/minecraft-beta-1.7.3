@@ -14,14 +14,15 @@ export class CreeperModel extends EntityModel {
       this.addBox(leg, { w: 4, h: 6, d: 4 }, material, 0, -3, 0); this.legs.push(leg); this.root.add(leg);
     }
   }
-  public updatePose(phase: number, amount: number): void {
+  public updatePose(phase: number, amount: number, headYaw=0, headPitch=0): void {
+    this.head.rotation.y=-headYaw*Math.PI/180;this.head.rotation.x=headPitch*Math.PI/180;
     const swing = Math.cos(phase * 0.6662) * 1.4 * amount;
     this.legs[0]!.rotation.x = swing; this.legs[1]!.rotation.x = -swing;
     this.legs[2]!.rotation.x = -swing; this.legs[3]!.rotation.x = swing;
   }
-  public setFuse(progress: number): void {
+  public setFuse(progress: number, burning = false): void {
     const p = Math.max(0, Math.min(1, progress)); const pulse = 1 + Math.sin(p * 100) * p * 0.01; const p4 = p ** 4;
     this.root.scale.set((1 + p4 * 0.4) * pulse, (1 + p4 * 0.1) / pulse, (1 + p4 * 0.4) * pulse);
-    this.setHurtFlash(Math.floor(p * 10) % 2 === 1 ? p * 0.2 : 0);
+    this.setHurtFlash(Math.max(Math.floor(p * 10) % 2 === 1 ? p * 0.2 : 0, burning ? 0.15 : 0));
   }
 }

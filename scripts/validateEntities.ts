@@ -441,13 +441,13 @@ function countPork(entities: EntityManager): number {
   w.entities.add(pig);
   w.entities.tick();
 
-  // Moving toward +X: heading jumps to ~-90°, but the body must turn only a
-  // clamped amount per tick (smooth), never snapping to the heading.
+  // Moving toward +X: Beta body yaw eases 30% toward the movement heading,
+  // never snapping to the full heading.
   pig.yaw = 0;
   pig.renderYawOffset = 0;
   pig.navigation.moveTo(pig, { x: 15.5, y: 11, z: 0.5 });
   w.entities.tick();
-  assert(Math.abs(pig.renderYawOffset) <= 10.001, `body turn is clamped per tick (got ${pig.renderYawOffset})`);
+  assert(Math.abs(pig.renderYawOffset) <= 27.001, `body turn uses Beta 0.3 easing (got ${pig.renderYawOffset})`);
   assert(Math.abs(pig.renderYawOffset) < Math.abs(pig.yaw), 'body lags behind the heading (does not snap)');
 }
 {
@@ -457,13 +457,14 @@ function countPork(entities: EntityManager): number {
   w.entities.add(pig);
   w.entities.tick();
 
-  // Idle: turn the head far from the heading; the body must NOT chase the head
-  // (it eases toward the heading, which is unchanged), proving independence.
+  // Idle: a head target beyond Beta's ±75° limit makes the body follow while
+  // retaining a clamped independent head angle.
   pig.yaw = 0;
   pig.renderYawOffset = 0;
   pig.headYaw = 80;
   w.entities.tick();
-  assert(Math.abs(pig.renderYawOffset) < 5, 'body does not snap to an independently-turned head');
+  assert(Math.abs(pig.renderYawOffset) > 0, 'body follows a head target beyond the clamp');
+  assert(Math.abs(pig.headYaw - pig.renderYawOffset) <= 75.001, 'head remains within Beta ±75° body-relative clamp');
 }
 
 // ============================================================
@@ -538,7 +539,7 @@ function countPork(entities: EntityManager): number {
 }
 
 // ============================================================
-// 7B: pork drop hook yields a valid 1–3 stack on death
+// 7B: pork drop hook yields Beta 0–2 on death
 // ============================================================
 {
   const w = buildWorld(2);
@@ -556,7 +557,7 @@ function countPork(entities: EntityManager): number {
     if (dropped > 0) {
       totalDropped += dropped;
       trials += 1;
-      assert(dropped >= 1 && dropped <= 3, `pork drop count must be 1–3 (got ${dropped})`);
+      assert(dropped >= 1 && dropped <= 2, `non-zero pork drop count must be 1–2 (got ${dropped})`);
     }
     // Clean up dropped items for the next trial.
     w.entities.forEachActive((e) => { if (e instanceof DroppedItemEntity) e.markRemoved(); });
@@ -724,15 +725,17 @@ function countPork(entities: EntityManager): number {
   w.entities.tick();
 
   const dropsOnce = countPork(w.entities);
-  const activeAfterKill = w.entities.activeCount; // dead pig (lingering) + its drop entity
-  assert(dropsOnce >= 1 && dropsOnce <= 3, 'lethal hit drops 1–3 pork exactly once');
-  assert(w.particles.deathCount === deathParticlesBefore + 1, 'death particles fired exactly once');
+  const activeAfterKill = w.entities.activeCount;
+  assert(dropsOnce >= 0 && dropsOnce <= 2, 'lethal hit uses Beta 0–2 pork roll exactly once');
+  assert(w.particles.deathCount === deathParticlesBefore, 'lethal damage emits no immediate particles');
 
-  for (let i = 0; i < 40; i++) w.entities.tick(); // death linger + beyond
+  for (let i = 0; i < 19; i++) w.entities.tick();
+  assert(w.particles.deathCount === deathParticlesBefore + 1, 'death particles fire once at terminal death tick');
+  for (let i = 0; i < 21; i++) w.entities.tick();
   assert(countPork(w.entities) === dropsOnce, 'no duplicate drops after death');
   assert(w.particles.deathCount === deathParticlesBefore + 1, 'death particles not re-fired');
   assert(pig.removed, 'pig removed after the death linger');
-  assert(w.entities.activeCount === activeAfterKill - 1, 'pig removed exactly once; its drop entity remains');
+  assert(w.entities.activeCount === activeAfterKill - 1, 'pig removed exactly once; any drop entity remains');
 }
 
 // ============================================================
@@ -1039,7 +1042,7 @@ function countDrop(entities: EntityManager, id: string | number): number {
 }
 
 // ============================================================
-// 8A: cow — spawn, damage, death, drops (leather + beef), save/load, cleanup
+// 8A: cow — spawn, damage, Beta leather drop, save/load, cleanup
 // ============================================================
 {
   const w = buildWorld(2);
@@ -1053,8 +1056,7 @@ function countDrop(entities: EntityManager, id: string | number): number {
   cow.attackEntityFrom(DamageSource.generic(), 99); // lethal
   w.entities.tick();
   assert(cow.isDead(), 'cow dies from lethal damage');
-  const beef = countDrop(w.entities, 'beef_raw');
-  assert(beef >= 1 && beef <= 3, `cow drops 1–3 raw beef (got ${beef})`);
+  assert(countDrop(w.entities, 'beef_raw') === 0, 'Beta cow drops no beef');
   // leather is 0–2 (may be 0); just assert it is within range
   const leather = countDrop(w.entities, 'leather');
   assert(leather >= 0 && leather <= 2, `cow drops 0–2 leather (got ${leather})`);
@@ -1126,11 +1128,11 @@ function countDrop(entities: EntityManager, id: string | number): number {
   assert(eggsAfter === eggsBefore + 1, 'egg timer expiry lays exactly one egg');
   assert(chicken.timeUntilNextEgg > 1, 'egg timer resets after laying');
 
-  // Drops feather (0–2) + raw chicken (1) on death.
+  // Beta drops feathers only (0–2).
   chicken.hurtResistantTime = 0;
   chicken.attackEntityFrom(DamageSource.generic(), 99);
   w.entities.tick();
-  assert(countDrop(w.entities, 'chicken_raw') >= 1, 'chicken drops raw chicken');
+  assert(countDrop(w.entities, 'chicken_raw') === 0, 'Beta chicken drops no raw chicken');
   const feather = countDrop(w.entities, 'feather');
   assert(feather >= 0 && feather <= 2, `chicken drops 0–2 feather (got ${feather})`);
 

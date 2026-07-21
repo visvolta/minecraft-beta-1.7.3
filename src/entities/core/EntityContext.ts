@@ -12,6 +12,7 @@ import type { EntityParticleSink } from '../particles/EntityParticleSink';
 import type { Player } from '../../player/Player';
 import type { Difficulty } from '../../world/Difficulty';
 import type { Entity } from './Entity';
+import type { MobSoundSink } from '../sound/MobSoundSink';
 
 /**
  * Long-lived service context handed to entities and entity factories.
@@ -56,6 +57,7 @@ export interface EntityWorldContext {
   readonly skylightSubtracted?: (() => number) | undefined;
   /** Shared world explosion service entry point (Creeper/TNT-safe). */
   readonly explode?: ((source: Entity, x: number, y: number, z: number, strength: number, flaming?: boolean) => void) | undefined;
+  readonly sounds?: MobSoundSink | undefined;
 }
 
 /**

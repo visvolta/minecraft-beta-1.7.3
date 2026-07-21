@@ -82,8 +82,7 @@ export abstract class QuadrupedModel extends EntityModel {
    * cycle; `bodyYawDeg` is the body heading and `headRelYawDeg` the head turn
    * relative to the body (both in degrees).
    */
-  public updatePose(legYaw: number, legSwing: number, bodyYawDeg: number, headRelYawDeg: number, headPitchDeg = 0): void {
-    this.bodyYawGroup.rotation.y = -deg2rad(bodyYawDeg);
+  public updatePose(legYaw: number, legSwing: number, _bodyYawDeg: number, headRelYawDeg: number, headPitchDeg = 0): void {
     this.headGroup.rotation.y = -deg2rad(headRelYawDeg);
     this.headGroup.rotation.x = deg2rad(headPitchDeg);
 
