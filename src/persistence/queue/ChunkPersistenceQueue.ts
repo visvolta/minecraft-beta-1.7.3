@@ -47,6 +47,7 @@ export class ChunkPersistenceQueue {
   private pendingPeriodicFlush: ReturnType<typeof setTimeout> | null = null;
   private stats = { saved: 0, failed: 0, loaded: 0 };
   private entityHooks: ChunkEntityHooks | null = null;
+  private simulationTickProvider: () => number = () => 0;
 
   public constructor(regionCoordinator: RegionCoordinator) {
     this.regionCoordinator = regionCoordinator;
@@ -55,6 +56,10 @@ export class ChunkPersistenceQueue {
   /** Connects the EntityManager so chunks can save/load their entities. */
   public setEntityHooks(hooks: ChunkEntityHooks): void {
     this.entityHooks = hooks;
+  }
+
+  public setSimulationTickProvider(provider: () => number): void {
+    this.simulationTickProvider = provider;
   }
 
   public getStats() {
@@ -131,7 +136,7 @@ export class ChunkPersistenceQueue {
       }
 
       const decoded = decodeNbt(bytes);
-      const chunk = ChunkSerializer.decodeChunk(decoded.root);
+      const chunk = ChunkSerializer.decodeChunk(decoded.root, this.simulationTickProvider());
       chunk.markAsLoadedFromDisk();
       this.stats.loaded++;
       // Restore owned entities from disk unless in-memory parked entities are
@@ -166,7 +171,7 @@ export class ChunkPersistenceQueue {
     try {
       const snapshotRevision = chunk.getPersistenceRevision();
       const entityTags = this.entityHooks?.serializeChunkEntities(chunk.chunkX, chunk.chunkZ) ?? [];
-      const nbt = ChunkSerializer.encodeChunk(chunk, 0n, entityTags);
+      const nbt = ChunkSerializer.encodeChunk(chunk, BigInt(this.simulationTickProvider()), entityTags);
       const bytes = encodeNbt(nbt, '');
 
       const rx = Math.floor(chunk.chunkX / 32);
@@ -192,6 +197,12 @@ export class ChunkPersistenceQueue {
         const rz = Math.floor(unload.chunk.chunkZ / 32);
         await this.regionCoordinator.commitRegion(rx, rz);
         unload.chunk.markPersistenceClean(snapshotRevision);
+        // Scheduled ticks and other mutations may advance while the async
+        // snapshot is being committed. Save again before permitting removal.
+        if (unload.chunk.isPersistenceDirty()) {
+          await this.processUnload(unload);
+          return;
+        }
       }
     } catch (err) {
       this.stats.failed++;

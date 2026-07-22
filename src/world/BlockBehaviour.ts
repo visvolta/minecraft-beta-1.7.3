@@ -3,6 +3,9 @@ import type { BlockUpdateWorld } from './BlockUpdateWorld';
 import type { WorldEventQueue } from './events/WorldEventQueue';
 import { AABB } from '../physics/AABB';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
+import type { PowerQueryContext, RedstonePower } from './redstone/RedstonePower';
+import type { RedstonePowerEngine } from './redstone/RedstonePowerEngine';
+import type { BlockMutationEvent, NeighbourUpdateEvent } from './updates/BlockMutation';
 
 export type BoundingBoxType = 'collision' | 'selection' | 'interaction';
 
@@ -14,14 +17,20 @@ export interface BlockBehaviourContext {
   /** Same world RNG stream; required by Beta WorldGenBigTree. */
   readonly nextLong?: () => bigint;
   readonly events?: WorldEventQueue;
+  readonly power?: RedstonePowerEngine;
 }
 
 export interface BlockBehaviour {
   readonly randomTicks?: boolean;
   readonly isClimbable?: boolean;
+  readonly canProvidePower?: boolean;
+  readonly requiresNeighbourReconciliation?: boolean;
+  getWeakPower?(ctx: PowerQueryContext): RedstonePower | number;
+  getStrongPower?(ctx: PowerQueryContext): RedstonePower | number;
   scheduledTick?(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void;
   randomTick?(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void;
-  neighborChanged?(ctx: BlockBehaviourContext, x: number, y: number, z: number, sourceX: number, sourceY: number, sourceZ: number): void;
+  neighborChanged?(ctx: BlockBehaviourContext, x: number, y: number, z: number, sourceX: number, sourceY: number, sourceZ: number, event?: NeighbourUpdateEvent): void;
+  stateChanged?(ctx: BlockBehaviourContext, event: BlockMutationEvent): void;
   canPlaceBlockAt?(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean;
   onPlaced?(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void;
   onRemoved?(ctx: BlockBehaviourContext, x: number, y: number, z: number, oldBlockId: BlockId): void;
@@ -41,6 +50,13 @@ export class BlockBehaviourRegistry {
 
   public get(blockId: BlockId): BlockBehaviour {
     return this.behaviours.get(blockId) ?? NOOP_BEHAVIOUR;
+  }
+
+  public requiresNeighbourReconciliation(blockId: BlockId): boolean {
+    const behaviour = this.get(blockId);
+    return behaviour.requiresNeighbourReconciliation === true
+      || behaviour.neighborChanged !== undefined
+      || behaviour.canProvidePower === true;
   }
 }
 

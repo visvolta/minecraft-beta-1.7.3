@@ -24,7 +24,7 @@ async function main() {
   const keys = [...level.value.keys()];
   assert(keys.join(',') === 'xPos,zPos,LastUpdate,Blocks,Data,SkyLight,BlockLight,HeightMap,TerrainPopulated,Entities,TileEntities,TileTicks', 'Strict byte order for NBT properties');
 
-  const restored = ChunkSerializer.decodeChunk(nbt);
+  const restored = ChunkSerializer.decodeChunk(nbt, 500);
   assert(restored.getBlock(0, 0, 0) === 1, 'block 0,0,0 restored');
   assert(restored.getBlock(15, 127, 15) === 2, 'block 15,127,15 restored');
   assert(restored.getBlockMetadata(0, 0, 0) === 15, 'metadata restored');
@@ -33,7 +33,7 @@ async function main() {
   assert(restored.getHeight(0, 0) === 1, 'heightmap implicitly restored');
 
   const ticks = restored.getScheduledTicks().drainAll();
-  assert(ticks.length === 1 && ticks[0]!.dueTick === 100, 'scheduled ticks round-trip');
+  assert(ticks.length === 1 && ticks[0]!.dueTick === 500, 'scheduled ticks persist as remaining delay relative to restored simulation tick');
 
   const mem = new MemoryWorldStorage();
   const region = await RegionStorage.open(mem, 'world1', 0, 0);

@@ -1,61 +1,56 @@
 import type { BlockId } from '../blocks/BlockId';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
+import type { BlockBehaviourContext, BlockBehaviourRegistry } from './BlockBehaviour';
+import { ALL_BLOCK_DIRECTIONS, offsetBlockPosition, oppositeDirection, type BlockPosition } from './BlockDirections';
 import type { ChunkManager } from './ChunkManager';
-import type { LightEngine } from './generation/lighting/LightEngine';
 import { CHUNK_SIZE_Y } from './chunkConstants';
-import { getBoundaryNeighbourChunks, worldToChunkLocal } from './worldToChunkCoords';
-import type { BlockBehaviourRegistry } from './BlockBehaviour';
 import type { WorldEventQueue } from './events/WorldEventQueue';
+import type { LightEngine } from './generation/lighting/LightEngine';
+import { getBoundaryNeighbourChunks, worldToChunkLocal } from './worldToChunkCoords';
+import type { RedstonePowerEngine } from './redstone/RedstonePowerEngine';
+import type { BlockMutationEvent, NeighbourUpdateEvent } from './updates/BlockMutation';
+import { NeighbourUpdateQueue, type NeighbourQueueMetrics, type NeighbourUpdateQueueOptions } from './updates/NeighbourUpdateQueue';
 
-export type BlockUpdateReason = 'player' | 'scheduled' | 'neighbour' | 'world';
+export type BlockUpdateReason = 'player' | 'scheduled' | 'neighbour' | 'world' | 'chunk-load';
 
 export interface SetBlockOptions {
   readonly metadata?: number;
   readonly reason?: BlockUpdateReason;
   readonly notifyNeighbours?: boolean;
   readonly updateLighting?: boolean;
-  readonly player?: any;
+  readonly player?: unknown;
 }
 
-export interface NeighbourNotification {
-  readonly sourceX: number;
-  readonly sourceY: number;
-  readonly sourceZ: number;
-  readonly targetX: number;
-  readonly targetY: number;
-  readonly targetZ: number;
-  readonly reason: BlockUpdateReason;
+export interface SetBlockMetadataOptions {
+  readonly affectsMesh?: boolean;
+  readonly affectsWeather?: boolean;
+  readonly affectsLight?: boolean;
+  readonly notifyNeighbours?: boolean;
+  readonly reason?: BlockUpdateReason;
 }
 
-const NEIGHBOUR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
-  [0, -1, 0],
-  [0, 1, 0],
-  [0, 0, -1],
-  [0, 0, 1],
-  [-1, 0, 0],
-  [1, 0, 0],
-];
-
-/**
- * Narrow world mutation gateway. Behaviour systems own decisions; this
- * class only applies block/metadata changes and coordinates invalidation,
- * lighting, neighbour notification and chunk-border dirtiness.
- * Now also dispatches onPlaced/onRemoved callbacks via behaviour registry.
- */
+/** Authoritative world mutation gateway and owner of the neighbour FIFO. */
 export class BlockUpdateWorld {
-  private readonly pendingNeighbourUpdates: NeighbourNotification[] = [];
+  private readonly neighbourUpdates: NeighbourUpdateQueue;
   private scheduleCallback: ((x: number, y: number, z: number, blockId: BlockId, delayTicks: number) => boolean) | undefined;
-  private readonly pendingNeighbourKeys = new Set<string>();
-  private behaviourRegistry?: BlockBehaviourRegistry;
-  private eventQueue?: WorldEventQueue;
-  private getGameTick?: () => number;
-  private getNextInt?: (bound: number) => number;
+  private behaviourRegistry: BlockBehaviourRegistry | undefined;
+  private eventQueue: WorldEventQueue | undefined;
+  private powerEngine: RedstonePowerEngine | undefined;
+  private getGameTick: (() => number) | undefined;
+  private getNextInt: ((bound: number) => number) | undefined;
+  private nextGenerationId = 1;
+  private nextMutationId = 1;
+  private activeGenerationId: number | undefined;
+  private activeDepth = 0;
 
   public constructor(
     private readonly chunkManager: ChunkManager,
     private readonly blockRegistry: BlockRegistry,
     private readonly lightEngine: LightEngine,
-  ) {}
+    neighbourQueueOptions: NeighbourUpdateQueueOptions = {},
+  ) {
+    this.neighbourUpdates = new NeighbourUpdateQueue(neighbourQueueOptions);
+  }
 
   public setScheduleCallback(callback: (x: number, y: number, z: number, blockId: BlockId, delayTicks: number) => boolean): void {
     this.scheduleCallback = callback;
@@ -67,6 +62,10 @@ export class BlockUpdateWorld {
 
   public setEventQueue(queue: WorldEventQueue): void {
     this.eventQueue = queue;
+  }
+
+  public setPowerEngine(powerEngine: RedstonePowerEngine): void {
+    this.powerEngine = powerEngine;
   }
 
   public setGameTickProvider(provider: () => number): void {
@@ -98,6 +97,15 @@ export class BlockUpdateWorld {
     return this.chunkManager.hasChunk(chunkX, chunkZ);
   }
 
+  public isNormalCube(worldX: number, worldY: number, worldZ: number): boolean {
+    if (!this.isLoaded(worldX, worldZ) || worldY < 0 || worldY >= CHUNK_SIZE_Y) return false;
+    const definition = this.blockRegistry.getById(this.getBlock(worldX, worldY, worldZ));
+    return definition !== undefined
+      && definition.solid
+      && !definition.transparent
+      && definition.renderType === 'opaque';
+  }
+
   /** Runtime generators must not force streaming; all touched chunks must already exist. */
   public areChunksLoadedAround(worldX: number, worldZ: number, radiusChunks: number): boolean {
     const { chunkX, chunkZ } = worldToChunkLocal(worldX, worldZ);
@@ -116,23 +124,24 @@ export class BlockUpdateWorld {
   }
 
   public setBlock(worldX: number, worldY: number, worldZ: number, blockId: BlockId, options: SetBlockOptions = {}): boolean {
-    if (worldY < 0 || worldY >= CHUNK_SIZE_Y) {
-      return false;
-    }
-
+    if (worldY < 0 || worldY >= CHUNK_SIZE_Y) return false;
     const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(worldX, worldZ);
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    if (chunk === undefined) {
-      return false;
-    }
+    if (chunk === undefined) return false;
 
     const previousBlockId = chunk.getBlock(localX, worldY, localZ);
     const previousMetadata = chunk.getBlockMetadata(localX, worldY, localZ);
-    const metadata = options.metadata ?? 0;
+    const metadata = this.normalizeMetadata(options.metadata ?? 0);
+    if (previousBlockId === blockId && previousMetadata === metadata) return false;
 
-    if (previousBlockId === blockId && previousMetadata === metadata) {
-      return false;
-    }
+    const mutation = this.createMutation(
+      { x: worldX, y: worldY, z: worldZ },
+      previousBlockId,
+      previousMetadata,
+      blockId,
+      metadata,
+      options.reason ?? 'world',
+    );
 
     chunk.setBlock(localX, worldY, localZ, blockId);
     chunk.setBlockMetadata(localX, worldY, localZ, metadata, {
@@ -141,46 +150,24 @@ export class BlockUpdateWorld {
       affectsLight: false,
     });
 
-    if (options.updateLighting ?? true) {
-      this.lightEngine.handleBlockEdit(worldX, worldY, worldZ);
-    }
+    if (options.updateLighting ?? true) this.lightEngine.handleBlockEdit(worldX, worldY, worldZ);
+    this.markBoundaryNeighboursDirty(chunkX, chunkZ, localX, localZ);
+    if (options.notifyNeighbours ?? true) this.enqueueMutationNotifications(mutation);
 
-    for (const neighbour of getBoundaryNeighbourChunks(chunkX, chunkZ, localX, localZ)) {
-      this.chunkManager.getChunk(neighbour.chunkX, neighbour.chunkZ)?.markDirty();
-    }
-
-    if (options.notifyNeighbours ?? true) {
-      this.enqueueNeighbourNotifications(worldX, worldY, worldZ, options.reason ?? 'world');
-    }
-
-    // Dispatch removal and placement callbacks via behaviour registry
-    if (this.behaviourRegistry) {
-      const gameTick = this.getGameTick ? this.getGameTick() : 0;
-      const ctx = {
-        world: this,
-        gameTick,
-        nextInt: this.getNextInt,
-        events: this.eventQueue,
-        player: options.player,
-      } as any;
-
-      if (previousBlockId !== 0 && previousBlockId !== blockId) {
-        try {
-          this.behaviourRegistry.get(previousBlockId).onRemoved?.(ctx, worldX, worldY, worldZ, previousBlockId);
-        } catch (e) {
-          console.warn('onRemoved failed', e);
+    const registry = this.behaviourRegistry;
+    if (registry !== undefined) {
+      this.withMutationContext(mutation, () => {
+        const ctx = this.createBehaviourContext(options.player);
+        if (previousBlockId !== 0 && previousBlockId !== blockId) {
+          registry.get(previousBlockId).onRemoved?.(ctx, worldX, worldY, worldZ, previousBlockId);
         }
-      }
-      if (blockId !== 0 && previousBlockId !== blockId) {
-        try {
-          this.behaviourRegistry.get(blockId).onPlaced?.(ctx, worldX, worldY, worldZ, blockId);
-        } catch (e) {
-          console.warn('onPlaced failed', e);
+        if (blockId !== 0 && previousBlockId !== blockId) {
+          registry.get(blockId).onPlaced?.(ctx, worldX, worldY, worldZ, blockId);
+        } else if (previousBlockId === blockId && previousMetadata !== metadata) {
+          registry.get(blockId).stateChanged?.(ctx, mutation);
         }
-      }
+      });
     }
-
-    void this.blockRegistry;
     return true;
   }
 
@@ -189,63 +176,173 @@ export class BlockUpdateWorld {
     worldY: number,
     worldZ: number,
     metadata: number,
-    options: { readonly affectsMesh?: boolean; readonly affectsWeather?: boolean; readonly affectsLight?: boolean } = {},
+    options: SetBlockMetadataOptions = {},
   ): boolean {
-    if (worldY < 0 || worldY >= CHUNK_SIZE_Y) {
-      return false;
-    }
+    if (worldY < 0 || worldY >= CHUNK_SIZE_Y) return false;
     const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(worldX, worldZ);
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    if (chunk === undefined) {
-      return false;
+    if (chunk === undefined) return false;
+    const blockId = chunk.getBlock(localX, worldY, localZ);
+    const previousMetadata = chunk.getBlockMetadata(localX, worldY, localZ);
+    const normalized = this.normalizeMetadata(metadata);
+    if (previousMetadata === normalized) return false;
+
+    const mutation = this.createMutation(
+      { x: worldX, y: worldY, z: worldZ },
+      blockId,
+      previousMetadata,
+      blockId,
+      normalized,
+      options.reason ?? 'world',
+    );
+    const changed = chunk.setBlockMetadata(localX, worldY, localZ, normalized, options);
+    if (!changed) return false;
+    if (options.affectsLight === true) this.lightEngine.handleBlockEdit(worldX, worldY, worldZ);
+    if (options.affectsMesh ?? true) this.markBoundaryNeighboursDirty(chunkX, chunkZ, localX, localZ);
+    if (options.notifyNeighbours === true) this.enqueueMutationNotifications(mutation);
+    const registry = this.behaviourRegistry;
+    if (registry !== undefined) {
+      this.withMutationContext(mutation, () => registry.get(blockId).stateChanged?.(this.createBehaviourContext(), mutation));
     }
-    const changed = chunk.setBlockMetadata(localX, worldY, localZ, metadata, options);
-    if (changed && options.affectsLight === true) {
-      this.lightEngine.handleBlockEdit(worldX, worldY, worldZ);
-    }
-    return changed;
+    return true;
   }
 
-  public drainNeighbourNotifications(limit: number, callback: (notification: NeighbourNotification) => void): number {
-    let processed = 0;
-    while (processed < limit && this.pendingNeighbourUpdates.length > 0) {
-      const notification = this.pendingNeighbourUpdates.shift()!;
-      this.pendingNeighbourKeys.delete(this.key(notification));
-      callback(notification);
-      processed += 1;
-    }
-    return processed;
+  /** Completes ordinary neighbour work in the current simulation tick. */
+  public drainNeighbourNotifications(callback: (notification: NeighbourUpdateEvent, ctx: BlockBehaviourContext) => void): number {
+    return this.neighbourUpdates.drain((notification) => {
+      if (!this.isLoaded(notification.receiverPosition.x, notification.receiverPosition.z)) {
+        this.neighbourUpdates.recordUnloadedDiscard();
+        return;
+      }
+      this.withUpdateContext(notification.generationId, notification.depth + 1, () => {
+        callback(notification, this.createBehaviourContext());
+      });
+    });
   }
 
   public getPendingNeighbourUpdateCount(): number {
-    return this.pendingNeighbourUpdates.length;
+    return this.neighbourUpdates.size;
   }
 
-  private enqueueNeighbourNotifications(sourceX: number, sourceY: number, sourceZ: number, reason: BlockUpdateReason): void {
-    for (const [dx, dy, dz] of NEIGHBOUR_OFFSETS) {
-      const targetY = sourceY + dy;
-      if (targetY < 0 || targetY >= CHUNK_SIZE_Y) {
+  public getNeighbourQueueMetrics(): NeighbourQueueMetrics {
+    return this.neighbourUpdates.getMetrics();
+  }
+
+  public createTickBehaviourContext(
+    gameTick: number,
+    nextInt: (bound: number) => number,
+    nextLong: () => bigint,
+    events?: WorldEventQueue,
+  ): BlockBehaviourContext {
+    return {
+      world: this,
+      gameTick,
+      nextInt,
+      nextLong,
+      ...(events === undefined ? {} : { events }),
+      ...(this.powerEngine === undefined ? {} : { power: this.powerEngine }),
+    };
+  }
+
+  public createUpdateGeneration(): number {
+    return this.nextGenerationId++;
+  }
+
+  /** Synthetic current-state notification used only for targeted chunk-boundary reconciliation. */
+  public enqueueBoundaryReconciliation(receiver: BlockPosition, source: BlockPosition, generationId: number): boolean {
+    const directionToSource = ALL_BLOCK_DIRECTIONS.find((direction) => {
+      const candidate = offsetBlockPosition(receiver, direction);
+      return candidate.x === source.x && candidate.y === source.y && candidate.z === source.z;
+    });
+    if (directionToSource === undefined || !this.isLoaded(receiver.x, receiver.z)) return false;
+    const sourceState = {
+      blockId: this.getBlock(source.x, source.y, source.z),
+      metadata: this.getBlockMetadata(source.x, source.y, source.z),
+    };
+    return this.neighbourUpdates.enqueue({
+      generationId,
+      mutationId: this.nextMutationId++,
+      sourcePosition: source,
+      receiverPosition: receiver,
+      previousState: sourceState,
+      currentState: sourceState,
+      directionToSource,
+      reason: 'chunk-load',
+      depth: 0,
+    });
+  }
+
+  private createMutation(
+    sourcePosition: BlockPosition,
+    previousBlockId: BlockId,
+    previousMetadata: number,
+    currentBlockId: BlockId,
+    currentMetadata: number,
+    reason: BlockUpdateReason,
+  ): BlockMutationEvent {
+    return {
+      generationId: this.activeGenerationId ?? this.nextGenerationId++,
+      mutationId: this.nextMutationId++,
+      sourcePosition,
+      previousState: { blockId: previousBlockId, metadata: previousMetadata },
+      currentState: { blockId: currentBlockId, metadata: currentMetadata },
+      reason,
+      depth: this.activeDepth,
+    };
+  }
+
+  private enqueueMutationNotifications(mutation: BlockMutationEvent): void {
+    for (const sourceToReceiverDirection of ALL_BLOCK_DIRECTIONS) {
+      const receiver = offsetBlockPosition(mutation.sourcePosition, sourceToReceiverDirection);
+      if (receiver.y < 0 || receiver.y >= CHUNK_SIZE_Y) continue;
+      if (!this.isLoaded(receiver.x, receiver.z)) {
+        this.neighbourUpdates.recordUnloadedDiscard();
         continue;
       }
-      const notification: NeighbourNotification = {
-        sourceX,
-        sourceY,
-        sourceZ,
-        targetX: sourceX + dx,
-        targetY,
-        targetZ: sourceZ + dz,
-        reason,
-      };
-      const key = this.key(notification);
-      if (this.pendingNeighbourKeys.has(key)) {
-        continue;
-      }
-      this.pendingNeighbourKeys.add(key);
-      this.pendingNeighbourUpdates.push(notification);
+      this.neighbourUpdates.enqueue({
+        ...mutation,
+        receiverPosition: receiver,
+        directionToSource: oppositeDirection(sourceToReceiverDirection),
+      });
     }
   }
 
-  private key(notification: NeighbourNotification): string {
-    return `${notification.sourceX},${notification.sourceY},${notification.sourceZ}->${notification.targetX},${notification.targetY},${notification.targetZ}:${notification.reason}`;
+  private createBehaviourContext(player?: unknown): BlockBehaviourContext {
+    return {
+      world: this,
+      gameTick: this.getGameTick?.() ?? 0,
+      ...(this.getNextInt === undefined ? {} : { nextInt: this.getNextInt }),
+      ...(this.eventQueue === undefined ? {} : { events: this.eventQueue }),
+      ...(this.powerEngine === undefined ? {} : { power: this.powerEngine }),
+      ...(player === undefined ? {} : { player }),
+    } as BlockBehaviourContext;
+  }
+
+  private withMutationContext(mutation: BlockMutationEvent, callback: () => void): void {
+    this.withUpdateContext(mutation.generationId, mutation.depth + 1, callback);
+  }
+
+  private withUpdateContext(generationId: number, depth: number, callback: () => void): void {
+    const previousGeneration = this.activeGenerationId;
+    const previousDepth = this.activeDepth;
+    this.activeGenerationId = generationId;
+    this.activeDepth = depth;
+    try {
+      callback();
+    } finally {
+      this.activeGenerationId = previousGeneration;
+      this.activeDepth = previousDepth;
+    }
+  }
+
+  private markBoundaryNeighboursDirty(chunkX: number, chunkZ: number, localX: number, localZ: number): void {
+    for (const neighbour of getBoundaryNeighbourChunks(chunkX, chunkZ, localX, localZ)) {
+      this.chunkManager.getChunk(neighbour.chunkX, neighbour.chunkZ)?.markDirty();
+    }
+  }
+
+  private normalizeMetadata(metadata: number): number {
+    if (!Number.isFinite(metadata)) return 0;
+    return Math.max(0, Math.min(15, Math.trunc(metadata)));
   }
 }

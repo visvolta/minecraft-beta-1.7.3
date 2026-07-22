@@ -72,6 +72,7 @@ import { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import { BlockBehaviourRegistry } from '../world/BlockBehaviour';
 import { RandomTickScheduler } from '../world/ticks/RandomTickScheduler';
 import { WorldTickScheduler } from '../world/ticks/WorldTickScheduler';
+import { RedstonePowerEngine } from '../world/redstone/RedstonePowerEngine';
 import { registerFluidBehaviours } from '../world/fluid/FluidBehaviour';
 import { registerPlantBehaviours } from '../world/behaviours/PlantBehaviours';
 import { registerSupportBehaviours } from '../world/behaviours/SupportBehaviours';
@@ -206,7 +207,8 @@ export class Engine {
   private readonly naturalMobSpawner: NaturalMobSpawner;
   private readonly explosionService: ExplosionService;
   private readonly entityParticles: SimpleEntityParticleSink;
-  private lastTotalTicks = 0;
+  private simulationAccumulatorTicks = 0;
+  private simulationTick = 0;
   private readonly inventory: Inventory;
   private readonly hotbarHudRenderer:HotbarHudRenderer;
   private readonly hudRenderer:HudRenderer;
@@ -250,6 +252,7 @@ export class Engine {
   private readonly blockBehaviourRegistry: BlockBehaviourRegistry;
   private readonly fallingBlockManager: FallingBlockManager;
   private readonly worldTickScheduler: WorldTickScheduler;
+  private readonly redstonePowerEngine: RedstonePowerEngine;
   private readonly worldTime: WorldTime;
   private readonly fogController: FogController;
   private readonly skyRenderer: SkyRenderer;
@@ -348,6 +351,8 @@ export class Engine {
 
     this.lightEngine = new LightEngine(this.chunkManager, blockRegistry);
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
+    this.redstonePowerEngine = new RedstonePowerEngine(this.blockUpdateWorld, blockRegistry, this.blockBehaviourRegistry);
+    this.blockUpdateWorld.setPowerEngine(this.redstonePowerEngine);
     this.playerPhysics=new PlayerPhysics(blockRegistry,this.blockBehaviourRegistry,this.blockUpdateWorld);
     this.playerSurvivalController=new PlayerSurvivalController(this.player,this.blockUpdateWorld,blockRegistry,()=>metadata.difficulty);
     this.cameraModeController = new CameraModeController(this.input, this.blockUpdateWorld, blockRegistry);
@@ -501,6 +506,7 @@ export class Engine {
     this.blockUpdateWorld.setEventQueue(this.worldEventQueue);
     this.blockUpdateWorld.setGameTickProvider(() => this.worldTickScheduler.getGameTick());
     this.blockUpdateWorld.setNextIntProvider((bound: number) => randomTickScheduler.nextInt(bound));
+    this.chunkPersistenceQueue.setSimulationTickProvider(() => this.worldTickScheduler.getGameTick());
 
     // Register precipitation tick as a game tick callback (runs at 20 TPS)
     this.worldTickScheduler.addGameTickCallback(() => {
@@ -579,8 +585,6 @@ export class Engine {
     playerEquipment.setBreakHandler(() => {
       this.itemEntityManager.emitItemBreak(this.player.position.x, this.player.position.y, this.player.position.z);
     });
-    this.lastTotalTicks = this.worldTime.getTotalTicks();
-
     const animalInteractions=new AnimalInteractionService(this.inventory,this.itemEntityManager);this.foodUseController=new FoodUseController(this.player,this.inventory,this.input,()=>this.selectedSlot,this.mobSoundSink);
     this.interactionController = new InteractionController(
       this.input,
@@ -851,7 +855,11 @@ export class Engine {
       this.lightEngine,
       worldSeed,
       this.chunkPersistenceQueue,
-      (chunk) => this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk)
+      (chunk) => {
+        this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
+        this.worldTickScheduler.indexLoadedChunkTicks(chunk);
+        this.worldTickScheduler.reconcileChunkBoundaries(chunk);
+      },
     );
     this.deathScreen=new DeathScreen(()=>this.respawnController.request());
     this.playerDeathController=new PlayerDeathController(this.player,this.inventory,this.itemEntityManager,worldRng,this.deathScreen,()=>{this.deathSavePending=true;});
@@ -916,6 +924,10 @@ export class Engine {
         tick: this.entityManager.currentTick,
       }),
       getTickMetrics: () => this.worldTickScheduler.getMetrics(),
+      getRedstoneMetrics: () => ({
+        ...this.worldTickScheduler.getMetrics(),
+        powerQueries: this.redstonePowerEngine.getMetrics(),
+      }),
       getFallingBlockMetrics: () => ({
         simulationTick: this.fallingBlockManager.getSimulationTick(),
         interpolationAlpha: this.fallingBlockManager.getInterpolationAlpha(),
@@ -1250,37 +1262,33 @@ export class Engine {
       this.worldTime.setNight();
     }
 
-    // 3. Advance world time and world block-tick infrastructure.
+    // 3. Advance day/night time separately from the Engine-owned fixed simulation step.
     this.worldTime.update(deltaSeconds);
+    this.simulationAccumulatorTicks += deltaSeconds * 20;
+    while (this.simulationAccumulatorTicks >= 1) {
+      this.simulationTick++;
+      this.worldTickScheduler.beginTick(this.simulationTick);
 
-    const prevTicks = Math.floor(this.lastTotalTicks);
-    const currentTicks = Math.floor(this.worldTime.getTotalTicks());
-    this.lastTotalTicks = this.worldTime.getTotalTicks();
+      // Existing Player/entity systems retain their established branch, but
+      // receive the same fixed-step event as scheduled/neighbour/random ticks.
+      this.player.tickCombatState();this.playerController.tickSprintWindow();this.foodUseController.tick();
+      this.playerSurvivalController.tick();this.interactionController.breakingController.tick();
+      this.playerDeathController.update();
+      this.respawnController.update();
+      this.naturalMobSpawner.tick();
+      this.entityManager.tick();
+      this.entityManager.collideWithPlayer(this.player);
+      this.itemEntityManager.tickPickups(this.player);
+      if(this.deathSavePending){this.deathSavePending=false;void this.saveMetadata(true);}
 
-    const elapsedTicks = currentTicks - prevTicks;
-    if (elapsedTicks > 0) {
-      for (let i = 0; i < elapsedTicks; i++) {
-        // Single authoritative 20 Hz simulation clock: the Engine advances all
-        // entities, resolves player↔mob pushing (through the player's velocity,
-        // so the player's own physics still resolves terrain), then runs the
-        // item-pickup pass (which needs the player).
-        this.player.tickCombatState();this.playerController.tickSprintWindow();this.foodUseController.tick();
-        this.playerSurvivalController.tick();this.interactionController.breakingController.tick();
-        this.playerDeathController.update();
-        this.respawnController.update();
-        this.naturalMobSpawner.tick();
-        this.entityManager.tick();
-        this.entityManager.collideWithPlayer(this.player);
-        this.itemEntityManager.tickPickups(this.player);
-        if(this.deathSavePending){this.deathSavePending=false;void this.saveMetadata(true);}
-      }
+      this.worldTickScheduler.endTick();
+      this.simulationAccumulatorTicks--;
     }
     const now = performance.now();
     if (now - this.lastMetadataAutosaveMs >= METADATA_AUTOSAVE_MS) {
       this.lastMetadataAutosaveMs = now;
       void this.saveMetadata(false);
     }
-    this.worldTickScheduler.update(deltaSeconds);
     this.chestManager.update();
     this.chestRenderer.update(deltaSeconds);
     this.signTextRenderer.update();

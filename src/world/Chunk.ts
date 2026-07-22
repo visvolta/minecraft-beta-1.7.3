@@ -176,6 +176,11 @@ export class Chunk {
     return this.scheduledTicks;
   }
 
+  /** Pending ticks must be re-snapshotted with current remaining delays before streaming unload. */
+  public requireScheduledTickUnloadSnapshot(): void {
+    if (this.scheduledTicks.size > 0 && !this.isPersistenceDirty()) this.markPersistenceDirty();
+  }
+
   private markBlockDataChanged(): void {
     this.heightmap = undefined;
     this.precipitationHeightmap = undefined;

@@ -183,6 +183,7 @@ export class ChunkStreamer {
     for (const { x, z } of toUnload) {
       const chunk = this.chunkManager.getChunk(x, z);
       if (chunk) {
+        chunk.requireScheduledTickUnloadSnapshot();
         if (!chunk.isPersistenceDirty()) {
           this.chunkRenderer.removeChunkMesh(x, z);
           this.chunkManager.removeChunk(x, z);

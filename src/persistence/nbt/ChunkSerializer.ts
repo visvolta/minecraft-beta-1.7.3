@@ -47,14 +47,15 @@ export class ChunkSerializer {
     const scheduledTicksList: NbtTag[] = [];
     const ticks = chunk.getScheduledTicks().getEntries();
 
-    for (const tick of ticks) {
+    for (let order = 0; order < ticks.length; order++) {
+      const tick = ticks[order]!;
       const tickCompound = new Map<string, NbtTag>();
       tickCompound.set('x', nbt.int(tick.localX));
       tickCompound.set('y', nbt.int(tick.localY));
       tickCompound.set('z', nbt.int(tick.localZ));
       tickCompound.set('id', nbt.int(tick.blockId));
-      tickCompound.set('time', nbt.int(tick.dueTick));
-      tickCompound.set('seq', nbt.int(tick.sequence));
+      tickCompound.set('delay', nbt.int(Math.max(0, tick.dueTick - Number(lastUpdate))));
+      tickCompound.set('order', nbt.int(order));
       scheduledTicksList.push(nbt.compound(tickCompound));
     }
 
@@ -78,7 +79,7 @@ export class ChunkSerializer {
     return nbt.compound(rootMap);
   }
 
-  public static decodeChunk(compound: NbtCompound): Chunk {
+  public static decodeChunk(compound: NbtCompound, currentSimulationTick = 0): Chunk {
     const levelTag = compound.value.get('Level');
     if (levelTag?.type !== 'compound') {
       throw new Error('Chunk missing Level compound');
@@ -143,19 +144,47 @@ export class ChunkSerializer {
     chunk.setTerrainPopulated(true);
 
     const tileTicksTag = level.get('TileTicks');
+    const lastUpdateTag = level.get('LastUpdate');
+    const savedSimulationTick = lastUpdateTag?.type === 'long' ? Number(lastUpdateTag.value) : 0;
     if (tileTicksTag?.type === 'list' && tileTicksTag.elementType === 'compound') {
+      let fallbackOrder = 0;
       for (const t of tileTicksTag.value) {
-        if (t.type === 'compound') {
-          const x = t.value.get('x');
-          const y = t.value.get('y');
-          const z = t.value.get('z');
-          const id = t.value.get('id');
-          const time = t.value.get('time');
-          const seq = t.value.get('seq');
-          if (x?.type === 'int' && y?.type === 'int' && z?.type === 'int' && id?.type === 'int' && time?.type === 'int' && seq?.type === 'int') {
-            chunk.getScheduledTicks().schedule(x.value, y.value, z.value, id.value, time.value, seq.value);
-          }
+        if (t.type !== 'compound') continue;
+        const x = t.value.get('x');
+        const y = t.value.get('y');
+        const z = t.value.get('z');
+        const id = t.value.get('id');
+        const delay = t.value.get('delay');
+        const order = t.value.get('order');
+        const legacyTime = t.value.get('time');
+        const legacySequence = t.value.get('seq');
+        if (x?.type !== 'int' || y?.type !== 'int' || z?.type !== 'int' || id?.type !== 'int') continue;
+        if (x.value < 0 || x.value >= CHUNK_SIZE_X || z.value < 0 || z.value >= CHUNK_SIZE_Z || y.value < 0 || y.value >= CHUNK_SIZE_Y || id.value <= 0 || id.value > 255) continue;
+        let remainingDelay: number;
+        if (delay?.type === 'int') {
+          remainingDelay = Math.max(0, Math.min(0x7fffffff, delay.value));
+        } else if (legacyTime?.type === 'int') {
+          // Old saves wrote absolute scheduler time but usually LastUpdate=0.
+          // When a useful base exists, recover the true remaining delay;
+          // otherwise safely interpret the non-negative value as a delay.
+          remainingDelay = Math.max(0, Math.min(0x7fffffff, savedSimulationTick > 0 ? legacyTime.value - savedSimulationTick : legacyTime.value));
+        } else {
+          continue;
         }
+        const stableOrder = order?.type === 'int'
+          ? Math.max(0, order.value)
+          : legacySequence?.type === 'int'
+            ? Math.max(0, legacySequence.value)
+            : fallbackOrder;
+        chunk.getScheduledTicks().schedule(
+          x.value,
+          y.value,
+          z.value,
+          id.value,
+          Math.max(0, Math.trunc(currentSimulationTick)) + remainingDelay,
+          stableOrder,
+        );
+        fallbackOrder++;
       }
     }
 
