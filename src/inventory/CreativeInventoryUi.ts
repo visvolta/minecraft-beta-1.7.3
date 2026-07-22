@@ -8,15 +8,15 @@ const GUI_H = 136;
 const SLOT = 16;
 const STEP = 18;
 const GRID_X = 7;
-const GRID_Y = 7;
+const GRID_Y = 0;
 const GRID_COLS = 9;
 const GRID_ROWS = 5;
 const GRID_VIEW_W = GRID_COLS * STEP;
 const GRID_VIEW_H = GRID_ROWS * STEP;
-const HOTBAR_Y = 111;
+const HOTBAR_Y = 112;
 const SCROLL_X = 174;
-const SCROLL_Y = 8;
-const SCROLL_TRACK_H = 87;
+const SCROLL_Y = 1;
+const SCROLL_TRACK_H = 88;
 const THUMB_H = 15;
 const PAGE_SIZE = GRID_COLS * GRID_ROWS;
 const ASSET = '/textures/gui/creative/';
@@ -61,10 +61,10 @@ export class CreativeInventoryUi {
       const button = document.createElement('button');
       button.dataset.creativeTab = tab;
       const left = 4 + i * 29;
-      button.style.cssText = `position:absolute;left:${left}px;top:-24px;width:28px;height:32px;padding:0;border:0;background:transparent;image-rendering:pixelated;cursor:pointer`;
+      button.style.cssText = `position:absolute;left:${left}px;top:-32px;width:28px;height:32px;padding:0;border:0;background:transparent;image-rendering:pixelated;cursor:pointer`;
       const bg = document.createElement('img');
       bg.draggable = false;
-      bg.style.cssText = 'position:absolute;left:0;top:0;width:28px;height:32px;image-rendering:pixelated;pointer-events:none';
+      bg.style.cssText = 'position:absolute;left:0;image-rendering:pixelated;pointer-events:none';
       bg.className = 'creative-tab-bg';
       const icon = document.createElement('img');
       icon.src = TAB_ICONS[tab];
@@ -85,14 +85,21 @@ export class CreativeInventoryUi {
 
   private updateTabVisuals(): void {
     for (const [tab, button] of this.tabButtons) {
+      const selected = tab === this.activeTab;
       const bg = button.querySelector<HTMLImageElement>('.creative-tab-bg');
-      if (bg) bg.src = this.tabBackground(tab, tab === this.activeTab);
-      button.style.zIndex = tab === this.activeTab ? '2' : '1';
+      if (bg) {
+        bg.src = this.tabBackground(tab, selected);
+        const height = selected ? 32 : (tab === 'building' ? 27 : 25);
+        bg.style.top = `${32 - height}px`;
+        bg.style.width = '28px';
+        bg.style.height = `${height}px`;
+      }
+      button.style.zIndex = selected ? '2' : '1';
     }
   }
 
   private createGrid(): void {
-    this.gridViewport.style.cssText = `position:absolute;left:${GRID_X}px;top:${GRID_Y}px;width:${GRID_VIEW_W}px;height:${GRID_VIEW_H}px;overflow:hidden;background:url('${ASSET}empty_grid.png') 0 0 repeat;image-rendering:pixelated`;
+    this.gridViewport.style.cssText = `position:absolute;left:${GRID_X}px;top:${GRID_Y}px;width:${GRID_VIEW_W}px;height:${GRID_VIEW_H}px;overflow:hidden;image-rendering:pixelated`;
     this.windowEl.append(this.gridViewport);
     for (let i = 0; i < PAGE_SIZE; i++) {
       const slot = this.createSlot(`source-${i}`);

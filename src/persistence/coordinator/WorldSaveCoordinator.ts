@@ -1,4 +1,4 @@
-import { decodeWorldMetadata, encodeWorldMetadata, type WorldMetadata, WORLD_METADATA_VERSION } from '../metadata/WorldMetadata';
+import { decodeWorldMetadata, encodeWorldMetadata, GENERATOR_VERSION, SAVE_VERSION, type WorldMetadata, WORLD_METADATA_VERSION } from '../metadata/WorldMetadata';
 import type { WorldStorage } from '../storage/WorldStorage';
 import type { ChunkPersistenceQueue } from '../queue/ChunkPersistenceQueue';
 import type { ChunkManager } from '../../world/ChunkManager';
@@ -35,7 +35,7 @@ export class WorldSaveCoordinator {
         await this.chunkQueue.saveAllDirty(this.chunkManager);
       }
 
-      this.metadata={...this.metadata,lastPlayedMs:Date.now()};
+      const now=Date.now();this.metadata={...this.metadata,lastPlayedMs:now,lastPlayedAt:now};
       await this.storage.put(this.metadata.worldId,KEY,encodeWorldMetadata(this.metadata));
       this.dirty=false;
       this.saves++;
@@ -47,4 +47,4 @@ export class WorldSaveCoordinator {
     }
   }
 }
-export function createDefaultMetadata():WorldMetadata{return{formatVersion:WORLD_METADATA_VERSION,worldId:'default',name:'Default World',seed:'-47',spawn:{x:8,y:140,z:8},player:{x:8,y:140,z:8,yaw:0,pitch:0},playerHealth:{health:20,maxHealth:20},playerFood:{hunger:20,saturation:5,exhaustion:0},gameMode:GameMode.Creative,timeTicks:0,difficulty:Difficulty.Normal,weather:{raining:false,thundering:false,rainTime:0,thunderTime:0},autosave:{enabled:true,intervalSeconds:30},lastPlayedMs:0};}
+export function createDefaultMetadata():WorldMetadata{return{formatVersion:WORLD_METADATA_VERSION,worldId:'default',name:'Default World',displayName:'Default World',seed:'-47',seedText:'-47',createdAt:0,lastPlayedAt:0,saveVersion:SAVE_VERSION,generatorVersion:GENERATOR_VERSION,spawn:{x:8,y:140,z:8},player:{x:8,y:140,z:8,yaw:0,pitch:0},playerHealth:{health:20,maxHealth:20},playerFood:{hunger:20,saturation:5,exhaustion:0},gameMode:GameMode.Creative,timeTicks:0,difficulty:Difficulty.Normal,weather:{raining:false,thundering:false,rainTime:0,thunderTime:0},autosave:{enabled:true,intervalSeconds:30},lastPlayedMs:0};}

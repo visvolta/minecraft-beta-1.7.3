@@ -607,7 +607,7 @@ export class Engine {
     this.inventoryController.setDisplayNameResolver(displayNameResolver as any);
     this.inventoryInputController = new InventoryInputController(this.inventoryController, this.hotbarHudRenderer.getLayout());
     this.creativeInventoryUi = new CreativeInventoryUi(this.hotbarHudRenderer.getSlotContentRenderer());
-    this.creativeInventoryController = new CreativeInventoryController(this.creativeInventoryUi, this.inventoryController, blockRegistry, this.hotbarHudRenderer.getSlotContentRenderer(), this.inventoryTooltip, displayNameResolver as (stack: ItemStack) => string);
+    this.creativeInventoryController = new CreativeInventoryController(this.creativeInventoryUi, this.inventory, blockRegistry, this.hotbarHudRenderer.getSlotContentRenderer(), this.inventoryTooltip, displayNameResolver as (stack: ItemStack) => string, () => this.inventoryController.open(this.hotbarHudRenderer.getLayout().scale));
 
     this.craftingTableUi = new CraftingTableUi();
     this.craftingTableController = new CraftingTableController(
@@ -861,6 +861,11 @@ export class Engine {
     this.playerDeathController.update();
     this.lastFrameTimeMs = null;
     this.animationFrameId = requestAnimationFrame(this.tick);
+  }
+
+  public async saveAndStop(): Promise<void> {
+    await this.saveMetadata(true);
+    this.stop();
   }
 
   public stop(): void {

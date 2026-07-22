@@ -4,6 +4,8 @@ import { Difficulty, isDifficulty } from '../../world/Difficulty';
 import { GameMode, parseGameMode } from '../../player/GameMode';
 
 export const WORLD_METADATA_VERSION = 1;
+export const SAVE_VERSION = 1;
+export const GENERATOR_VERSION = 'beta-browser-1';
 
 export interface SerializedItemStack {
   readonly id: number | string;
@@ -24,7 +26,13 @@ export interface WorldMetadata {
   readonly formatVersion: number;
   readonly worldId: string;
   readonly name: string;
+  readonly displayName?: string;
   readonly seed: string;
+  readonly seedText?: string;
+  readonly createdAt?: number;
+  readonly lastPlayedAt?: number;
+  readonly saveVersion?: number;
+  readonly generatorVersion?: string;
   readonly spawn: { readonly x: number; readonly y: number; readonly z: number };
   /** Current player transform; distinct from configured world spawn. */
   readonly player: { readonly x: number; readonly y: number; readonly z: number; readonly yaw: number; readonly pitch: number };
@@ -47,6 +55,12 @@ export function validateWorldMetadata(value: unknown): WorldMetadata {
   const data=value as Record<string,unknown>; const req=(key:string)=>{if(!(key in data))throw new Error(`World metadata missing ${key}`);return data[key];};
   if(data.formatVersion!==WORLD_METADATA_VERSION)throw new Error(`Unsupported world metadata version: ${String(data.formatVersion)}`);
   if(typeof req('worldId')!=='string'||typeof req('name')!=='string'||typeof req('seed')!=='string')throw new Error('World metadata identity is invalid');
+  if (typeof data.displayName !== 'string') data.displayName = data.name;
+  if (typeof data.seedText !== 'string') data.seedText = data.seed;
+  if (!Number.isFinite(data.createdAt)) data.createdAt = Number.isFinite(data.lastPlayedMs) ? data.lastPlayedMs : Date.now();
+  if (!Number.isFinite(data.lastPlayedAt)) data.lastPlayedAt = Number.isFinite(data.lastPlayedMs) ? data.lastPlayedMs : 0;
+  if (!Number.isFinite(data.saveVersion)) data.saveVersion = SAVE_VERSION;
+  if (typeof data.generatorVersion !== 'string') data.generatorVersion = GENERATOR_VERSION;
   try { BigInt(data.seed as string); } catch { throw new Error('World metadata seed is not a decimal bigint'); }
   const spawn=req('spawn') as Record<string,unknown>;
   // Version-1 metadata written before player state existed is migrated from spawn.

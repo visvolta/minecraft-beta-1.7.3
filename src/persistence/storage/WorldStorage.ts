@@ -2,6 +2,8 @@
 export interface WorldStorage {
   get(worldId: string, key: string): Promise<Uint8Array | undefined>;
   put(worldId: string, key: string, value: Uint8Array): Promise<void>;
+  delete?(worldId: string, key: string): Promise<void>;
+  deleteWorld?(worldId: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -12,5 +14,7 @@ export class MemoryWorldStorage implements WorldStorage {
     return value?.slice();
   }
   public async put(worldId: string, key: string, value: Uint8Array): Promise<void> { this.records.set(`${worldId}/${key}`, value.slice()); }
+  public async delete(worldId: string, key: string): Promise<void> { this.records.delete(`${worldId}/${key}`); }
+  public async deleteWorld(worldId: string): Promise<void> { for (const key of [...this.records.keys()]) if (key.startsWith(`${worldId}/`)) this.records.delete(key); }
   public async close(): Promise<void> {}
 }
