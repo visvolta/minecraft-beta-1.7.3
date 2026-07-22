@@ -1,4 +1,5 @@
 import type { BlockId } from '../blocks/BlockId';
+import { BlockIds } from '../blocks/BlockId';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { BlockBehaviourContext, BlockBehaviourRegistry } from './BlockBehaviour';
 import { ALL_BLOCK_DIRECTIONS, offsetBlockPosition, oppositeDirection, type BlockPosition } from './BlockDirections';
@@ -6,6 +7,7 @@ import type { ChunkManager } from './ChunkManager';
 import { CHUNK_SIZE_Y } from './chunkConstants';
 import type { WorldEventQueue } from './events/WorldEventQueue';
 import type { LightEngine } from './generation/lighting/LightEngine';
+import type { EntityManager } from '../entities/core/EntityManager';
 import { getBoundaryNeighbourChunks, worldToChunkLocal } from './worldToChunkCoords';
 import type { RedstonePowerEngine } from './redstone/RedstonePowerEngine';
 import type { BlockMutationEvent, NeighbourUpdateEvent } from './updates/BlockMutation';
@@ -35,6 +37,7 @@ export class BlockUpdateWorld {
   private scheduleCallback: ((x: number, y: number, z: number, blockId: BlockId, delayTicks: number) => boolean) | undefined;
   private behaviourRegistry: BlockBehaviourRegistry | undefined;
   private eventQueue: WorldEventQueue | undefined;
+  private entityManager: EntityManager | undefined;
   private powerEngine: RedstonePowerEngine | undefined;
   private getGameTick: (() => number) | undefined;
   private getNextInt: ((bound: number) => number) | undefined;
@@ -62,6 +65,10 @@ export class BlockUpdateWorld {
 
   public setEventQueue(queue: WorldEventQueue): void {
     this.eventQueue = queue;
+  }
+
+  public setEntityManager(manager: EntityManager): void {
+    this.entityManager = manager;
   }
 
   public setPowerEngine(powerEngine: RedstonePowerEngine): void {
@@ -207,6 +214,43 @@ export class BlockUpdateWorld {
     return true;
   }
 
+  public setBlockMetadataWithNotify(worldX: number, worldY: number, worldZ: number, metadata: number, options: SetBlockMetadataOptions = {}): boolean {
+    return this.setBlockMetadata(worldX, worldY, worldZ, metadata, { ...options, notifyNeighbours: true });
+  }
+
+  public setBlockWithNotify(worldX: number, worldY: number, worldZ: number, blockId: BlockId, options: SetBlockOptions = {}): boolean {
+    return this.setBlock(worldX, worldY, worldZ, blockId, { ...options, notifyNeighbours: true });
+  }
+
+  public notifyNeighborsOfStateChange(worldX: number, worldY: number, worldZ: number, sourceBlockId: BlockId): void {
+    const mutation = this.createMutation(
+      { x: worldX, y: worldY, z: worldZ },
+      sourceBlockId,
+      this.getBlockMetadata(worldX, worldY, worldZ),
+      sourceBlockId,
+      this.getBlockMetadata(worldX, worldY, worldZ),
+      'neighbour'
+    );
+    this.enqueueMutationNotifications(mutation);
+  }
+
+  public markDirty(worldX: number, worldZ: number): void {
+    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(worldX, worldZ);
+    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+    if (chunk) {
+      chunk.markDirty();
+      this.markBoundaryNeighboursDirty(chunkX, chunkZ, localX, localZ);
+    }
+  }
+
+  public dropBlockAsItem(worldX: number, worldY: number, worldZ: number, blockId: BlockId): void {
+    if (this.eventQueue && this.getGameTick) {
+      if (blockId === BlockIds.RedstoneWire) {
+        this.eventQueue.enqueueItemDrop(this.getGameTick(), worldX, worldY, worldZ, 331, 0, 1, 'support-loss');
+      }
+    }
+  }
+
   /** Completes ordinary neighbour work in the current simulation tick. */
   public drainNeighbourNotifications(callback: (notification: NeighbourUpdateEvent, ctx: BlockBehaviourContext) => void): number {
     return this.neighbourUpdates.drain((notification) => {
@@ -313,6 +357,7 @@ export class BlockUpdateWorld {
       gameTick: this.getGameTick?.() ?? 0,
       ...(this.getNextInt === undefined ? {} : { nextInt: this.getNextInt }),
       ...(this.eventQueue === undefined ? {} : { events: this.eventQueue }),
+      ...(this.entityManager === undefined ? {} : { entities: this.entityManager }),
       ...(this.powerEngine === undefined ? {} : { power: this.powerEngine }),
       ...(player === undefined ? {} : { player }),
     } as BlockBehaviourContext;

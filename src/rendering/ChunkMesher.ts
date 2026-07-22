@@ -16,6 +16,7 @@ import {
   CHUNK_SIZE_Y,
   CHUNK_SIZE_Z,
 } from '../world/chunkConstants';
+import { getWireConnections, WireConnection, getRedstoneColor } from '../world/redstone/RedstoneWireConnectivity';
 import { clampedVisibility, getLightBrightness } from './voxelLighting';
 import { isFallingFluid } from '../world/fluid/FluidMetadata';
 import { FluidTextureKind } from '../world/fluid/FluidTextureKind';
@@ -905,6 +906,10 @@ export class ChunkMesher {
               buffers.pushFace(face, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
             }
           } else if (renderType === 'cutout') {
+            if (blockId === BlockIds.RedstoneTorchOff || blockId === BlockIds.RedstoneTorchOn || blockId === BlockIds.Torch) {
+              this.buildTorch(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
             if (blockId === BlockIds.Slab) {
               this.buildSlab(buffers, chunk, x, y, z, blockId, definition);
               continue;
@@ -962,6 +967,8 @@ export class ChunkMesher {
               const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
               buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
             }
+          } else if (renderType === 'redstone_wire') {
+            this.buildRedstoneWire(buffers, chunk, x, y, z, blockId, definition);
           } else if (renderType === 'cross' && blockId !== BlockIds.Fire) {
             const textureName = resolveBlockTexture(definition, 'side');
             const uvRect = this.getSafeUvRect(textureName);
@@ -1640,6 +1647,189 @@ export class ChunkMesher {
       return false;
     }
     return definition.renderType === 'opaque';
+  }
+
+  private buildRedstoneWire(
+    buffers: MeshBuffers,
+    chunk: Chunk,
+    x: number,
+    y: number,
+    z: number,
+    _blockId: BlockId,
+    _definition: BlockDefinition,
+  ): void {
+    const metadata = chunk.getBlockMetadata(x, y, z);
+    const tint = getRedstoneColor(metadata);
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    
+    const connections = getWireConnections(
+      {
+        getBlock: (bx, by, bz) => this.getBlockAt(chunk, bx, by, bz),
+        isNormalCube: (bx, by, bz) => {
+            const id = this.getBlockAt(chunk, bx, by, bz);
+            const def = this.blockRegistry.getById(id);
+            return def !== undefined && def.solid && !def.transparent && def.renderType === 'opaque';
+        },
+      },
+      x, y, z,
+      (id) => {
+        if (id === BlockIds.RedstoneWire) return true;
+        // Check for other connectable types by ID or renderType heuristic
+        return id === BlockIds.RedstoneTorch || id === BlockIds.Lever || 
+               id === BlockIds.StoneButton || id === BlockIds.StonePressurePlate ||
+               id === BlockIds.WoodPressurePlate;
+      }
+    );
+
+    const isN = connections.north !== WireConnection.NONE;
+    const isS = connections.south !== WireConnection.NONE;
+    const isE = connections.east !== WireConnection.NONE;
+    const isW = connections.west !== WireConnection.NONE;
+
+    // Beta wire orientation and shape logic
+    let straightPass = 0;
+    if ((isW || isE) && !isN && !isS) straightPass = 1; // East-West
+    if ((isN || isS) && !isW && !isE) straightPass = 2; // North-South
+
+    const textureName = straightPass !== 0 ? 'redstone_dust_line' : 'redstone_dust_cross';
+    const uvRect = this.getSafeUvRect(textureName);
+    if (!uvRect) return;
+
+    let minX = 0, maxX = 1, minZ = 0, maxZ = 1;
+    let u0 = uvRect.u0, v0 = uvRect.v0, u1 = uvRect.u1, v1 = uvRect.v1;
+
+    // Cropping logic for cross texture in Beta
+    if (straightPass === 0 && (isN || isS || isE || isW)) {
+        if (!isW) { minX += 0.3125; u0 += (u1 - u0) * 0.3125; }
+        if (!isE) { maxX -= 0.3125; u1 -= (u1 - u0) * 0.3125; } // Wait cropping math needs to be careful
+        if (!isN) { minZ += 0.3125; v0 += (v1 - v0) * 0.3125; }
+        if (!isS) { maxZ -= 0.3125; v1 -= (v1 - v0) * 0.3125; }
+    }
+
+    const h = 0.015625;
+    const floorVertices: [Corner, Corner, Corner, Corner] = [
+        [minX, h, maxZ], [maxX, h, maxZ], [maxX, h, minZ], [minX, h, minZ]
+    ];
+
+    const rotate = straightPass === 1; // Rotate line for East-West
+    const finalUvs: [number, number, number, number, number, number, number, number] = rotate 
+        ? [u1, v0, u1, v1, u0, v1, u0, v0] 
+        : [u0, v1, u1, v1, u1, v0, u0, v0];
+
+    buffers.pushQuad(
+        floorVertices.map(v => [x + v[0], y + v[1], z + v[2]]) as any,
+        [0, 1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, finalUvs
+    );
+
+    // Vertical climbing strips
+    const lineRect = this.getSafeUvRect('redstone_dust_line');
+    if (lineRect) {
+        const lu0 = lineRect.u0, lv0 = lineRect.v0, lu1 = lineRect.u1, lv1 = lineRect.v1;
+        const vUvs: [number, number, number, number, number, number, number, number] = [lu0, lv1, lu1, lv1, lu1, lv0, lu0, lv0];
+
+        if (connections.north === WireConnection.UP) {
+            buffers.pushQuad(
+                [[x, y + 1, z + h], [x + 1, y + 1, z + h], [x + 1, y, z + h], [x, y, z + h]],
+                [0, 0, 1], lineRect, tint, light, 1, FluidTextureKind.WaterStill, vUvs
+            );
+        }
+        if (connections.south === WireConnection.UP) {
+            buffers.pushQuad(
+                [[x + 1, y + 1, z + 1 - h], [x, y + 1, z + 1 - h], [x, y, z + 1 - h], [x + 1, y, z + 1 - h]],
+                [0, 0, -1], lineRect, tint, light, 1, FluidTextureKind.WaterStill, vUvs
+            );
+        }
+        if (connections.west === WireConnection.UP) {
+            buffers.pushQuad(
+                [[x + h, y + 1, z + 1], [x + h, y + 1, z], [x + h, y, z], [x + h, y, z + 1]],
+                [1, 0, 0], lineRect, tint, light, 1, FluidTextureKind.WaterStill, vUvs
+            );
+        }
+        if (connections.east === WireConnection.UP) {
+            buffers.pushQuad(
+                [[x + 1 - h, y + 1, z], [x + 1 - h, y + 1, z + 1], [x + 1 - h, y, z + 1], [x + 1 - h, y, z]],
+                [-1, 0, 0], lineRect, tint, light, 1, FluidTextureKind.WaterStill, vUvs
+            );
+        }
+    }
+  }
+
+  private buildTorch(
+    buffers: MeshBuffers,
+    chunk: Chunk,
+    x: number,
+    y: number,
+    z: number,
+    _blockId: BlockId,
+    definition: BlockDefinition,
+  ): void {
+    const metadata = chunk.getBlockMetadata(x, y, z);
+    const textureName = resolveBlockTexture(definition, 'side') || 'torch_on';
+    const uvRect = this.getSafeUvRect(textureName);
+    if (!uvRect) return;
+
+    const tint: [number, number, number] = [1, 1, 1];
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+
+    let dx = 0, dz = 0;
+    let ox = 0, oz = 0;
+    let oy = 0;
+
+    const tilt = 0.4;
+    const shift = 0.5 - tilt;
+    const yShift = 0.2;
+
+    if (metadata === 1) { dx = -tilt; ox = -shift; oy = yShift; }
+    else if (metadata === 2) { dx = tilt; ox = shift; oy = yShift; }
+    else if (metadata === 3) { dz = -tilt; oz = -shift; oy = yShift; }
+    else if (metadata === 4) { dz = tilt; oz = shift; oy = yShift; }
+
+    const u0 = uvRect.u0, v0 = uvRect.v0, u1 = uvRect.u1, v1 = uvRect.v1;
+    const w = 0.0625;
+
+    const cx = x + 0.5, cz = z + 0.5;
+    const px = cx + ox, pz = cz + oz;
+
+    // Top face
+    const th = 0.625;
+    const topV = [
+        [px - w + dx * (1 - th), y + th + oy, pz - w + dz * (1 - th)],
+        [px - w + dx * (1 - th), y + th + oy, pz + w + dz * (1 - th)],
+        [px + w + dx * (1 - th), y + th + oy, pz + w + dz * (1 - th)],
+        [px + w + dx * (1 - th), y + th + oy, pz - w + dz * (1 - th)]
+    ] as const;
+    const tu0 = u0 + (u1 - u0) * 7/16, tv0 = v0 + (v1 - v0) * 6/16, tu1 = u0 + (u1 - u0) * 9/16, tv1 = v0 + (v1 - v0) * 8/16;
+    buffers.pushQuad(topV as any, [0, 1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, [tu0, tv1, tu0, tv0, tu1, tv0, tu1, tv1]);
+
+    // Side faces (1.0 height quads, tilted)
+    // -X face
+    buffers.pushQuad([
+        [px - w, y + 1 + oy, pz + 0.5],
+        [px - w + dx, y + oy, pz + 0.5 + dz],
+        [px - w + dx, y + oy, pz - 0.5 + dz],
+        [px - w, y + 1 + oy, pz - 0.5]
+    ], [-1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
+    // +X face
+    buffers.pushQuad([
+        [px + w, y + 1 + oy, pz - 0.5],
+        [px + w + dx, y + oy, pz - 0.5 + dz],
+        [px + w + dx, y + oy, pz + 0.5 + dz],
+        [px + w, y + 1 + oy, pz + 0.5]
+    ], [1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
+    // -Z face
+    buffers.pushQuad([
+        [px - 0.5, y + 1 + oy, pz - w],
+        [px + 0.5, y + 1 + oy, pz - w],
+        [px + 0.5 + dx, y + oy, pz - w + dz],
+        [px - 0.5 + dx, y + oy, pz - w + dz]
+    ], [0, 0, -1], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
+    // +Z face
+    buffers.pushQuad([
+        [px - 0.5, y + 1 + oy, pz + w],
+        [px - 0.5 + dx, y + oy, pz + w + dz],
+        [px + 0.5 + dx, y + oy, pz + w + dz],
+        [px + 0.5, y + 1 + oy, pz + w]
+    ], [0, 0, 1], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
   }
 
   private buildSlab(

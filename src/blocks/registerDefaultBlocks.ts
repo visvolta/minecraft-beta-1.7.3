@@ -628,10 +628,23 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.Rail, 'rail', 'Rail', { all: 'rail_normal' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.PoweredRail, 'powered_rail', 'Powered Rail', { all: 'rail_golden' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.DetectorRail, 'detector_rail', 'Detector Rail', { all: 'rail_detector' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
-  registerSimple(BlockIds.RedstoneTorch, 'redstone_torch', 'Redstone Torch', { all: 'redstone_torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', lightEmission: 7 });
+  registerSimple(BlockIds.RedstoneTorchOn, 'redstone_torch_on', 'Redstone Torch', { all: 'redstone_torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', lightEmission: 7 });
+  registerSimple(BlockIds.RedstoneTorchOff, 'redstone_torch_off', 'Redstone Torch (Off)', { all: 'redstone_torch_off' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross' });
   registerSimple(BlockIds.RedstoneBlock, 'redstone_block', 'Redstone Block', { all: 'redstone_block' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.RedstoneLampOff, 'redstone_lamp_off', 'Redstone Lamp', { all: 'redstone_lamp_off' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.RedstoneLampOn, 'redstone_lamp_on', 'Lit Redstone Lamp', { all: 'redstone_lamp_on' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: 15 });
+
+  registerBlock(registry, {
+    id: BlockIds.RedstoneWire,
+    name: 'redstone_wire',
+    displayName: 'Redstone Wire',
+    solid: false,
+    transparent: true,
+    replaceable: true,
+    blocksWeather: false,
+    textures: { all: 'redstone_dust_line' },
+    renderType: 'redstone_wire',
+  });
 
   // Fire-related blocks for Stage 2/3 fire system.
   // Full opaque cubes that participate in flammability:
@@ -709,7 +722,8 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Glass]: 0.3,
     [BlockIds.SnowBlock]: 0.2,
     [BlockIds.Torch]: 0.0,
-    [BlockIds.RedstoneTorch]: 0.0,
+    [BlockIds.RedstoneTorchOn]: 0.0,
+    [BlockIds.RedstoneTorchOff]: 0.0,
     [BlockIds.Ladder]: 0.4,
     [BlockIds.SignPost]: 1.0,
     [BlockIds.WallSign]: 1.0,
@@ -726,6 +740,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.RedstoneBlock]: 5.0,
     [BlockIds.RedstoneLampOff]: 0.3,
     [BlockIds.RedstoneLampOn]: 0.3,
+    [BlockIds.RedstoneWire]: 0.0,
     [BlockIds.Planks]: 2.0,
     [BlockIds.CraftingTable]: 2.5,
     [BlockIds.Furnace]: 3.5,

@@ -1,122 +1,69 @@
-import { BlockIds, type BlockId } from '../../blocks/BlockId';
-import type { BlockBehaviour, BlockBehaviourContext } from '../BlockBehaviour';
-import type { BlockBehaviourRegistry } from '../BlockBehaviour';
-import { AABB } from '../../physics/AABB';
+import { BlockIds } from '../../blocks/BlockId';
+import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
+import type { PowerQueryContext, RedstonePower } from '../redstone/RedstonePower';
+import { FaceDirection } from '../../blocks/BlockFace';
 
 export class ButtonBehaviour implements BlockBehaviour {
-  public canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
-    const isSolid = (dx: number, dz: number) => {
-      const def = ctx.world['blockRegistry']?.getById(ctx.world.getBlock(x + dx, y, z + dz));
-      return def ? def.solid && def.renderType === 'opaque' : false;
-    };
-    return isSolid(-1, 0) || isSolid(1, 0) || isSolid(0, -1) || isSolid(0, 1);
-  }
+    public readonly canProvidePower = true;
 
-  public onPlaced(ctx: BlockBehaviourContext, x: number, y: number, z: number, _blockId: BlockId): void {
-    const metaAlreadySet = ctx.world.getBlockMetadata(x, y, z);
-    if (metaAlreadySet !== 0) return;
+    public onInteract(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+        const meta = ctx.world.getBlockMetadata(x, y, z);
+        if (meta & 8) return true; // Already pressed
 
-    const player = (ctx as any).player;
-    if (!player) return;
-
-    let yaw = Math.atan2(-player.lookDirection.x, -player.lookDirection.z);
-    while (yaw < 0) yaw += Math.PI * 2;
-    while (yaw >= Math.PI * 2) yaw -= Math.PI * 2;
-
-    let meta = 0;
-    if (yaw >= Math.PI * 0.25 && yaw < Math.PI * 0.75) meta = 2; // -X
-    else if (yaw >= Math.PI * 0.75 && yaw < Math.PI * 1.25) meta = 4; // -Z
-    else if (yaw >= Math.PI * 1.25 && yaw < Math.PI * 1.75) meta = 1; // +X
-    else meta = 3; // +Z
-
-    const isSolid = (dx: number, dz: number) => {
-      const def = ctx.world['blockRegistry']?.getById(ctx.world.getBlock(x + dx, y, z + dz));
-      return def ? def.solid && def.renderType === 'opaque' : false;
-    };
-
-    if (meta === 1 && !isSolid(-1, 0)) meta = 0;
-    if (meta === 2 && !isSolid(1, 0)) meta = 0;
-    if (meta === 3 && !isSolid(0, -1)) meta = 0;
-    if (meta === 4 && !isSolid(0, 1)) meta = 0;
-
-    if (meta === 0) {
-      if (isSolid(-1, 0)) meta = 1;
-      else if (isSolid(1, 0)) meta = 2;
-      else if (isSolid(0, -1)) meta = 3;
-      else if (isSolid(0, 1)) meta = 4;
+        const orientation = meta & 7;
+        ctx.world.setBlockMetadataWithNotify(x, y, z, orientation | 8);
+        this.notifyNeighbors(ctx, x, y, z, orientation);
+        ctx.world.scheduleBlockTick(x, y, z, BlockIds.StoneButton, 20);
+        return true;
     }
 
-    ctx.world.setBlockMetadata(x, y, z, meta, { affectsMesh: true, affectsLight: false });
-  }
+    public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+        const meta = ctx.world.getBlockMetadata(x, y, z);
+        const orientation = meta & 7;
+        let drop = false;
+        if (orientation === 1 && !ctx.world.isNormalCube(x - 1, y, z)) drop = true;
+        if (orientation === 2 && !ctx.world.isNormalCube(x + 1, y, z)) drop = true;
+        if (orientation === 3 && !ctx.world.isNormalCube(x, y, z - 1)) drop = true;
+        if (orientation === 4 && !ctx.world.isNormalCube(x, y, z + 1)) drop = true;
 
-  public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number, _sourceX: number, _sourceY: number, _sourceZ: number): void {
-    const meta = ctx.world.getBlockMetadata(x, y, z);
-    const attachMeta = meta & 7;
-    let dx = 0, dz = 0;
-    if (attachMeta === 1) dx = -1;
-    if (attachMeta === 2) dx = 1;
-    if (attachMeta === 3) dz = -1;
-    if (attachMeta === 4) dz = 1;
-
-    const def = ctx.world['blockRegistry']?.getById(ctx.world.getBlock(x + dx, y, z + dz));
-    if (!def || !def.solid || def.renderType !== 'opaque') {
-      ctx.world.setBlock(x, y, z, BlockIds.Air, { reason: 'neighbour', notifyNeighbours: true, updateLighting: true });
-      ctx.events?.enqueueBlockDrop(ctx.gameTick, 0, BlockIds.StoneButton, meta, x, y, z, 'placement_failed');
-    }
-  }
-
-  public onInteract(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
-    const meta = ctx.world.getBlockMetadata(x, y, z);
-    if ((meta & 8) !== 0) return true; // Already pressed
-
-    ctx.world.setBlockMetadata(x, y, z, meta | 8, { affectsMesh: true, affectsLight: false });
-    ctx.world.scheduleBlockTick(x, y, z, BlockIds.StoneButton, 20); // 1 second
-    return true;
-  }
-
-  public scheduledTick(ctx: BlockBehaviourContext, x: number, y: number, z: number, _blockId: BlockId): void {
-    const meta = ctx.world.getBlockMetadata(x, y, z);
-    if ((meta & 8) !== 0) {
-      ctx.world.setBlockMetadata(x, y, z, meta & ~8, { affectsMesh: true, affectsLight: false });
-    }
-  }
-
-  public getBoundingBoxes(ctx: BlockBehaviourContext, x: number, y: number, z: number, type: 'collision' | 'selection' | 'interaction'): AABB[] | undefined {
-    if (type === 'collision') return [];
-
-    const meta = ctx.world.getBlockMetadata(x, y, z);
-    const pressed = (meta & 8) !== 0;
-    const dir = meta & 7;
-
-    const depth = pressed ? 1/16 : 2/16;
-    const w = 6/16;
-    const h = 4/16;
-    const d = depth;
-
-    // Default centered
-    let minX = 0.5 - w/2;
-    let maxX = 0.5 + w/2;
-    let minY = 0.5 - h/2;
-    let maxY = 0.5 + h/2;
-    let minZ = 0.5 - w/2;
-    let maxZ = 0.5 + w/2;
-
-    if (dir === 1) { // Attached to West, facing East
-      minX = 0; maxX = d;
-      minZ = 0.5 - w/2; maxZ = 0.5 + w/2;
-    } else if (dir === 2) { // Attached to East, facing West
-      minX = 1 - d; maxX = 1;
-      minZ = 0.5 - w/2; maxZ = 0.5 + w/2;
-    } else if (dir === 3) { // Attached to North, facing South
-      minX = 0.5 - w/2; maxX = 0.5 + w/2;
-      minZ = 0; maxZ = d;
-    } else if (dir === 4) { // Attached to South, facing North
-      minX = 0.5 - w/2; maxX = 0.5 + w/2;
-      minZ = 1 - d; maxZ = 1;
+        if (drop) {
+            ctx.world.dropBlockAsItem(x, y, z, BlockIds.StoneButton);
+            ctx.world.setBlockWithNotify(x, y, z, BlockIds.Air);
+        }
     }
 
-    return [new AABB(x + minX, y + minY, z + minZ, x + maxX, y + maxY, z + maxZ)];
-  }
+    public scheduledTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+        const meta = ctx.world.getBlockMetadata(x, y, z);
+        if (meta & 8) {
+            const orientation = meta & 7;
+            ctx.world.setBlockMetadataWithNotify(x, y, z, orientation);
+            this.notifyNeighbors(ctx, x, y, z, orientation);
+        }
+    }
+
+    private notifyNeighbors(ctx: BlockBehaviourContext, x: number, y: number, z: number, orientation: number): void {
+        ctx.world.notifyNeighborsOfStateChange(x, y, z, BlockIds.StoneButton);
+        if (orientation === 1) ctx.world.notifyNeighborsOfStateChange(x - 1, y, z, BlockIds.StoneButton);
+        else if (orientation === 2) ctx.world.notifyNeighborsOfStateChange(x + 1, y, z, BlockIds.StoneButton);
+        else if (orientation === 3) ctx.world.notifyNeighborsOfStateChange(x, y, z - 1, BlockIds.StoneButton);
+        else if (orientation === 4) ctx.world.notifyNeighborsOfStateChange(x, y, z + 1, BlockIds.StoneButton);
+    }
+
+    public getWeakPower(ctx: PowerQueryContext): RedstonePower {
+        return (ctx.sourceMetadata & 8) ? 15 as RedstonePower : 0 as RedstonePower;
+    }
+
+    public getStrongPower(ctx: PowerQueryContext): RedstonePower {
+        if (!(ctx.sourceMetadata & 8)) return 0 as RedstonePower;
+        const orientation = ctx.sourceMetadata & 7;
+        
+        if (orientation === 1 && ctx.directionToSource === FaceDirection.EAST) return 15 as RedstonePower;
+        if (orientation === 2 && ctx.directionToSource === FaceDirection.WEST) return 15 as RedstonePower;
+        if (orientation === 3 && ctx.directionToSource === FaceDirection.SOUTH) return 15 as RedstonePower;
+        if (orientation === 4 && ctx.directionToSource === FaceDirection.NORTH) return 15 as RedstonePower;
+
+        return 0 as RedstonePower;
+    }
 }
 
 export function registerButtonBehaviour(registry: BlockBehaviourRegistry): void {

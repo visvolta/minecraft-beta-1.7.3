@@ -85,11 +85,14 @@ export const BlockIds = {
   StoneButton: 77,
   Lever: 69,
   StonePressurePlate: 70,
+  WoodPressurePlate: 72,
   WoodDoor: 64,
-  RedstoneTorch: 76,
+  RedstoneTorchOff: 75,
+  RedstoneTorchOn: 76,
   RedstoneBlock: 152,
   RedstoneLampOff: 123,
   RedstoneLampOn: 124,
+  RedstoneWire: 55,
   /** Beta 1.7.3 rails. */
   Rail: 66,
   PoweredRail: 27,
@@ -121,7 +124,6 @@ export const BlockIds = {
   /** Beta 1.7.3 glass (transparent solid). */
   Glass: 20,
   IronDoor: 71,
-  WoodPressurePlate: 72,
   Trapdoor: 96,
   /** Temporary Birch Leaves for Stage 5 species validation (temp ID, see SpruceLeaves). */
   BirchLeaves: 250,

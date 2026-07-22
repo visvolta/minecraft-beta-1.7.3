@@ -69,7 +69,7 @@ class GenericAttachedBehaviour extends SupportedBehaviour {
 
 export function registerSupportBehaviours(registry: BlockBehaviourRegistry, blocks: BlockRegistry): void {
   registry.register(BlockIds.Torch, new TorchBehaviour(blocks));
-  registry.register(BlockIds.RedstoneTorch, new TorchBehaviour(blocks));
+  registry.register(BlockIds.RedstoneTorchOn, new TorchBehaviour(blocks));
   registry.register(BlockIds.Ladder, new LadderBehaviour(blocks));
   registry.register(BlockIds.SignPost, new GenericAttachedBehaviour(blocks));
   registry.register(BlockIds.WallSign, new GenericAttachedBehaviour(blocks));

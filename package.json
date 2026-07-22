@@ -39,7 +39,8 @@
     "validate:durability": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateDurability.js",
     "validate:armour": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateArmour.js",
     "validate:armour-rendering": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateArmourRendering.js",
-    "validate:redstone-engine": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateRedstoneEngine.js"
+    "validate:redstone-engine": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateRedstoneEngine.js",
+    "validate:redstone-wire": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateRedstoneWire.js"
   },
   "dependencies": {
     "three": "^0.185.1"

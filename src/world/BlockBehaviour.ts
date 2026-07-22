@@ -7,6 +7,8 @@ import type { PowerQueryContext, RedstonePower } from './redstone/RedstonePower'
 import type { RedstonePowerEngine } from './redstone/RedstonePowerEngine';
 import type { BlockMutationEvent, NeighbourUpdateEvent } from './updates/BlockMutation';
 
+import type { EntityManager } from '../entities/core/EntityManager';
+
 export type BoundingBoxType = 'collision' | 'selection' | 'interaction';
 
 export interface BlockBehaviourContext {
@@ -18,6 +20,7 @@ export interface BlockBehaviourContext {
   readonly nextLong?: () => bigint;
   readonly events?: WorldEventQueue;
   readonly power?: RedstonePowerEngine;
+  readonly entities?: EntityManager;
 }
 
 export interface BlockBehaviour {

@@ -21,4 +21,5 @@ export interface ItemDefinition {
   readonly armourSlot?: ArmourSlot;
   readonly armourMaterial?: ArmourMaterialId;
   readonly protection?: number;
+  readonly placeBlockId?: number;
 }

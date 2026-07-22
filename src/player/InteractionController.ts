@@ -16,6 +16,7 @@ import { BreakingController } from './BreakingController';
 import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import { Inventory } from '../inventory/Inventory';
 import { InventoryTransferService } from '../inventory/InventoryTransferService';
+import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 import type { EntityManager } from '../entities/core/EntityManager';
 import { LivingEntity } from '../entities/living/LivingEntity';
 import { DamageSource } from '../entities/damage/DamageSource';
@@ -158,12 +159,16 @@ export class InteractionController {
       if (stack.identity.type === 'block') {
         return stack.identity.id as BlockId;
       } else if (stack.identity.type === 'item') {
+        const itemDef = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+        if (itemDef?.placeBlockId !== undefined) {
+          return itemDef.placeBlockId;
+        }
         if (stack.identity.id === 'door_wood') return BlockIds.WoodDoor;
         if (stack.identity.id === 'door_iron') return BlockIds.IronDoor;
-        if (stack.identity.id === 'sign') return BlockIds.SignPost; // Temporary fallback, resolved more precisely in placeBlock
+        if (stack.identity.id === 'sign') return BlockIds.SignPost;
       }
     }
-    return 0; // Return empty (Air) if empty or non-block
+    return 0;
   }
 
   /**
@@ -405,6 +410,14 @@ export class InteractionController {
       if (hit.face.z === 1) return 3;
       if (hit.face.x === -1) return 4;
       if (hit.face.x === 1) return 5;
+    }
+
+    if (blockId === BlockIds.RedstoneTorchOn || blockId === BlockIds.Torch) {
+        if (hit.face.y === 1) return 5;
+        if (hit.face.z === 1) return 3;
+        if (hit.face.z === -1) return 4;
+        if (hit.face.x === 1) return 1;
+        if (hit.face.x === -1) return 2;
     }
 
     if (blockId === BlockIds.StoneButton) {

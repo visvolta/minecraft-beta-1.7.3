@@ -89,6 +89,8 @@ import { registerLadderBehaviour } from '../world/behaviours/LadderBehaviour';
 import { registerPressurePlateBehaviour } from '../world/behaviours/PressurePlateBehaviour';
 import { registerButtonBehaviour } from '../world/behaviours/ButtonBehaviour';
 import { registerLeverBehaviour } from '../world/behaviours/LeverBehaviour';
+import { registerRedstoneWireBehaviour } from '../world/behaviours/RedstoneWireBehaviour';
+import { registerRedstoneTorchBehaviour } from '../world/behaviours/RedstoneTorchBehaviour';
 import { SlabBehaviour } from '../world/behaviours/SlabBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
@@ -477,6 +479,8 @@ export class Engine {
     registerPressurePlateBehaviour(this.blockBehaviourRegistry);
     registerButtonBehaviour(this.blockBehaviourRegistry);
     registerLeverBehaviour(this.blockBehaviourRegistry);
+    registerRedstoneWireBehaviour(this.blockBehaviourRegistry);
+    registerRedstoneTorchBehaviour(this.blockBehaviourRegistry);
     this.blockBehaviourRegistry.register(BlockIds.Slab, new SlabBehaviour());
     // Fire needs WeatherController + ChunkManager for rain/sky-exposure checks.
     this.weatherController = new WeatherController(worldSeed);
@@ -503,6 +507,7 @@ export class Engine {
       this.worldTickScheduler.schedule(x, y, z, id, delay),
     );
     this.blockUpdateWorld.setBehaviourRegistry(this.blockBehaviourRegistry);
+    this.blockUpdateWorld.setEntityManager(this.entityManager);
     this.blockUpdateWorld.setEventQueue(this.worldEventQueue);
     this.blockUpdateWorld.setGameTickProvider(() => this.worldTickScheduler.getGameTick());
     this.blockUpdateWorld.setNextIntProvider((bound: number) => randomTickScheduler.nextInt(bound));

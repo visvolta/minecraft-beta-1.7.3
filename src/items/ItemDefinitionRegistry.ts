@@ -76,20 +76,33 @@ const CURRENT_ITEM_IDS = [
   'fish_cod_cooked', 'fish_salmon_raw', 'fish_salmon_cooked', 'potato', 'potato_baked', 'flint',
   'flint_and_steel', 'gold_ingot', 'gunpowder', 'iron_ingot', 'leather', 'redstone_dust', 'seeds_wheat',
   'shears', 'sign', 'stick', 'string', 'sugar', 'wheat',
+  'redstone_torch', 'lever', 'stone_button', 'stone_pressure_plate', 'wood_pressure_plate',
 ] as const;
+
+const SPECIAL_PLACE_BLOCKS: Readonly<Record<string, number>> = {
+  'redstone_dust': 55,
+  'redstone_torch': 76,
+  'lever': 69,
+  'stone_button': 77,
+  'stone_pressure_plate': 70,
+  'wood_pressure_plate': 72,
+};
 
 const GENERIC_ITEMS: readonly ItemDefinition[] = CURRENT_ITEM_IDS.map((id) => {
   if (id === 'shears') return { id, stackSize: 1, durability: 238, useAction: 'none' };
   if (id === 'flint_and_steel') return { id, stackSize: 1, durability: 64, useAction: 'none' };
   if (id === 'sign') return { id, stackSize: 16, useAction: 'none' };
   if (id.startsWith('bucket_')) return { id, stackSize: 1, useAction: 'none' };
-  return { id, stackSize: 64, useAction: 'none' };
+  
+  const placeBlockId = (SPECIAL_PLACE_BLOCKS as any)[id];
+  return { id, stackSize: 64, useAction: 'none', placeBlockId };
 });
 
 const NUMERIC_ALIASES: Readonly<Record<number, string>> = {
   262: 'arrow', 263: 'coal', 264: 'diamond', 265: 'iron_ingot', 266: 'gold_ingot', 280: 'stick',
   281: 'bowl', 288: 'feather', 289: 'gunpowder', 295: 'seeds_wheat', 296: 'wheat', 323: 'sign',
   324: 'door_wood', 330: 'door_iron', 331: 'redstone_dust', 334: 'leather', 344: 'egg', 352: 'bone',
+  76: 'redstone_torch', 69: 'lever', 77: 'stone_button', 70: 'stone_pressure_plate', 72: 'wood_pressure_plate',
 };
 
 export class ItemDefinitionRegistry {
