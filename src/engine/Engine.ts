@@ -29,7 +29,9 @@ import { PlayerDeathController } from '../player/PlayerDeathController';
 import { RespawnController } from '../player/RespawnController';
 import { DeathScreen } from '../player/DeathScreen';
 import { CameraHurtController } from '../player/CameraHurtController';
-import { HudRenderer } from '../player/HudRenderer';import { FoodUseController } from '../player/FoodUseController';import { SprintFovController } from '../player/SprintFovController';
+import { HudRenderer } from '../player/HudRenderer';
+import { FoodUseController } from '../player/FoodUseController';
+import { SprintFovController } from '../player/SprintFovController';
 import type { EntityTextureAssets } from '../assets/EntityTextureAssets';
 import { SimpleEntityParticleSink } from '../entities/particles/EntityParticleSink';
 import { Inventory } from '../inventory/Inventory';
@@ -92,8 +94,6 @@ import { registerLeverBehaviour } from '../world/behaviours/LeverBehaviour';
 import { registerRedstoneWireBehaviour } from '../world/behaviours/RedstoneWireBehaviour';
 import { registerRedstoneTorchBehaviour } from '../world/behaviours/RedstoneTorchBehaviour';
 import { registerTntBehaviour } from '../world/behaviours/TntBehaviour';
-import { registerDoorBehaviour } from '../world/behaviours/DoorBehaviour';
-import { registerTrapdoorBehaviour } from '../world/behaviours/TrapdoorBehaviour';
 import { registerPoweredRailBehaviour } from '../world/behaviours/PoweredRailBehaviour';
 import { SlabBehaviour } from '../world/behaviours/SlabBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
@@ -107,6 +107,7 @@ import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
 import { ClimateSampler } from '../world/generation/climate/ClimateSampler';
 import { WeatherController } from '../world/weather/WeatherController';
+import { PrecipitationSimulator as _UnusedPrecipitationSimulator } from '../world/weather/PrecipitationSimulator';
 import { PrecipitationRenderer } from '../rendering/weather/PrecipitationRenderer';
 import { RainSplashRenderer } from '../rendering/weather/RainSplashRenderer';
 import { LightningRenderer } from '../rendering/weather/LightningRenderer';
@@ -165,33 +166,9 @@ interface EntityLightingUniforms {
   uStaticFaceBrightness: { value: number };
 }
 
-/** Maximum delta (seconds) applied in one frame after tab focus / hitch. */
 const MAX_DELTA_SECONDS = 0.1;
-
-/**
- * Hardcoded world seed for this stage (no seed-selection UI or save
- * system yet). BigInt because Beta's terrain noise depends on Java's
- * full 64-bit long seed semantics, which a plain JS number can't
- * represent exactly.
- *
- * Keep this in sync with scripts/verifyDefaultSeedHealth.ts.
- */
 const METADATA_AUTOSAVE_MS = 30_000;
 
-/**
- * Player spawn (feet position). Fixed X/Z with a generously high Y so the
- * player always starts above generated terrain (which varies in height,
- * unlike the old flat world) and falls onto it under gravity + collision.
- * No spawn search or saved spawn data yet — fixed for this stage.
- */
-
-/**
- * Application lifecycle and game loop.
- * Coordinates systems; contains no gameplay rules.
- *
- * The block registry and texture atlas are built before the Engine exists
- * (asset loading is asynchronous) and are handed in already populated.
- */
 export class Engine {
   private readonly renderer: Renderer;
   private readonly input: Input;
@@ -203,7 +180,10 @@ export class Engine {
   private readonly playerDeathController:PlayerDeathController;
   private readonly respawnController:RespawnController;
   private readonly deathScreen:DeathScreen;
-  private readonly cameraHurtController=new CameraHurtController();private readonly sprintFovController=new SprintFovController();private readonly mobSoundSink=new NullMobSoundSink();private readonly foodUseController:FoodUseController;
+  private readonly cameraHurtController=new CameraHurtController();
+  private readonly sprintFovController=new SprintFovController();
+  private readonly mobSoundSink=new NullMobSoundSink();
+  private readonly foodUseController:FoodUseController;
   private readonly interactionController: InteractionController;
   private readonly blockHighlight: BlockHighlight;
   private readonly destroyOverlayRenderer: DestroyOverlayRenderer;
@@ -272,10 +252,6 @@ export class Engine {
   private readonly lightningRenderer: LightningRenderer;
   private readonly updatables: IUpdatable[] = [];
 
-  // Stage 12D debug systems. Kept isolated from gameplay: DebugController
-  // only ever moves the player directly while no-clip is on (Engine picks
-  // whether PlayerPhysics or DebugController runs each frame); DebugOverlay
-  // only ever reads a DebugStats snapshot and never touches game state.
   private readonly debugOverlay: DebugOverlay;
   private readonly debugController: DebugController;
   private readonly debugStatsCollector: DebugStatsCollector;
@@ -367,17 +343,15 @@ export class Engine {
     this.firstPersonArmRenderer = new FirstPersonArmRenderer();
     this.firstPersonMotionController = new FirstPersonMotionController();
 
-    // Apply the active skin texture to the models
     this.playerModel.updateSkin(this.skinManager);
     this.firstPersonArmRenderer.updateSkin(this.skinManager);
 
-    // Initialize Held Block Material with generalized fog/lighting shader
     this.heldBlockMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       vertexColors: true,
       transparent: true,
       alphaTest: 0.3,
-      fog: false, // Exclude foreground hand held blocks from distance fog
+      fog: false,
     });
     attachEntityLighting(this.heldBlockMaterial);
 
@@ -389,9 +363,6 @@ export class Engine {
     });
     attachEntityLighting(this.itemHeldMaterial);
 
-    // Shared entity foundation (single authoritative simulation owner, driven
-    // by the Engine's 20 Hz clock). Created early so specialised entity
-    // systems (falling blocks, items) can be wired against it.
     const worldRng = new JavaRandom(worldSeed);
     const entityTypeRegistry = createDefaultEntityTypeRegistry();
     registerEntityTypes(entityTypeRegistry);
@@ -422,7 +393,6 @@ export class Engine {
     });
     this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng);
 
-    // Persist each chunk's owned entities on save and restore them on load.
     this.chunkPersistenceQueue.setEntityHooks({
       serializeChunkEntities: (cx, cz) => this.entityManager.serializeChunkEntities(cx, cz),
       loadChunkEntities: (tags) => this.entityManager.loadChunkEntities(tags),
@@ -431,41 +401,16 @@ export class Engine {
 
     this.playerModelUniforms = this.playerModel.material.userData.dynamicLightingUniforms as EntityLightingUniforms | undefined;
 
-    // Dummy initial geometries
     this.firstPersonHeldBlockMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.heldBlockMaterial);
     this.thirdPersonHeldBlockMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), this.heldBlockMaterial);
 
-    this.firstPersonHeldBlockMesh.position.set(
-      FIRST_PERSON_HELD_BLOCK_X,
-      FIRST_PERSON_HELD_BLOCK_Y,
-      FIRST_PERSON_HELD_BLOCK_Z
-    );
-    this.firstPersonHeldBlockMesh.rotation.set(
-      FIRST_PERSON_HELD_BLOCK_PITCH,
-      FIRST_PERSON_HELD_BLOCK_YAW,
-      FIRST_PERSON_HELD_BLOCK_ROLL
-    );
-    this.firstPersonHeldBlockMesh.scale.set(
-      FIRST_PERSON_HELD_BLOCK_SCALE,
-      FIRST_PERSON_HELD_BLOCK_SCALE,
-      FIRST_PERSON_HELD_BLOCK_SCALE
-    );
+    this.firstPersonHeldBlockMesh.position.set(FIRST_PERSON_HELD_BLOCK_X, FIRST_PERSON_HELD_BLOCK_Y, FIRST_PERSON_HELD_BLOCK_Z);
+    this.firstPersonHeldBlockMesh.rotation.set(FIRST_PERSON_HELD_BLOCK_PITCH, FIRST_PERSON_HELD_BLOCK_YAW, FIRST_PERSON_HELD_BLOCK_ROLL);
+    this.firstPersonHeldBlockMesh.scale.set(FIRST_PERSON_HELD_BLOCK_SCALE, FIRST_PERSON_HELD_BLOCK_SCALE, FIRST_PERSON_HELD_BLOCK_SCALE);
 
-    this.thirdPersonHeldBlockMesh.position.set(
-      THIRD_PERSON_HELD_BLOCK_X,
-      THIRD_PERSON_HELD_BLOCK_Y,
-      THIRD_PERSON_HELD_BLOCK_Z
-    );
-    this.thirdPersonHeldBlockMesh.rotation.set(
-      THIRD_PERSON_HELD_BLOCK_PITCH,
-      THIRD_PERSON_HELD_BLOCK_YAW,
-      THIRD_PERSON_HELD_BLOCK_ROLL
-    );
-    this.thirdPersonHeldBlockMesh.scale.set(
-      THIRD_PERSON_HELD_BLOCK_SCALE,
-      THIRD_PERSON_HELD_BLOCK_SCALE,
-      THIRD_PERSON_HELD_BLOCK_SCALE
-    );
+    this.thirdPersonHeldBlockMesh.position.set(THIRD_PERSON_HELD_BLOCK_X, THIRD_PERSON_HELD_BLOCK_Y, THIRD_PERSON_HELD_BLOCK_Z);
+    this.thirdPersonHeldBlockMesh.rotation.set(THIRD_PERSON_HELD_BLOCK_PITCH, THIRD_PERSON_HELD_BLOCK_YAW, THIRD_PERSON_HELD_BLOCK_ROLL);
+    this.thirdPersonHeldBlockMesh.scale.set(THIRD_PERSON_HELD_BLOCK_SCALE, THIRD_PERSON_HELD_BLOCK_SCALE, THIRD_PERSON_HELD_BLOCK_SCALE);
 
     this.firstPersonArmRenderer.armGroup.add(this.firstPersonHeldBlockMesh);
     this.playerModel.rightArmGroup.add(this.thirdPersonHeldBlockMesh);
@@ -486,22 +431,16 @@ export class Engine {
     registerRedstoneWireBehaviour(this.blockBehaviourRegistry);
     registerRedstoneTorchBehaviour(this.blockBehaviourRegistry);
     registerTntBehaviour(this.blockBehaviourRegistry);
-    registerDoorBehaviour(this.blockBehaviourRegistry);
-    registerTrapdoorBehaviour(this.blockBehaviourRegistry);
     registerPoweredRailBehaviour(this.blockBehaviourRegistry);
     this.blockBehaviourRegistry.register(BlockIds.Slab, new SlabBehaviour());
-    // Fire needs WeatherController + ChunkManager for rain/sky-exposure checks.
     this.weatherController = new WeatherController(worldSeed);
     this.weatherController.restore(metadata.weather);
     this.precipitationSimulator = new PrecipitationSimulator(worldSeed);
     registerFireBehaviour(this.blockBehaviourRegistry, blockRegistry, this.weatherController, this.chunkManager);
     registerSnowIceBehaviours(this.blockBehaviourRegistry);
     registerFallingBlockBehaviours(this.blockBehaviourRegistry, blockRegistry, this.fallingBlockManager);
-    // Stage 5 leaf decay
-    const leafBehaviour = registerLeafBehaviour(this.blockBehaviourRegistry);
-    const logBehaviour = registerLogBehaviour(this.blockBehaviourRegistry);
-    (this as any)._leafBehaviour = leafBehaviour;
-    (this as any)._logBehaviour = logBehaviour;
+    registerLeafBehaviour(this.blockBehaviourRegistry);
+    registerLogBehaviour(this.blockBehaviourRegistry);
 
     const randomTickScheduler = new RandomTickScheduler(worldSeed);
     this.worldTickScheduler = new WorldTickScheduler(
@@ -521,7 +460,6 @@ export class Engine {
     this.blockUpdateWorld.setNextIntProvider((bound: number) => randomTickScheduler.nextInt(bound));
     this.chunkPersistenceQueue.setSimulationTickProvider(() => this.worldTickScheduler.getGameTick());
 
-    // Register precipitation tick as a game tick callback (runs at 20 TPS)
     this.worldTickScheduler.addGameTickCallback(() => {
       const weatherState = this.weatherController.getState();
       if (weatherState.raining) {
@@ -539,7 +477,6 @@ export class Engine {
     this.skyRenderer = new SkyRenderer(this.renderer.scene);
     this.cloudRenderer = new CloudRenderer(this.renderer.scene);
 
-    // Stage 18: weather. WeatherController already created above for fire.
     this.climateSampler = new ClimateSampler(worldSeed);
     this.naturalMobSpawner = new NaturalMobSpawner({
       chunkManager: this.chunkManager,
@@ -598,7 +535,8 @@ export class Engine {
     playerEquipment.setBreakHandler(() => {
       this.itemEntityManager.emitItemBreak(this.player.position.x, this.player.position.y, this.player.position.z);
     });
-    const animalInteractions=new AnimalInteractionService(this.inventory,this.itemEntityManager);this.foodUseController=new FoodUseController(this.player,this.inventory,this.input,()=>this.selectedSlot,this.mobSoundSink);
+    const animalInteractions=new AnimalInteractionService(this.inventory,this.itemEntityManager);
+    this.foodUseController=new FoodUseController(this.player,this.inventory,this.input,()=>this.selectedSlot,this.mobSoundSink);
     this.interactionController = new InteractionController(
       this.input,
       this.renderer.camera,
@@ -621,16 +559,10 @@ export class Engine {
       this.blockUpdateWorld,
     );
 
-    // After atlas and materials are ready
     this.heldItemRenderer = new FirstPersonHeldItemRenderer(this.firstPersonArmRenderer, this.inventory, blockRegistry, this.atlas, this.itemAtlas);
     this.firstPersonHeldBlockMesh.visible = false;
     this.thirdPersonHeldBlockMesh.visible = false;
-    this.hotbarHudRenderer = new HotbarHudRenderer(
-      this.atlas,
-      this.itemAtlas,
-      blockRegistry,
-      this.inventory,
-    );
+    this.hotbarHudRenderer = new HotbarHudRenderer(this.atlas, this.itemAtlas, blockRegistry, this.inventory);
     this.hudRenderer=new HudRenderer(this.hotbarHudRenderer,this.player,playerEquipment);
     this.inventoryUi = new InventoryUi();
     this.inventoryTooltip = new InventoryTooltip();
@@ -660,10 +592,7 @@ export class Engine {
         .join(' ');
     };
     this.inventoryController.setDisplayNameResolver(displayNameResolver as any);
-    this.inventoryInputController = new InventoryInputController(
-      this.inventoryController,
-      this.hotbarHudRenderer.getLayout()
-    );
+    this.inventoryInputController = new InventoryInputController(this.inventoryController, this.hotbarHudRenderer.getLayout());
 
     this.craftingTableUi = new CraftingTableUi();
     this.craftingTableController = new CraftingTableController(
@@ -677,10 +606,7 @@ export class Engine {
       this.recipeRegistry
     );
     this.craftingTableController.setDisplayNameResolver(displayNameResolver as any);
-    this.craftingTableInputController = new CraftingTableInputController(
-      this.craftingTableController,
-      this.hotbarHudRenderer.getLayout()
-    );
+    this.craftingTableInputController = new CraftingTableInputController(this.craftingTableController, this.hotbarHudRenderer.getLayout());
 
     this.furnaceManager = new FurnaceManager();
     this.smeltingRegistry = new SmeltingRegistry();
@@ -694,8 +620,6 @@ export class Engine {
     registerChestBehaviour(this.blockBehaviourRegistry, this.chestManager);
 
     this.signManager = new SignManager();
-    // this.signManager.deserialize(metadata.signs);
-    
     registerSignBehaviour(this.blockBehaviourRegistry, this.signManager);
 
     this.signUi = new SignUi();
@@ -726,10 +650,7 @@ export class Engine {
       this.fuelRegistry
     );
     this.furnaceController.setDisplayNameResolver(displayNameResolver as any);
-    this.furnaceInputController = new FurnaceInputController(
-      this.furnaceController,
-      this.hotbarHudRenderer.getLayout()
-    );
+    this.furnaceInputController = new FurnaceInputController(this.furnaceController, this.hotbarHudRenderer.getLayout());
 
     this.menuInputRouter = new MenuInputRouter(
       this.inventoryController,
@@ -827,20 +748,7 @@ export class Engine {
           for (const s of items) {
             if (s !== null && s.count > 0) {
               const eyeY = this.player.position.y + 1.62;
-              this.itemEntityManager.spawnThrownItem(
-                x + 0.5,
-                eyeY - 0.3,
-                z + 0.5,
-                {
-                  type: s.identity.type,
-                  id: s.identity.id,
-                  count: s.count,
-                  metadata: s.metadata,
-                  damage: s.damage,
-                },
-                0, 0.2, 0,
-                40
-              );
+              this.itemEntityManager.spawnThrownItem(x + 0.5, eyeY - 0.3, z + 0.5, { type: s.identity.type, id: s.identity.id, count: s.count, metadata: s.metadata, damage: s.damage }, 0, 0.2, 0, 40);
             }
           }
           c.clear();
@@ -852,78 +760,26 @@ export class Engine {
     this.fluidAnimationSystem = new FluidAnimationSystem();
     this.fireAnimationSystem = new FireAnimationSystem();
 
-    this.chunkRenderer = new ChunkRenderer(
-      this.renderer.scene,
-      this.chunkManager,
-      blockRegistry,
-      this.atlas,
-      this.fluidAnimationSystem,
-      this.fireAnimationSystem,
-      worldSeed,
-    );
-    this.chunkStreamer = new ChunkStreamer(
-      this.chunkManager,
-      this.worldGenerator,
-      this.chunkRenderer,
-      this.lightEngine,
-      worldSeed,
-      this.chunkPersistenceQueue,
-      (chunk) => {
+    this.chunkRenderer = new ChunkRenderer(this.renderer.scene, this.chunkManager, blockRegistry, this.atlas, this.fluidAnimationSystem, this.fireAnimationSystem, worldSeed);
+    this.chunkStreamer = new ChunkStreamer(this.chunkManager, this.worldGenerator, this.chunkRenderer, this.lightEngine, worldSeed, this.chunkPersistenceQueue, (chunk) => {
         this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
         this.worldTickScheduler.indexLoadedChunkTicks(chunk);
         this.worldTickScheduler.reconcileChunkBoundaries(chunk);
-      },
-    );
+    });
     this.deathScreen=new DeathScreen(()=>this.respawnController.request());
     this.playerDeathController=new PlayerDeathController(this.player,this.inventory,this.itemEntityManager,worldRng,this.deathScreen,()=>{this.deathSavePending=true;});
     this.respawnController=new RespawnController(this.player,this.chunkManager,this.chunkStreamer,this.blockUpdateWorld,blockRegistry,metadata.spawn,this.deathScreen,this.playerDeathController,()=>{this.cameraHurtController.reset(this.renderer.camera);this.sprintFovController.reset(this.renderer.camera);this.foodUseController.cancel();void this.saveMetadata(true);});
 
-    this.chestRenderer = new ChestRenderer(
-      this.renderer.scene,
-      this.chestManager,
-      this.atlas,
-      this.chunkRenderer.getOpaqueMaterial()
-    );
-
-    this.signTextRenderer = new SignTextRenderer(
-      this.renderer.scene,
-      this.signManager,
-      this.blockUpdateWorld
-    );
-
+    this.chestRenderer = new ChestRenderer(this.renderer.scene, this.chestManager, this.atlas, this.chunkRenderer.getOpaqueMaterial());
+    this.signTextRenderer = new SignTextRenderer(this.renderer.scene, this.signManager, this.blockUpdateWorld);
     this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
-
     this.debugOverlay = new DebugOverlay();
-    this.debugController = new DebugController(
-      this.input,
-      this.cameraController,
-      this.player,
-    );
-    this.debugStatsCollector = new DebugStatsCollector(
-      this.player,
-      this.chunkManager,
-      this.chunkRenderer,
-      this.renderer,
-      this.skyRenderer,
-      this.cloudRenderer,
-      this.weatherController,
-      this.precipitationRenderer,
-      this.rainSplashRenderer,
-      this.lightningRenderer,
-      this.renderer.renderer,
-      worldSeed,
-      this.worldTime,
-      this.performanceProfiler,
-      this.worldTickScheduler,
-      this.fallingBlockManager,
-      this.worldEventQueue,
-    );
+    this.debugController = new DebugController(this.input, this.cameraController, this.player);
+    this.debugStatsCollector = new DebugStatsCollector(this.player, this.chunkManager, this.chunkRenderer, this.renderer, this.skyRenderer, this.cloudRenderer, this.weatherController, this.precipitationRenderer, this.rainSplashRenderer, this.lightningRenderer, this.renderer.renderer, worldSeed, this.worldTime, this.performanceProfiler, this.worldTickScheduler, this.fallingBlockManager, this.worldEventQueue);
 
     const validationHarness = new WorkerValidationHarness(worldSeed, this.atlas);
     (window as unknown as { __mcDebug?: Record<string, unknown> }).__mcDebug = {
       saveWorldMetadata: () => this.saveMetadata(true),
-      // Compatibility alias: persists metadata + dirty chunks (chunks now carry
-      // their owned entities via the EntityManager persistence hooks).
       saveWorld: () => this.saveMetadata(true),
       getSaveMetrics: () => this.saveCoordinator.getMetrics(),
       inspectWorldMetadata: () => this.saveCoordinator.getMetadata(),
@@ -931,182 +787,56 @@ export class Engine {
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
       validateMeshWorkers: () => validationHarness.validateMeshWorker(),
       getTargetedEntity: () => this.interactionController.getTargetedEntity(),
-      getEntityMetrics: () => ({
-        active: this.entityManager.activeCount,
-        parked: this.entityManager.parkedCount,
-        tick: this.entityManager.currentTick,
-      }),
+      getEntityMetrics: () => ({ active: this.entityManager.activeCount, parked: this.entityManager.parkedCount, tick: this.entityManager.currentTick }),
       getTickMetrics: () => this.worldTickScheduler.getMetrics(),
-      getRedstoneMetrics: () => ({
-        ...this.worldTickScheduler.getMetrics(),
-        powerQueries: this.redstonePowerEngine.getMetrics(),
-      }),
-      getFallingBlockMetrics: () => ({
-        simulationTick: this.fallingBlockManager.getSimulationTick(),
-        interpolationAlpha: this.fallingBlockManager.getInterpolationAlpha(),
-        active: this.fallingBlockManager.getCount(),
-        persisted: this.fallingBlockManager.getPersistedCount(),
-        meshCount: this.fallingBlockManager.getMeshCount(),
-        entities: this.fallingBlockManager.getDebugEntities(),
-        pendingDrops: this.worldEventQueue.getBlockDropCount(),
-      }),
-      getFluidMetrics: () => ({
-        ...this.fluidAnimationSystem.getDebugInfo(),
-        lavaIgnitionAttempts: this.worldEventQueue.getTotalLavaIgnitionAttempts(),
-        worldEventQueueDepth: this.worldEventQueue.getQueueDepth(),
-      }),
-      getFireMetrics: () => ({
-        ...this.fireAnimationSystem.getDebugInfo(),
-        tntIgniteAttempts: this.worldEventQueue.getTotalTntIgniteAttempts(),
-        pendingTntIgnitions: this.worldEventQueue.getTntIgniteAttemptCount(),
-      }),
-      getBlockTestGrid: () => ({
-        grid: this.blockTestGrid.getGridState(),
-        blocks: this.blockTestGrid.getInfo(),
-        totalBlocks: this.blockTestGrid.getInfo().length,
-        origin: this.blockTestGrid.getGridState() ? {
-          x: this.blockTestGrid.getGridState()!.originX,
-          y: this.blockTestGrid.getGridState()!.originY,
-          z: this.blockTestGrid.getGridState()!.originZ,
-        } : null,
-      }),
-      getWeatherMetrics: () => ({
-        ...this.precipitationSimulator.getMetrics(),
-        activeSnowfall: this.weatherController.getState().raining,
-        weatherMode: this.weatherController.getState().getEffectiveMode(this.weatherController.getState().partialTick),
-      }),
+      getRedstoneMetrics: () => ({ ...this.worldTickScheduler.getMetrics(), powerQueries: this.redstonePowerEngine.getMetrics() }),
+      getFallingBlockMetrics: () => ({ simulationTick: this.fallingBlockManager.getSimulationTick(), interpolationAlpha: this.fallingBlockManager.getInterpolationAlpha(), active: this.fallingBlockManager.getCount(), persisted: this.fallingBlockManager.getPersistedCount(), meshCount: this.fallingBlockManager.getMeshCount(), entities: this.fallingBlockManager.getDebugEntities(), pendingDrops: this.worldEventQueue.getBlockDropCount() }),
+      getFluidMetrics: () => ({ ...this.fluidAnimationSystem.getDebugInfo(), lavaIgnitionAttempts: this.worldEventQueue.getTotalLavaIgnitionAttempts(), worldEventQueueDepth: this.worldEventQueue.getQueueDepth() }),
+      getFireMetrics: () => ({ ...this.fireAnimationSystem.getDebugInfo(), tntIgniteAttempts: this.worldEventQueue.getTotalTntIgniteAttempts(), pendingTntIgnitions: this.worldEventQueue.getTntIgniteAttemptCount() }),
+      getBlockTestGrid: () => ({ grid: this.blockTestGrid.getGridState(), blocks: this.blockTestGrid.getInfo(), totalBlocks: this.blockTestGrid.getInfo().length, origin: this.blockTestGrid.getGridState() ? { x: this.blockTestGrid.getGridState()!.originX, y: this.blockTestGrid.getGridState()!.originY, z: this.blockTestGrid.getGridState()!.originZ } : null }),
+      getWeatherMetrics: () => ({ ...this.precipitationSimulator.getMetrics(), activeSnowfall: this.weatherController.getState().raining, weatherMode: this.weatherController.getState().getEffectiveMode(this.weatherController.getState().partialTick) }),
       getLeafDecayMetrics: () => {
-        const leaf = (this as any)._leafBehaviour as { getMetrics?: () => any } | undefined;
-        const log = (this as any)._logBehaviour as { getMetrics?: () => any } | undefined;
-        return {
-          ...(leaf?.getMetrics?.() ?? {}),
-          ...(log?.getMetrics?.() ?? {}),
-          pendingItemDrops: this.worldEventQueue.getItemDropCount(),
-          totalItemDrops: this.worldEventQueue.getTotalItemDrops(),
-          discardedItemDrops: this.worldEventQueue.getDiscardedItemDropCount(),
-          queueDepth: this.worldEventQueue.getQueueDepth(),
-        };
+        return { pendingItemDrops: this.worldEventQueue.getItemDropCount(), totalItemDrops: this.worldEventQueue.getTotalItemDrops(), discardedItemDrops: this.worldEventQueue.getDiscardedItemDropCount(), queueDepth: this.worldEventQueue.getQueueDepth() };
       },
       drainLeafDecayDrops: () => this.worldEventQueue.drainItemDrops(),
-      resetLeafDecayMetrics: () => {
-        const leaf = (this as any)._leafBehaviour as { resetMetrics?: () => void } | undefined;
-        const log = (this as any)._logBehaviour as { resetMetrics?: () => void } | undefined;
-        leaf?.resetMetrics?.();
-        log?.resetMetrics?.();
-      },
+      resetLeafDecayMetrics: () => {},
       inspectLeafDecayArea: (x: number, y: number, z: number, radius = 4) => {
         const results: any[] = [];
-        const cx = Math.floor(x);
-        const cy = Math.floor(y);
-        const cz = Math.floor(z);
-        // Guard check for area
+        const cx = Math.floor(x); const cy = Math.floor(y); const cz = Math.floor(z);
         let guardPass = true;
-        const minCX = Math.floor((cx - radius - 1) / 16);
-        const maxCX = Math.floor((cx + radius + 1) / 16);
-        const minCZ = Math.floor((cz - radius - 1) / 16);
-        const maxCZ = Math.floor((cz + radius + 1) / 16);
-        for (let cxx = minCX; cxx <= maxCX; cxx++) {
-          for (let czz = minCZ; czz <= maxCZ; czz++) {
-            if (!this.chunkManager.hasChunk(cxx, czz)) {
-              guardPass = false;
-            }
-          }
+        const minCX = Math.floor((cx - radius - 1) / 16); const maxCX = Math.floor((cx + radius + 1) / 16);
+        const minCZ = Math.floor((cz - radius - 1) / 16); const maxCZ = Math.floor((cz + radius + 1) / 16);
+        for (let cxx = minCX; cxx <= maxCX; cxx++) for (let czz = minCZ; czz <= maxCZ; czz++) if (!this.chunkManager.hasChunk(cxx, czz)) guardPass = false;
+        for (let dx = -radius; dx <= radius; dx++) for (let dy = -radius; dy <= radius; dy++) for (let dz = -radius; dz <= radius; dz++) {
+          const wx = cx + dx; const wy = cy + dy; const wz = cz + dz;
+          if (wy < 0 || wy >= 128) continue;
+          const bid = this.blockUpdateWorld.getBlock(wx, wy, wz);
+          const isLeaf = bid === 18 || bid === 250 || bid === 253; const isLog = bid === 17 || bid === 251 || bid === 252;
+          if (!isLeaf && !isLog) continue;
+          const meta = this.blockUpdateWorld.getBlockMetadata(wx, wy, wz);
+          const hasFlag = (meta & 8) !== 0; const species = meta & 3;
+          results.push({ x: wx, y: wy, z: wz, blockId: bid, blockName: isLeaf ? 'leaves' : 'log', metadata: meta, hasDecayFlag: hasFlag, species, guardPass });
         }
-        for (let dx = -radius; dx <= radius; dx++) {
-          for (let dy = -radius; dy <= radius; dy++) {
-            for (let dz = -radius; dz <= radius; dz++) {
-              const wx = cx + dx;
-              const wy = cy + dy;
-              const wz = cz + dz;
-              if (wy < 0 || wy >= 128) continue;
-              const bid = this.blockUpdateWorld.getBlock(wx, wy, wz);
-              // Only report leaves and logs
-              const isLeaf = bid === 18 || bid === 250 || bid === 253;
-              const isLog = bid === 17 || bid === 251 || bid === 252;
-              if (!isLeaf && !isLog) continue;
-              const meta = this.blockUpdateWorld.getBlockMetadata(wx, wy, wz);
-              const hasFlag = (meta & 8) !== 0;
-              const species = meta & 3;
-              results.push({
-                x: wx,
-                y: wy,
-                z: wz,
-                blockId: bid,
-                blockName: isLeaf ? 'leaves' : 'log',
-                metadata: meta,
-                hasDecayFlag: hasFlag,
-                species,
-                guardPass,
-              });
-            }
-          }
-        }
-        return {
-          center: { x: cx, y: cy, z: cz },
-          radius,
-          guardPass,
-          leaves: results.filter((r) => r.blockName === 'leaves'),
-          logs: results.filter((r) => r.blockName === 'log'),
-          all: results,
-        };
+        return { center: { x: cx, y: cy, z: cz }, radius, guardPass, leaves: results.filter((r) => r.blockName === 'leaves'), logs: results.filter((r) => r.blockName === 'log'), all: results };
       },
       inspectFluid: (x: number, y: number, z: number) => {
-        const blockId = this.blockUpdateWorld.getBlock(x, y, z);
-        const metadata = this.blockUpdateWorld.getBlockMetadata(x, y, z);
-        const flow = computeFluidFlowVector({
-          getBlock: (wx, wy, wz) => this.blockUpdateWorld.getBlock(wx, wy, wz),
-          getMetadata: (wx, wy, wz) => this.blockUpdateWorld.getBlockMetadata(wx, wy, wz),
-          isSolid: (id) => blockRegistry.getById(id)?.solid ?? false,
-        }, x, y, z, blockId);
-        const isWater = blockId === 8 || blockId === 9;
-        const isLava = blockId === 10 || blockId === 11;
+        const blockId = this.blockUpdateWorld.getBlock(x, y, z); const metadata = this.blockUpdateWorld.getBlockMetadata(x, y, z);
+        const flow = computeFluidFlowVector({ getBlock: (wx, wy, wz) => this.blockUpdateWorld.getBlock(wx, wy, wz), getMetadata: (wx, wy, wz) => this.blockUpdateWorld.getBlockMetadata(wx, wy, wz), isSolid: (id) => blockRegistry.getById(id)?.solid ?? false }, x, y, z, blockId);
+        const isWater = blockId === 8 || blockId === 9; const isLava = blockId === 10 || blockId === 11;
         const moving = Math.hypot(flow.x, flow.z) > 1e-6;
-        const textureSelector = isWater
-          ? (isFallingFluid(metadata) || moving || blockId === 8 ? 'WaterFlow' : 'WaterStill')
-          : isLava
-            ? (isFallingFluid(metadata) || moving || blockId === 10 ? 'LavaFlow' : 'LavaStill')
-            : 'None';
-        return {
-          blockId,
-          metadata,
-          flowLevel: getFluidLevel(metadata),
-          falling: isFallingFluid(metadata),
-          flow,
-          surfaceHeight: fluidSurfaceHeight(metadata),
-          textureSelector,
-          currentFrames: this.fluidAnimationSystem.getDebugInfo(),
-        };
+        const textureSelector = isWater ? (isFallingFluid(metadata) || moving || blockId === 8 ? 'WaterFlow' : 'WaterStill') : isLava ? (isFallingFluid(metadata) || moving || blockId === 10 ? 'LavaFlow' : 'LavaStill') : 'None';
+        return { blockId, metadata, flowLevel: getFluidLevel(metadata), falling: isFallingFluid(metadata), flow, surfaceHeight: fluidSurfaceHeight(metadata), textureSelector, currentFrames: this.fluidAnimationSystem.getDebugInfo() };
       },
     };
 
     this.updateHeldItemMesh();
   }
 
-  /**
-   * Register a system to receive update(deltaSeconds) each frame.
-   * Core systems are wired explicitly; use this for future systems.
-   */
-  public register(system: IUpdatable): void {
-    if (this.updatables.includes(system)) {
-      return;
-    }
-
-    this.updatables.push(system);
-  }
-
-  public unregister(system: IUpdatable): void {
-    const index = this.updatables.indexOf(system);
-
-    if (index !== -1) {
-      this.updatables.splice(index, 1);
-    }
-  }
+  public register(system: IUpdatable): void { if (!this.updatables.includes(system)) this.updatables.push(system); }
+  public unregister(system: IUpdatable): void { const index = this.updatables.indexOf(system); if (index !== -1) this.updatables.splice(index, 1); }
 
   public start(): void {
-    if (this.running) {
-      return;
-    }
-
+    if (this.running) return;
     document.body.appendChild(this.renderer.domElement);
     this.debugOverlay.mount();
     this.input.start();
@@ -1118,742 +848,235 @@ export class Engine {
   }
 
   public stop(): void {
-    if (!this.running) {
-      return;
-    }
-
-    if (this.animationFrameId !== null) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = null;
-    }
-
+    if (!this.running) return;
+    if (this.animationFrameId !== null) { cancelAnimationFrame(this.animationFrameId); this.animationFrameId = null; }
     this.lastFrameTimeMs = null;
-    this.renderer.stop();
-    this.input.stop();
-    this.debugOverlay.dispose();
-    this.blockHighlight.dispose();
-    this.destroyOverlayRenderer.dispose();
-    this.hudRenderer.dispose();
-    this.deathScreen.dispose();
-    this.inventoryInputController.dispose();
-    this.inventoryController.dispose();
-    this.craftingTableInputController.dispose();
-    this.furnaceInputController.dispose();
-    this.menuInputRouter.dispose();
-    this.craftingTableController.dispose();
-    this.furnaceController.dispose();
-    this.furnaceManager.clear();
-    this.contextMenuSuppressor.dispose();
-    this.heldItemRenderer.dispose();
-    this.playerArmourRenderer.dispose();
-    this.playerModel.dispose();
-    this.entityManager.dispose();
-    this.entityParticles.dispose();
-    this.chunkStreamer.dispose();
-    this.fallingBlockManager.dispose();
-    this.lightningRenderer.dispose();
-    this.rainSplashRenderer.dispose();
-    this.precipitationRenderer.dispose();
-    this.cloudRenderer.dispose();
-    this.skyRenderer.dispose();
-    this.chunkRenderer.dispose();
-    this.fluidAnimationSystem.dispose();
-    this.fireAnimationSystem.dispose();
-    this.armourMaterialCache.dispose();
-    this.armourGeometryCache.dispose();
-    this.armourTextures.dispose();
-    this.atlas.dispose();
-    this.entityTextures.dispose();
-    this.chunkManager.clear();
-    this.renderer.domElement.remove();
-    this.running = false;
+    this.renderer.stop(); this.input.stop(); this.debugOverlay.dispose(); this.blockHighlight.dispose(); this.destroyOverlayRenderer.dispose(); this.hudRenderer.dispose(); this.deathScreen.dispose(); this.inventoryInputController.dispose(); this.inventoryController.dispose(); this.craftingTableInputController.dispose(); this.furnaceInputController.dispose(); this.menuInputRouter.dispose(); this.craftingTableController.dispose(); this.furnaceController.dispose(); this.furnaceManager.clear(); this.contextMenuSuppressor.dispose(); this.heldItemRenderer.dispose(); this.playerArmourRenderer.dispose(); this.playerModel.dispose(); this.entityManager.dispose(); this.entityParticles.dispose(); this.chunkStreamer.dispose(); this.fallingBlockManager.dispose(); this.lightningRenderer.dispose(); this.rainSplashRenderer.dispose(); this.precipitationRenderer.dispose(); this.cloudRenderer.dispose(); this.skyRenderer.dispose(); this.chunkRenderer.dispose(); this.fluidAnimationSystem.dispose(); this.fireAnimationSystem.dispose(); this.armourMaterialCache.dispose(); this.armourGeometryCache.dispose(); this.armourTextures.dispose(); this.atlas.dispose(); this.entityTextures.dispose(); this.chunkManager.clear(); this.renderer.domElement.remove(); this.running = false;
   }
 
-  /**
-   * Frame order:
-   * 1. Begin input frame
-   * 2. Toggle debug systems (F3/F4/F6/F7) + time controls
-   * 3. Advance world time
-   * 4. Update camera look
-   * 5. Read movement input (player wish velocity + jump) — only when not in no-clip
-   * 6. Update player physics / no-clip movement
-   * 7. Move camera to player eye position
-   * 8. Update sky/celestials and apply global skylight subtraction
-   * 9. Stream chunks
-   * 10. Update interaction (raycast + break/place)
-   * 11. Rebuild dirty meshes (terrain + water)
-   * 12. Compute/apply fog from the current camera eye environment
-   * 13. Update block highlight
-   * 14. Update debug overlay stats
-   * 15. Render (terrain, then water, then debug overlay is plain DOM
-   *     drawn by the browser compositor, not part of the WebGL pass)
-   *
-   * Optional registered systems (see register()) run just before rendering,
-   * after all core systems above.
-   */
   private tick = (timeMs: number): void => {
     this.animationFrameId = requestAnimationFrame(this.tick);
     this.performanceProfiler.beginFrame();
     this.performanceProfiler.beginUpdate();
 
-    const deltaSeconds =
-      this.lastFrameTimeMs === null
-        ? 0
-        : Math.min((timeMs - this.lastFrameTimeMs) / 1000, MAX_DELTA_SECONDS);
+    const deltaSeconds = this.lastFrameTimeMs === null ? 0 : Math.min((timeMs - this.lastFrameTimeMs) / 1000, MAX_DELTA_SECONDS);
     this.lastFrameTimeMs = timeMs;
 
-    // 1. Begin input frame
     this.input.beginFrame();
-
-    // 2. Toggle debug systems
-    if (this.input.isDebugKeyJustPressed('F2')) {
-      this.blockTestGrid.generate(this.player.position.x, this.player.position.z);
-    }
-
-    if (this.input.isDebugKeyJustPressed('F3')) {
-      this.debugOverlay.toggle();
-    }
-
+    if (this.input.isDebugKeyJustPressed('F2')) this.blockTestGrid.generate(this.player.position.x, this.player.position.z);
+    if (this.input.isDebugKeyJustPressed('F3')) this.debugOverlay.toggle();
     if (this.input.isKeyJustPressed('KeyU')) {
       const active = this.skinManager.toggleDebugMode();
       this.playerModel.updateSkin(this.skinManager);
       this.firstPersonArmRenderer.updateSkin(this.skinManager);
       console.log(`[SkinManager] Toggled UV-debug skin diagnostic mode. Active: ${active}`);
     }
+    if (this.input.isDebugKeyJustPressed('F4')) { this.rawLightDebugMode = !this.rawLightDebugMode; if (this.rawLightDebugMode) { this.ambientOcclusionDebugMode = false; this.chunkRenderer.setAmbientOcclusionDebugMode(false); } this.chunkRenderer.setRawLightDebugMode(this.rawLightDebugMode); }
+    if (this.input.isDebugKeyJustPressed('F7')) { this.ambientOcclusionDebugMode = !this.ambientOcclusionDebugMode; if (this.ambientOcclusionDebugMode) { this.rawLightDebugMode = false; this.chunkRenderer.setRawLightDebugMode(false); } this.chunkRenderer.setAmbientOcclusionDebugMode(this.ambientOcclusionDebugMode); }
+    if (this.input.isDebugKeyJustPressed('F6')) { this.noClipEnabled = !this.noClipEnabled; this.debugController.resetPhysicsState(); }
+    if (this.input.isDebugKeyJustPressed('F5')) this.weatherController.setAuto();
+    if (this.input.isDebugKeyJustPressed('F8')) this.weatherController.forceMode('clear');
+    if (this.input.isDebugKeyJustPressed('F9')) this.weatherController.forceMode('rain');
+    if (this.input.isDebugKeyJustPressed('F10')) this.weatherController.forceMode('thunder');
+    if (this.input.isKeyJustPressed('ArrowLeft')) this.worldTime.addTicks(-1000);
+    if (this.input.isKeyJustPressed('ArrowRight')) this.worldTime.addTicks(1000);
+    if (this.input.isKeyJustPressed('ArrowUp')) this.worldTime.setDay();
+    if (this.input.isKeyJustPressed('ArrowDown')) this.worldTime.setNight();
 
-    if (this.input.isDebugKeyJustPressed('F4')) {
-      this.rawLightDebugMode = !this.rawLightDebugMode;
-      if (this.rawLightDebugMode) {
-        this.ambientOcclusionDebugMode = false;
-        this.chunkRenderer.setAmbientOcclusionDebugMode(false);
-      }
-      this.chunkRenderer.setRawLightDebugMode(this.rawLightDebugMode);
-    }
-
-    if (this.input.isDebugKeyJustPressed('F7')) {
-      this.ambientOcclusionDebugMode = !this.ambientOcclusionDebugMode;
-      if (this.ambientOcclusionDebugMode) {
-        this.rawLightDebugMode = false;
-        this.chunkRenderer.setRawLightDebugMode(false);
-      }
-      this.chunkRenderer.setAmbientOcclusionDebugMode(this.ambientOcclusionDebugMode);
-    }
-
-    if (this.input.isDebugKeyJustPressed('F6')) {
-      this.noClipEnabled = !this.noClipEnabled;
-      // Reset velocity/grounded state on every transition so re-enabling
-      // normal physics (or starting no-clip mid-fall/mid-jump) never
-      // carries over a stale velocity into the new mode.
-      this.debugController.resetPhysicsState();
-    }
-
-    // Stage 18 weather debug controls.
-    if (this.input.isDebugKeyJustPressed('F5')) {
-      this.weatherController.setAuto();
-    }
-    if (this.input.isDebugKeyJustPressed('F8')) {
-      this.weatherController.forceMode('clear');
-    }
-    if (this.input.isDebugKeyJustPressed('F9')) {
-      this.weatherController.forceMode('rain');
-    }
-    if (this.input.isDebugKeyJustPressed('F10')) {
-      this.weatherController.forceMode('thunder');
-    }
-
-    // Basic time controls.
-    if (this.input.isKeyJustPressed('ArrowLeft')) {
-      this.worldTime.addTicks(-1000);
-    }
-    if (this.input.isKeyJustPressed('ArrowRight')) {
-      this.worldTime.addTicks(1000);
-    }
-    if (this.input.isKeyJustPressed('ArrowUp')) {
-      this.worldTime.setDay();
-    }
-    if (this.input.isKeyJustPressed('ArrowDown')) {
-      this.worldTime.setNight();
-    }
-
-    // 3. Advance day/night time separately from the Engine-owned fixed simulation step.
     this.worldTime.update(deltaSeconds);
     this.simulationAccumulatorTicks += deltaSeconds * 20;
     while (this.simulationAccumulatorTicks >= 1) {
       this.simulationTick++;
       this.worldTickScheduler.beginTick(this.simulationTick);
-
-      // Existing Player/entity systems retain their established branch, but
-      // receive the same fixed-step event as scheduled/neighbour/random ticks.
-      this.player.tickCombatState();this.playerController.tickSprintWindow();this.foodUseController.tick();
-      this.playerSurvivalController.tick();this.interactionController.breakingController.tick();
-      this.playerDeathController.update();
-      this.respawnController.update();
-      this.naturalMobSpawner.tick();
-      this.entityManager.tick();
-      this.entityManager.collideWithPlayer(this.player);
-      this.itemEntityManager.tickPickups(this.player);
+      this.player.tickCombatState(); this.playerController.tickSprintWindow(); this.foodUseController.tick();
+      this.playerSurvivalController.tick(); this.interactionController.breakingController.tick();
+      this.playerDeathController.update(); this.respawnController.update(); this.naturalMobSpawner.tick();
+      this.entityManager.tick(); this.entityManager.collideWithPlayer(this.player); this.itemEntityManager.tickPickups(this.player);
       if(this.deathSavePending){this.deathSavePending=false;void this.saveMetadata(true);}
-
       this.worldTickScheduler.endTick();
       this.simulationAccumulatorTicks--;
     }
     const now = performance.now();
-    if (now - this.lastMetadataAutosaveMs >= METADATA_AUTOSAVE_MS) {
-      this.lastMetadataAutosaveMs = now;
-      void this.saveMetadata(false);
-    }
-    this.chestManager.update();
-    this.chestRenderer.update(deltaSeconds);
-    this.signTextRenderer.update();
-    this.furnaceManager.tick(this.blockUpdateWorld, this.smeltingRegistry, this.fuelRegistry);
+    if (now - this.lastMetadataAutosaveMs >= METADATA_AUTOSAVE_MS) { this.lastMetadataAutosaveMs = now; void this.saveMetadata(false); }
+    this.chestManager.update(); this.chestRenderer.update(deltaSeconds); this.signTextRenderer.update(); this.furnaceManager.tick(this.blockUpdateWorld, this.smeltingRegistry, this.fuelRegistry);
     
-    // Process block and item drops from scheduled events (like plant popping or leaf decay)
     for (const drop of this.worldEventQueue.drainBlockDrops()) {
       const drops = resolveBlockDrops(drop.blockId, drop.metadata);
-      for (const d of drops) {
-        this.itemEntityManager.spawnItem(drop.x + 0.5, drop.y + 0.2, drop.z + 0.5, d, 10);
-      }
+      for (const d of drops) this.itemEntityManager.spawnItem(drop.x + 0.5, drop.y + 0.2, drop.z + 0.5, d, 10);
     }
     for (const drop of this.worldEventQueue.drainItemDrops()) {
-      this.itemEntityManager.spawnItem(drop.x + 0.5, drop.y + 0.2, drop.z + 0.5, {
-        type: 'item', id: drop.itemId, count: drop.count, metadata: drop.metadata
-      }, 10);
+      this.itemEntityManager.spawnItem(drop.x + 0.5, drop.y + 0.2, drop.z + 0.5, { type: 'item', id: drop.itemId, count: drop.count, metadata: drop.metadata }, 10);
     }
     this.worldEventQueue.drainNoop();
-
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
-
-    // 4. Update camera look
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
-      this.cameraController.update();
-    }
-
-    // 5-6. Movement + physics: no-clip bypasses PlayerController's wish
-    // velocity entirely and moves the player directly, skipping
-    // PlayerPhysics (gravity, player collision, block collision) so
-    // none of it runs while no-clip is active, per this stage's
-    // requirements.
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.cameraController.update();
     if(!this.player.isAlive()){this.player.wishVelocity.x=this.player.wishVelocity.z=0;}
-    else if (this.noClipEnabled) {
-      this.player.fallDistance=0;
-      this.debugController.update(deltaSeconds);
-    } else {
+    else if (this.noClipEnabled) { this.player.fallDistance=0; this.debugController.update(deltaSeconds); }
+    else {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
         if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
           this.playerController.update();
-        } else {
-          this.player.wishVelocity.x = 0;
-          this.player.wishVelocity.z = 0;
-        }
+        } else { this.player.wishVelocity.x = 0; this.player.wishVelocity.z = 0; }
         const movement=this.playerPhysics.update(this.player,deltaSeconds,this.input.isActionActive('jump'));
         this.playerSurvivalController.recordMovement(movement);
-      } else {
-        // Pause physics if the containing chunk is not yet loaded
-        // Ensure streamer knows this is the highest priority chunk
-        this.chunkStreamer.dispatchCriticalLoad(chunkX, chunkZ);
-      }
+      } else { this.chunkStreamer.dispatchCriticalLoad(chunkX, chunkZ); }
     }
 
-    // 7. Apply Camera Mode and Transform
     this.player.updateAnimationState(deltaSeconds);
     this.cameraModeController.update();
     const camera = this.renderer.camera;
-    this.cameraModeController.applyTransform(
-      camera,
-      this.player,
-      this.cameraController.getYaw(),
-      this.cameraController.getPitch()
-    );
-    this.cameraHurtController.update(camera,this.player,deltaSeconds);const survivalUiSuppressed=this.inventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;if(survivalUiSuppressed){this.player.isSprinting=false;this.foodUseController.cancel();this.interactionController.breakingController.reset();}this.sprintFovController.update(camera,this.player,deltaSeconds,survivalUiSuppressed);
+    this.cameraModeController.applyTransform(camera, this.player, this.cameraController.getYaw(), this.cameraController.getPitch());
+    this.cameraHurtController.update(camera,this.player,deltaSeconds);
+    const survivalUiSuppressed=this.inventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;
+    if(survivalUiSuppressed){this.player.isSprinting=false;this.foodUseController.cancel();this.interactionController.breakingController.reset();}
+    this.sprintFovController.update(camera,this.player,deltaSeconds,survivalUiSuppressed);
 
-    // 7a. Update Player Model and Visibility Rules
     if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
-      this.playerModel.setVisible(true);
-      this.playerModel.setFirstPersonMode(true);
-      this.firstPersonArmRenderer.setVisible(true);
-
+      this.playerModel.setVisible(true); this.playerModel.setFirstPersonMode(true); this.firstPersonArmRenderer.setVisible(true);
       this.firstPersonMotionController.update(camera, this.player, this.firstPersonArmRenderer, 1.0);
       const hasHeldContent = this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
       this.firstPersonArmRenderer.setArmMeshVisible(!hasHeldContent);
-
-      this.playerAnimator.update(
-        this.player,
-        this.playerModel,
-        this.cameraController.getYaw(),
-        this.cameraController.getPitch(),
-        1.0
-      );
+      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0);
     } else {
-      this.playerModel.setVisible(true);
-      this.playerModel.setFirstPersonMode(false);
-      this.firstPersonArmRenderer.setVisible(false);
+      this.playerModel.setVisible(true); this.playerModel.setFirstPersonMode(false); this.firstPersonArmRenderer.setVisible(false);
       this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
-
-      this.playerAnimator.update(
-        this.player,
-        this.playerModel,
-        this.cameraController.getYaw(),
-        this.cameraController.getPitch(),
-        1.0
-      );
+      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0);
     }
     this.playerArmourRenderer.sync();
 
-    // 7b. Stage 18: advance weather simulation. Renderer-independent;
-    //     only produces a WeatherState the rest of the frame reads from.
     this.weatherController.update(deltaSeconds);
     const weatherState = this.weatherController.getState();
-
-    // 8. Update camera-centered sky and global skylight darkening.
-    //    Stage 18: SkyColorController's own getCloudColor still runs
-    //    for cloud vertex-colour recompute; the SHARED atmospheric
-    //    state we build immediately after is what all other systems
-    //    (fog, precipitation, celestial fade) consume. We preview the
-    //    weather fade values here (cheap, no colour math) so the sky
-    //    renderer can pass them into CelestialRenderer.update in a
-    //    single pass.
-    const previewFade = previewWeatherFade(
-      weatherState.getRainStrength(weatherState.partialTick),
-      weatherState.getThunderStrength(weatherState.partialTick),
-    );
-    // The SkyRenderState returned here is used only for the F3 overlay
-    // (via SkyRenderer.getCurrentState); fog and atmos now read from
-    // the underlying SkyColorState via getCurrentColorState().
+    const previewFade = previewWeatherFade(weatherState.getRainStrength(weatherState.partialTick), weatherState.getThunderStrength(weatherState.partialTick));
     this.skyRenderer.update(camera, this.worldTime, previewFade);
 
-    // 8b. Build the SHARED atmospheric state once per frame. All
-    //     downstream atmospheric renderers read from here — no
-    //     independent weather calculation anywhere.
-    //     Uses the underlying SkyColorState (which carries the raw
-    //     colour channels the weather blend needs), NOT the compact
-    //     SkyRenderState used by the F3 overlay.
-    const atmos = buildAtmosphericState(
-      this.skyRenderer.getCurrentColorState(),
-      weatherState,
-      this.lightningManager.getState().getFlashStrength(weatherState.partialTick),
-    );
+    const atmos = buildAtmosphericState(this.skyRenderer.getCurrentColorState(), weatherState, this.lightningManager.getState().getFlashStrength(weatherState.partialTick));
     this.skyRenderer.applyAtmosphericState(atmos);
-
-    // Beta weather lighting: calculateSkylightSubtracted and sun brightness
-    // are produced by the shared weather math. Lightning flash is visual
-    // only and brightens via the same derived atmospheric snapshot.
     this.chunkRenderer.setSkylightSubtracted(atmos.effectiveSkylightSubtracted);
     this.chunkRenderer.setSunBrightnessFactor(atmos.sunBrightnessFactor);
+    this.debugStatsCollector.setStormReadout({ weatherSkylightPenalty: atmos.weatherSkylightPenalty, effectiveSkylightSubtracted: atmos.effectiveSkylightSubtracted, windX: atmos.wind.x, windZ: atmos.wind.z });
+    const cloudColor = { r: atmos.cloud.r, g: atmos.cloud.g, b: atmos.cloud.b, hex: atmos.cloud.hex };
+    this.cloudRenderer.update(camera.position.x, camera.position.z, deltaSeconds, cloudColor, atmos.cloudFogStrength);
 
-    this.debugStatsCollector.setStormReadout({
-      weatherSkylightPenalty: atmos.weatherSkylightPenalty,
-      effectiveSkylightSubtracted: atmos.effectiveSkylightSubtracted,
-      windX: atmos.wind.x,
-      windZ: atmos.wind.z,
-    });
-
-    // 8c. Stage 17/18: cloud layer. Weather-blended cloud colour comes
-    //     via the shared atmospheric state so it and the sky sphere
-    //     agree exactly.
-    const cloudColor = {
-      r: atmos.cloud.r,
-      g: atmos.cloud.g,
-      b: atmos.cloud.b,
-      hex: atmos.cloud.hex,
-    };
-    this.cloudRenderer.update(
-      camera.position.x,
-      camera.position.z,
-      deltaSeconds,
-      cloudColor,
-      atmos.cloudFogStrength,
-    );
-
-    // 9. Stream chunks around the player
     const preStreamMeshingStats = this.chunkRenderer.getMeshingStats();
-    this.chunkStreamer.update(
-      camera.position.x,
-      camera.position.z,
-      this.cameraController.getYaw(),
-      this.player.velocity.x,
-      this.player.velocity.z,
-      preStreamMeshingStats.queued,
-      preStreamMeshingStats.pendingUploads,
-    );
+    this.chunkStreamer.update(camera.position.x, camera.position.z, this.cameraController.getYaw(), this.player.velocity.x, this.player.velocity.z, preStreamMeshingStats.queued, preStreamMeshingStats.pendingUploads);
     const generationStats = this.chunkStreamer.getGenerationStats();
     const meshingStats = this.chunkRenderer.getMeshingStats();
-    this.performanceProfiler.setQueues(
-      generationStats.queued,
-      meshingStats.queued + meshingStats.pendingUploads,
-      generationStats.activeWorkers + meshingStats.activeWorkers,
-      generationStats.oldestCriticalAgeMs,
-    );
-    this.performanceProfiler.setWorkerCounters(
-      generationStats.completed,
-      generationStats.stale,
-      generationStats.errors,
-    );
+    this.performanceProfiler.setQueues(generationStats.queued, meshingStats.queued + meshingStats.pendingUploads, generationStats.activeWorkers + meshingStats.activeWorkers, generationStats.oldestCriticalAgeMs);
+    this.performanceProfiler.setWorkerCounters(generationStats.completed, generationStats.stale, generationStats.errors);
 
-    // 10. Update interaction (raycast targeting + break/place edits)
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
-      this.interactionController.update(deltaSeconds);
-    }
+    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.interactionController.update(deltaSeconds);
 
-    // 10a. Update held item selection and slot HUD if changed
     const currentSlot = this.interactionController.getSelectedSlotIndex();
     const currentStack = this.inventory.getStack(currentSlot);
     const currentStackKey = currentStack === null ? 'empty' : `${currentStack.identity.id}_${currentStack.count}`;
-    if (this.selectedSlot !== currentSlot || this.lastSelectedStackKey !== currentStackKey) {
-      this.selectedSlot = currentSlot;
-      this.lastSelectedStackKey = currentStackKey;
-      this.updateHeldItemMesh();
-    }
+    if (this.selectedSlot !== currentSlot || this.lastSelectedStackKey !== currentStackKey) { this.selectedSlot = currentSlot; this.lastSelectedStackKey = currentStackKey; this.updateHeldItemMesh(); }
 
-    // Transactional Q-key dropped item throw (Beta 1.7.3)
     if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && this.input.isKeyJustPressed('KeyQ')) {
       const selectedSlotIndex = this.interactionController.getSelectedSlotIndex();
       const stack = this.inventory.getStack(selectedSlotIndex);
       if (stack !== null) {
-        // Player eye coordinates (X, Y - 0.3 + 1.62 = Y + 1.32, Z)
-        const spawnX = this.player.position.x;
-        const spawnY = this.player.position.y + 1.32;
-        const spawnZ = this.player.position.z;
-
-        // Compute exact Beta 1.7.3 launch velocities based on look pitch/yaw
-        const yaw = this.cameraController.getYaw();
-        const pitch = this.cameraController.getPitch();
-        
+        const spawnX = this.player.position.x; const spawnY = this.player.position.y + 1.32; const spawnZ = this.player.position.z;
+        const yaw = this.cameraController.getYaw(); const pitch = this.cameraController.getPitch();
         const throwStrength = 0.3;
-        let motionX = -Math.sin(yaw) * Math.cos(pitch) * throwStrength;
-        let motionZ = Math.cos(yaw) * Math.cos(pitch) * throwStrength;
-        let motionY = -Math.sin(pitch) * throwStrength + 0.1;
-
-        // Add minor randomized deviance matching original source
-        const randAngle = Math.random() * Math.PI * 2;
-        const randForce = Math.random() * 0.02;
-        motionX += Math.cos(randAngle) * randForce;
-        motionZ += Math.sin(randAngle) * randForce;
-        motionY += (Math.random() - Math.random()) * 0.1;
-
-        // Single drop representation
-        const singleDrop = {
-          type: stack.identity.type,
-          id: stack.identity.id,
-          count: 1,
-          metadata:stack.metadata,
-          damage:stack.damage,
-        };
-
-        // Spawn the thrown item with a 40-tick pickup delay (2.0s)
-        this.itemEntityManager.spawnThrownItem(spawnX, spawnY, spawnZ, singleDrop, motionX, motionY, motionZ, 40);
-
-        // Transactional: Consume exactly 1 item from the stack only after successful spawn
+        let motionX = -Math.sin(yaw) * Math.cos(pitch) * throwStrength; let motionZ = Math.cos(yaw) * Math.cos(pitch) * throwStrength; let motionY = -Math.sin(pitch) * throwStrength + 0.1;
+        const randAngle = Math.random() * Math.PI * 2; const randForce = Math.random() * 0.02;
+        motionX += Math.cos(randAngle) * randForce; motionZ += Math.sin(randAngle) * randForce; motionY += (Math.random() - Math.random()) * 0.1;
+        this.itemEntityManager.spawnThrownItem(spawnX, spawnY, spawnZ, { type: stack.identity.type, id: stack.identity.id, count: 1, metadata:stack.metadata, damage:stack.damage }, motionX, motionY, motionZ, 40);
         this.inventory.decrementSlot(selectedSlotIndex, 1);
       }
     }
 
-    // 10b. Query and update static player and arm lighting defensively
-    const px = Math.floor(this.player.position.x);
-    const pey = Math.floor(this.player.position.y + FIRST_PERSON_CAMERA_OFFSET_Y); // Sample lighting at eye/body level
-    const pz = Math.floor(this.player.position.z);
-    const skyLight = this.blockUpdateWorld.getSkylight(px, pey, pz);
-    const blockLight = this.blockUpdateWorld.getBlocklight(px, pey, pz);
-
+    const px = Math.floor(this.player.position.x); const pey = Math.floor(this.player.position.y + FIRST_PERSON_CAMERA_OFFSET_Y); const pz = Math.floor(this.player.position.z);
+    const skyLight = this.blockUpdateWorld.getSkylight(px, pey, pz); const blockLight = this.blockUpdateWorld.getBlocklight(px, pey, pz);
     this.firstPersonArmRenderer.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
     this.heldItemRenderer.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
     this.armourMaterialCache.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
 
     if (this.playerModelUniforms && this.playerModelUniforms.uStaticSkyLight && this.playerModelUniforms.uStaticBlockLight) {
-      this.playerModelUniforms.uStaticSkyLight.value = skyLight;
-      this.playerModelUniforms.uStaticBlockLight.value = blockLight;
-      this.playerModelUniforms.uSkylightSubtracted.value = atmos.effectiveSkylightSubtracted;
-      this.playerModelUniforms.uSunBrightnessFactor.value = atmos.sunBrightnessFactor;
+      this.playerModelUniforms.uStaticSkyLight.value = skyLight; this.playerModelUniforms.uStaticBlockLight.value = blockLight;
+      this.playerModelUniforms.uSkylightSubtracted.value = atmos.effectiveSkylightSubtracted; this.playerModelUniforms.uSunBrightnessFactor.value = atmos.sunBrightnessFactor;
     }
 
-    // 11. Rebuild dirty chunk meshes (budgeted, terrain + water together);
-    // picks up this frame's edits
-    this.chunkRenderer.update(
-      this.performanceProfiler.getSnapshot().frameTimeMs,
-      camera.position.x,
-      camera.position.z,
-    );
-
-    // 11b. Stage 18: precipitation, splash particles, lightning.
-    //      Precipitation depends on chunk heightmaps having been
-    //      streamed/updated (step 9), so it runs after streaming.
-    this.precipitationRenderer.update(
-      camera.position.x,
-      camera.position.y,
-      camera.position.z,
-      deltaSeconds,
-      atmos,
-      this.worldTime,
-    );
+    this.chunkRenderer.update(this.performanceProfiler.getSnapshot().frameTimeMs, camera.position.x, camera.position.z);
+    this.precipitationRenderer.update(camera.position.x, camera.position.y, camera.position.z, deltaSeconds, atmos, this.worldTime);
     this.rainSplashRenderer.update(camera, deltaSeconds, atmos, this.precipitationRenderer);
-    this.lightningManager.update(
-      deltaSeconds,
-      weatherState,
-      camera.position.x,
-      camera.position.y,
-      camera.position.z,
-    );
+    this.lightningManager.update(deltaSeconds, weatherState, camera.position.x, camera.position.y, camera.position.z);
     this.lightningRenderer.update(this.lightningManager.getState());
 
-    // 12. Apply fog from the camera eye position after streaming so any
-    // newly entered fluid volume is already loaded when sampled.
-    // Stage 17: fog colour now derives from the sky's HORIZON colour
-    // (which already equals Beta getFogColor + sunrise tint) so the
-    // fog band and horizon band always agree.
-    // Stage 18: horizon colour used is the WEATHER-BLENDED one from
-    // AtmosphericState, so storms tighten and darken fog automatically.
-    const fogState = this.fogController.compute({
-      eyeX: camera.position.x,
-      eyeY: camera.position.y,
-      eyeZ: camera.position.z,
-      rawLightDebugMode: this.rawLightDebugMode,
-      ambientOcclusionDebugMode: this.ambientOcclusionDebugMode,
-      // Stage 18: use WEATHER-BLENDED horizon so fog and sky agree
-      // during storms. Base overworld density multiplied by the storm
-      // multiplier so rain/thunder pull the horizon closer.
-      overworldColorHex: atmos.horizon.hex,
-      overworldDensityMultiplier: atmos.fogDensityMultiplier,
-    });
+    const fogState = this.fogController.compute({ eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z, rawLightDebugMode: this.rawLightDebugMode, ambientOcclusionDebugMode: this.ambientOcclusionDebugMode, overworldColorHex: atmos.horizon.hex, overworldDensityMultiplier: atmos.fogDensityMultiplier });
     this.renderer.setFogState(fogState);
-
-    // 13. Update the block highlight to match the current target
     this.blockHighlight.setTarget(this.interactionController.getCurrentHit());
-
-    // Update the block breaking destroy crack overlay
-    const activeMiningPos = this.interactionController.breakingController.getMiningBlockPos();
-    const progress = this.interactionController.breakingController.getProgress();
+    const activeMiningPos = this.interactionController.breakingController.getMiningBlockPos(); const progress = this.interactionController.breakingController.getProgress();
     this.destroyOverlayRenderer.update(activeMiningPos, progress);
-
-    // Update dropped item visuals (rotation and bobbing)
-    // Interpolate entity transforms between the last two simulation ticks
-    // using the authoritative world clock's fractional tick as alpha.
     const totalTicksForAlpha = this.worldTime.getTotalTicks();
     this.entityManager.render(totalTicksForAlpha - Math.floor(totalTicksForAlpha));
     this.entityParticles.update(deltaSeconds);
-
-    // 14. Update debug overlay stats. Frame timing is recorded every
-    // frame (so FPS smoothing stays accurate even while the overlay is
-    // hidden); the full stats snapshot (including a climate/biome
-    // sample) is only computed while the overlay is actually visible.
     this.debugStatsCollector.recordFrame(deltaSeconds);
-    if (this.debugOverlay.isVisible()) {
-      this.debugOverlay.render(this.debugStatsCollector.collect(this.noClipEnabled));
-    }
-
-    // Optional registered systems, before rendering.
-    for (const system of this.updatables) {
-      system.update(deltaSeconds);
-    }
+    if (this.debugOverlay.isVisible()) this.debugOverlay.render(this.debugStatsCollector.collect(this.noClipEnabled));
+    for (const system of this.updatables) system.update(deltaSeconds);
 
     this.performanceProfiler.recordMeshUpload(this.chunkRenderer.getMeshUploadsThisFrame());
-    this.performanceProfiler.setApproximateGeometryMemoryMb(
-      this.chunkRenderer.getApproximateGeometryMemoryBytes() / (1024 * 1024),
-    );
+    this.performanceProfiler.setApproximateGeometryMemoryMb(this.chunkRenderer.getApproximateGeometryMemoryBytes() / (1024 * 1024));
     this.performanceProfiler.endUpdate();
-
-    // 15. Render terrain + water (both drawn in the one WebGL pass; the
-    // debug overlay is a separate plain-HTML element composited by the
-    // browser on top, not part of this render call).
     this.performanceProfiler.beginRender();
+    this.renderer.renderer.clear(); this.renderer.render();
+    if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) { this.renderer.renderer.clearDepth(); this.renderer.renderer.render(this.firstPersonArmRenderer.scene, camera); }
 
-    // Clear whole buffer before world render
-    this.renderer.renderer.clear();
-
-    // Render world
-    this.renderer.render();
-
-    // Render first-person arm layer over the world (no depth clash)
-    if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
-      this.renderer.renderer.clearDepth();
-      this.renderer.renderer.render(this.firstPersonArmRenderer.scene, camera);
-    }
-
-    // Render WebGL HUD slots icons pass cleanly on top of everything
     this.hudRenderer.update(this.selectedSlot);
     const layoutScale = this.hotbarHudRenderer.getLayout().scale;
-    this.inventoryController.updateScale(layoutScale);
-    this.craftingTableController.updateScale(layoutScale);
-    this.furnaceController.updateScale(layoutScale);
-    this.chestController.updateScale(layoutScale);
-    if (this.inventoryController.isOpen) {
-      this.inventoryController.renderAll();
-    }
-    if (this.craftingTableController.isOpen) {
-      this.craftingTableController.renderAll();
-    }
-    if (this.furnaceController.isOpen) {
-      this.furnaceController.renderAll();
-    }
-    if (this.chestController.isOpen) {
-      this.chestController.renderAll();
-    }
+    this.inventoryController.updateScale(layoutScale); this.craftingTableController.updateScale(layoutScale); this.furnaceController.updateScale(layoutScale); this.chestController.updateScale(layoutScale);
+    if (this.inventoryController.isOpen) this.inventoryController.renderAll();
+    if (this.craftingTableController.isOpen) this.craftingTableController.renderAll();
+    if (this.furnaceController.isOpen) this.furnaceController.renderAll();
+    if (this.chestController.isOpen) this.chestController.renderAll();
     this.hudRenderer.render();
-
-    this.performanceProfiler.endRender();
-    this.performanceProfiler.endFrame();
+    this.performanceProfiler.endRender(); this.performanceProfiler.endFrame();
   };
+
   private snapshotMetadata(): WorldMetadata {
-    const current = this.saveCoordinator.getMetadata();
-    const weather = this.weatherController.getState();
-    const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);
-
-    return {
-      ...current,
-      player: {
-        x: this.player.position.x,
-        y: this.player.position.y,
-        z: this.player.position.z,
-        yaw: this.cameraController.getYaw(),
-        pitch: this.cameraController.getPitch()
-      },
-      playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion},
-      timeTicks: this.worldTime.getTotalTicks(),
-      weather: {
-        raining: weather.raining,
-        thundering: weather.thundering,
-        rainTime: weather.rainTime,
-        thunderTime: weather.thunderTime
-      },
-      inventory: serialized.inventory,
-      armour: serialized.armour,
-      selectedHotbarSlot: serialized.selectedHotbarSlot,
-      furnaces: this.furnaceManager.serialize(),
-      chests: this.chestManager.serialize(),
-    };
+    const weather = this.weatherController.getState(); const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);
+    return { ...this.saveCoordinator.getMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize() };
   }
 
-  private async saveMetadata(force: boolean): Promise<void> {
-    if (this.metadataSaveInFlight !== null) return this.metadataSaveInFlight;
-    this.saveCoordinator.update(this.snapshotMetadata());
-    this.metadataSaveInFlight = this.saveCoordinator.save(force).finally(() => { this.metadataSaveInFlight = null; });
-    return this.metadataSaveInFlight;
-  }
+  private async saveMetadata(force: boolean): Promise<void> { if (this.metadataSaveInFlight !== null) return this.metadataSaveInFlight; this.saveCoordinator.update(this.snapshotMetadata()); this.metadataSaveInFlight = this.saveCoordinator.save(force).finally(() => { this.metadataSaveInFlight = null; }); return this.metadataSaveInFlight; }
 
   private updateHeldItemMesh(): void {
     const stack = this.inventory.getStack(this.selectedSlot);
-
-    if (stack === null) {
-      this.firstPersonHeldBlockMesh.visible = false;
-      this.thirdPersonHeldBlockMesh.visible = false;
-    } else {
-      const category = classifyItemRender(stack.identity, this.blockRegistry);
-      const def = this.blockRegistry.getById(stack.identity.id as number);
-
+    if (stack === null) { this.firstPersonHeldBlockMesh.visible = false; this.thirdPersonHeldBlockMesh.visible = false; } else {
+      const category = classifyItemRender(stack.identity, this.blockRegistry); const def = this.blockRegistry.getById(stack.identity.id as number);
       if (category === 'unsupported') {
         const newGeo = BlockItemModelBuilder.buildDebugPlaceholder();
-
-        this.firstPersonHeldBlockMesh.geometry.dispose();
-        this.firstPersonHeldBlockMesh.geometry = newGeo;
-        this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
-
-        this.thirdPersonHeldBlockMesh.geometry.dispose();
-        this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
-        this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
+        this.firstPersonHeldBlockMesh.geometry.dispose(); this.firstPersonHeldBlockMesh.geometry = newGeo; this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
+        this.thirdPersonHeldBlockMesh.geometry.dispose(); this.thirdPersonHeldBlockMesh.geometry = newGeo.clone(); this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
       } else if (category === 'block_3d' && def !== undefined) {
         const newGeo = BlockItemModelBuilder.build3DGeometry(def, this.atlas);
-
-        this.firstPersonHeldBlockMesh.geometry.dispose();
-        this.firstPersonHeldBlockMesh.geometry = newGeo;
-        this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
-
-        this.thirdPersonHeldBlockMesh.geometry.dispose();
-        this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
-        this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
+        this.firstPersonHeldBlockMesh.geometry.dispose(); this.firstPersonHeldBlockMesh.geometry = newGeo; this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
+        this.thirdPersonHeldBlockMesh.geometry.dispose(); this.thirdPersonHeldBlockMesh.geometry = newGeo.clone(); this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
       } else if (category === 'block_flat' && def !== undefined) {
         const newGeo = BlockItemModelBuilder.buildFlatGeometry(def, this.atlas);
-
-        this.firstPersonHeldBlockMesh.geometry.dispose();
-        this.firstPersonHeldBlockMesh.geometry = newGeo;
-        this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
-
-        this.thirdPersonHeldBlockMesh.geometry.dispose();
-        this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
-        this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
+        this.firstPersonHeldBlockMesh.geometry.dispose(); this.firstPersonHeldBlockMesh.geometry = newGeo; this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
+        this.thirdPersonHeldBlockMesh.geometry.dispose(); this.thirdPersonHeldBlockMesh.geometry = newGeo.clone(); this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
       } else {
-        const uvRect = this.itemAtlas.getUvRect(stack.identity.id as string);
-        const u0 = uvRect?.u0 ?? 0;
-        const v0 = uvRect?.v0 ?? 0;
-        const u1 = uvRect?.u1 ?? 1;
-        const v1 = uvRect?.v1 ?? 1;
-
+        const uvRect = this.itemAtlas.getUvRect(stack.identity.id as string); const u0 = uvRect?.u0 ?? 0; const v0 = uvRect?.v0 ?? 0; const u1 = uvRect?.u1 ?? 1; const v1 = uvRect?.v1 ?? 1;
         const newGeo = this.createBillboardGeometry(u0, v0, u1, v1, uvRect === undefined);
-
-        this.firstPersonHeldBlockMesh.geometry.dispose();
-        this.firstPersonHeldBlockMesh.geometry = newGeo;
-        this.firstPersonHeldBlockMesh.material = this.itemHeldMaterial;
-
-        this.thirdPersonHeldBlockMesh.geometry.dispose();
-        this.thirdPersonHeldBlockMesh.geometry = newGeo.clone();
-        this.thirdPersonHeldBlockMesh.material = this.itemHeldMaterial;
+        this.firstPersonHeldBlockMesh.geometry.dispose(); this.firstPersonHeldBlockMesh.geometry = newGeo; this.firstPersonHeldBlockMesh.material = this.itemHeldMaterial;
+        this.thirdPersonHeldBlockMesh.geometry.dispose(); this.thirdPersonHeldBlockMesh.geometry = newGeo.clone(); this.thirdPersonHeldBlockMesh.material = this.itemHeldMaterial;
       }
-
-      // Legacy Engine-held meshes are intentionally disabled: HeldItemRenderer owns first-person content.
-      this.firstPersonHeldBlockMesh.visible = false;
-      this.thirdPersonHeldBlockMesh.visible = false;
+      this.firstPersonHeldBlockMesh.visible = false; this.thirdPersonHeldBlockMesh.visible = false;
     }
   }
 
   private createBillboardGeometry(u0: number, v0: number, u1: number, v1: number, isMissing = false): THREE.BufferGeometry {
-    const geom = new THREE.BufferGeometry();
-    const half = 0.25; // Compact size for held item
-    
-    // 8 vertices: 4 for front quad, 4 for back quad
-    const positions = new Float32Array([
-      // Front quad
-      -half,  half,  0.001,
-       half,  half,  0.001,
-      -half, -half,  0.001,
-       half, -half,  0.001,
-
-      // Back quad (offset slightly backward)
-      -half,  half, -0.001,
-       half,  half, -0.001,
-      -half, -half, -0.001,
-       half, -half, -0.001,
-    ]);
-
-    const uvs = new Float32Array([
-      // Front face standard UVs
-      u0, v0,
-      u1, v0,
-      u0, v1,
-      u1, v1,
-
-      // Back face horizontally-flipped UVs so they render unmirrored from behind
-      u1, v0,
-      u0, v0,
-      u1, v1,
-      u0, v1,
-    ]);
-
-    const colors = new Float32Array(24);
-    const r = isMissing ? 1.0 : 1.0;
-    const g = isMissing ? 0.0 : 1.0;
-    const b = isMissing ? 1.0 : 1.0;
-    for (let i = 0; i < 8; i++) {
-      colors[i * 3 + 0] = r;
-      colors[i * 3 + 1] = g;
-      colors[i * 3 + 2] = b;
-    }
-
-    const indices = [
-      // Front face (Counter-clockwise winding)
-      0, 2, 1,
-      1, 2, 3,
-
-      // Back face (Clockwise winding from front, but counter-clockwise from back)
-      5, 6, 4,
-      7, 6, 5
-    ];
-
-    geom.setIndex(indices);
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geom.computeVertexNormals();
-    return geom;
+    const geom = new THREE.BufferGeometry(); const half = 0.25;
+    const positions = new Float32Array([-half, half, 0.001, half, half, 0.001, -half, -half, 0.001, half, -half, 0.001, -half, half, -0.001, half, half, -0.001, -half, -half, -0.001, half, -half, -0.001]);
+    const uvs = new Float32Array([u0, v0, u1, v0, u0, v1, u1, v1, u1, v0, u0, v0, u1, v1, u0, v1]);
+    const colors = new Float32Array(24); const r = 1.0; const g = isMissing ? 0.0 : 1.0; const b = 1.0;
+    for (let i = 0; i < 8; i++) { colors[i * 3 + 0] = r; colors[i * 3 + 1] = g; colors[i * 3 + 2] = b; }
+    geom.setIndex([0, 2, 1, 1, 2, 3, 5, 6, 4, 7, 6, 5]);
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3)); geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2)); geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geom.computeVertexNormals(); return geom;
   }
-
 }

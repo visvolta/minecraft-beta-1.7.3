@@ -1,4 +1,4 @@
-import { BlockIds, type BlockId } from '../../blocks/BlockId';
+import { BlockIds } from '../../blocks/BlockId';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
 import { AABB } from '../../physics/AABB';
 import type { PowerQueryContext, RedstonePower } from '../redstone/RedstonePower';

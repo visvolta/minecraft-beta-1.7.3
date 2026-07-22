@@ -1726,7 +1726,7 @@ export class ChunkMesher {
         ? [ou1, ov0, ou1, ov1, ou0, ov1, ou0, ov0]
         : [ou0, ov1, ou1, ov1, ou1, ov0, ou0, ov0];
 
-    const worldFloorV = floorV.map(v => [x + v[0], y + v[1], z + v[2]]) as [Corner, Corner, Corner, Corner];
+    const worldFloorV = floorV.map(v => [x + v[0], y + v[1], z + v[2]]) as unknown as [Corner, Corner, Corner, Corner];
     
     // Pass 1: Tinted
     buffers.pushQuad(worldFloorV, [0, 1, 0], uvBase, tint, light, 1, FluidTextureKind.WaterStill, finalUvs);
@@ -2261,7 +2261,7 @@ export class ChunkMesher {
     else if (orientation === 3) { v0 = [0, 1 + h, 1]; v1 = [1, h, 1]; v2 = [1, h, 0]; v3 = [0, 1 + h, 0]; }
     else if (orientation === 4) { v0 = [0, h, 1]; v1 = [1, h, 1]; v2 = [1, 1 + h, 0]; v3 = [0, 1 + h, 0]; }
     else if (orientation === 5) { v0 = [0, 1 + h, 1]; v1 = [1, 1 + h, 1]; v2 = [1, h, 0]; v3 = [0, h, 0]; }
-    const worldV = [v0, v1, v2, v3].map(v => [x + v[0], y + v[1], z + v[2]]) as [Corner, Corner, Corner, Corner];
+    const worldV = [v0, v1, v2, v3].map(v => [x + v[0], y + v[1], z + v[2]]) as unknown as [Corner, Corner, Corner, Corner];
     buffers.pushQuad(worldV, [0, 1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
   }
 }

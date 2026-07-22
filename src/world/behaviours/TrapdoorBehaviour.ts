@@ -1,6 +1,5 @@
 import { BlockIds } from '../../blocks/BlockId';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
-import { FaceDirection } from '../../blocks/BlockFace';
 
 export class TrapdoorBehaviour implements BlockBehaviour {
     public onInteract(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {

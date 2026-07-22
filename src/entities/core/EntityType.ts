@@ -22,6 +22,8 @@ export const EntityTypeIds = {
   Spider: 9,
   Creeper: 10,
   Arrow: 11,
+  PrimedTnt: 12,
+  Minecart: 13,
 } as const;
 
 export type EntityTypeId = (typeof EntityTypeIds)[keyof typeof EntityTypeIds];

@@ -24,13 +24,15 @@ export class PoweredRailBehaviour implements BlockBehaviour {
     private checkChainPower(ctx: BlockBehaviourContext, x: number, y: number, z: number, meta: number, direction: boolean, depth: number): boolean {
         if (depth >= 8) return false;
         
-        // Is THIS rail directly powered?
-        if (ctx.power?.isBlockIndirectlyPowered({ x, y, z }) || ctx.power?.isBlockIndirectlyPowered({ x, y + 1, z })) {
+        if ((ctx.power?.isBlockIndirectlyPowered({ x: x, y: y, z: z }) ?? false) || 
+            (ctx.power?.isBlockIndirectlyPowered({ x: x, y: y + 1, z: z }) ?? false)) {
             return true;
         }
 
         const orientation = meta & 7;
-        let nx = x, ny = y, nz = z;
+        let nx = x;
+        let ny = y;
+        let nz = z;
         
         if (orientation === 0) nz += direction ? 1 : -1;
         else if (orientation === 1) nx += direction ? 1 : -1;
@@ -39,7 +41,6 @@ export class PoweredRailBehaviour implements BlockBehaviour {
         else if (orientation === 4) { nz += direction ? -1 : 1; if (direction) ny++; }
         else if (orientation === 5) { nz += direction ? 1 : -1; if (!direction) ny++; }
 
-        // Try same level or one below (for slopes)
         return this.isRailPowered(ctx, nx, ny, nz, direction, depth, orientation) || 
                this.isRailPowered(ctx, nx, ny - 1, nz, direction, depth, orientation);
     }
@@ -51,16 +52,14 @@ export class PoweredRailBehaviour implements BlockBehaviour {
         const meta = ctx.world.getBlockMetadata(x, y, z);
         const orientation = meta & 7;
 
-        // Continuity check
         if (parentOrientation === 1 && (orientation === 0 || orientation === 4 || orientation === 5)) return false;
         if (parentOrientation === 0 && (orientation === 1 || orientation === 2 || orientation === 3)) return false;
 
-        // If this neighbor is directly powered, chain is powered
-        if (ctx.power?.isBlockIndirectlyPowered({ x, y, z }) || ctx.power?.isBlockIndirectlyPowered({ x, y + 1, z })) {
+        if ((ctx.power?.isBlockIndirectlyPowered({ x: x, y: y, z: z }) ?? false) || 
+            (ctx.power?.isBlockIndirectlyPowered({ x: x, y: y + 1, z: z }) ?? false)) {
             return true;
         }
 
-        // Recursively check next in chain
         return this.checkChainPower(ctx, x, y, z, meta, direction, depth + 1);
     }
 }

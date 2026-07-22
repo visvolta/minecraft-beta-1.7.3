@@ -156,7 +156,7 @@ export class RedstoneWireBehaviour implements BlockBehaviour {
   private isPowerProvider(blockId: BlockId): boolean {
     if (blockId === BlockIds.RedstoneWire) return true;
     if (blockId === 0) return false;
-    return blockId === BlockIds.RedstoneTorchOn || blockId === BlockIds.Lever || 
+    return blockId === BlockIds.RedstoneTorchOn || blockId === BlockIds.RedstoneTorchOff || blockId === BlockIds.Lever || 
            blockId === BlockIds.StoneButton || blockId === BlockIds.StonePressurePlate ||
            blockId === BlockIds.WoodPressurePlate;
   }

@@ -8,7 +8,9 @@ export class DoorBehaviour implements BlockBehaviour {
         if (this.isIron) return true;
         const meta = ctx.world.getBlockMetadata(x, y, z);
         const isUpper = (meta & 8) !== 0;
-        const lx = x, ly = isUpper ? y - 1 : y, lz = z;
+        const lx = x;
+        const ly = isUpper ? y - 1 : y;
+        const lz = z;
         const lowerMeta = ctx.world.getBlockMetadata(lx, ly, lz);
         this.setDoorState(ctx, lx, ly, lz, (lowerMeta & 4) === 0);
         return true;
@@ -35,12 +37,12 @@ export class DoorBehaviour implements BlockBehaviour {
             }
         }
 
-        // Power handling (only for lower half logic)
         if (!isUpper) {
-            const powered = ctx.power?.isBlockIndirectlyPowered({ x, y, z }) || ctx.power?.isBlockIndirectlyPowered({ x, y + 1, z });
+            const powered = (ctx.power?.isBlockIndirectlyPowered({ x: x, y: y, z: z }) ?? false) || 
+                            (ctx.power?.isBlockIndirectlyPowered({ x: x, y: y + 1, z: z }) ?? false);
             const isOpen = (meta & 4) !== 0;
-            if (!!powered !== isOpen) {
-                this.setDoorState(ctx, x, y, z, !!powered);
+            if (powered !== isOpen) {
+                this.setDoorState(ctx, x, y, z, powered);
             }
         }
     }

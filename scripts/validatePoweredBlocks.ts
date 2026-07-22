@@ -1,10 +1,7 @@
-import { FaceDirection } from '../src/blocks/BlockFace.ts';
 import type { BlockDefinition, BlockRenderType } from '../src/blocks/BlockDefinition.ts';
-import type { BlockId } from '../src/blocks/BlockId.ts';
 import { BlockIds } from '../src/blocks/BlockId.ts';
 import { BlockRegistry } from '../src/blocks/BlockRegistry.ts';
 import { BlockBehaviourRegistry } from '../src/world/BlockBehaviour.ts';
-import { ALL_BLOCK_DIRECTIONS, directionOffset, offsetBlockPosition } from '../src/world/BlockDirections.ts';
 import { BlockUpdateWorld } from '../src/world/BlockUpdateWorld.ts';
 import { ChunkManager } from '../src/world/ChunkManager.ts';
 import { LightEngine } from '../src/world/generation/lighting/LightEngine.ts';
@@ -14,13 +11,9 @@ import { WorldTickScheduler } from '../src/world/ticks/WorldTickScheduler.ts';
 import { RedstoneWireBehaviour } from '../src/world/behaviours/RedstoneWireBehaviour.ts';
 import { RedstoneTorchBehaviour } from '../src/world/behaviours/RedstoneTorchBehaviour.ts';
 import { LeverBehaviour } from '../src/world/behaviours/LeverBehaviour.ts';
-import { ButtonBehaviour } from '../src/world/behaviours/ButtonBehaviour.ts';
-import { PressurePlateBehaviour } from '../src/world/behaviours/PressurePlateBehaviour.ts';
 import { DoorBehaviour } from '../src/world/behaviours/DoorBehaviour.ts';
-import { TrapdoorBehaviour } from '../src/world/behaviours/TrapdoorBehaviour.ts';
-import { PoweredRailBehaviour } from '../src/world/behaviours/PoweredRailBehaviour.ts';
 import { TntBehaviour } from '../src/world/behaviours/TntBehaviour.ts';
-import { LivingEntity } from '../src/entities/living/LivingEntity.ts';
+import { PoweredRailBehaviour } from '../src/world/behaviours/PoweredRailBehaviour.ts';
 
 function assert(value: boolean, message: string): void {
   if (!value) throw new Error(message);
@@ -97,19 +90,12 @@ function createTestWorld(): TestWorld {
 function testDoorSynchronization(): void {
     const test = createTestWorld();
     test.world.setBlock(0, 9, 0, SOLID);
-    test.world.setBlock(0, 10, 0, DOOR_WOOD, { metadata: 0 }); // Lower
-    test.world.setBlock(0, 11, 0, DOOR_WOOD, { metadata: 8 }); // Upper
+    test.world.setBlock(0, 10, 0, DOOR_WOOD, { metadata: 0 });
+    test.world.setBlock(0, 11, 0, DOOR_WOOD, { metadata: 8 });
     
-    // Interact with lower half
-    test.behaviours.get(DOOR_WOOD).onInteract!({ world: test.world, gameTick: 0 } as any, 0, 10, 0);
+    test.behaviours.get(DOOR_WOOD).onInteract?.({ world: test.world, gameTick: 0 } as any, 0, 10, 0);
     assert((test.world.getBlockMetadata(0, 10, 0) & 4) !== 0, 'Lower half opened');
     assert((test.world.getBlockMetadata(0, 11, 0) & 4) !== 0, 'Upper half synchronized open');
-    
-    // Power upper half
-    test.world.setBlock(1, 11, 0, LEVER, { metadata: 8 | 2 }); // Active, North-facing (points South to door)
-    test.step();
-    // Door should respond to power
-    // Wait, Lever needs to provide power. RedstonePowerEngine queries it.
     console.log('Door synchronization validation passed.');
 }
 
@@ -117,11 +103,10 @@ function testRailPropagation(): void {
     const test = createTestWorld();
     for (let x = 0; x < 10; x++) {
         test.world.setBlock(x, 9, 0, SOLID);
-        test.world.setBlock(x, 10, 0, RAIL_POWERED, { metadata: 1 }); // EW orientation
+        test.world.setBlock(x, 10, 0, RAIL_POWERED, { metadata: 1 });
     }
     
-    // Power first rail
-    test.world.setBlock(0, 10, 1, LEVER, { metadata: 8 | 4 }); // Active, points North
+    test.world.setBlock(0, 10, 1, LEVER, { metadata: 8 | 4 });
     test.world.notifyNeighborsOfStateChange(0, 10, 0, LEVER);
     test.step();
     
@@ -134,7 +119,7 @@ function testRailPropagation(): void {
 function testTntPriming(): void {
     const test = createTestWorld();
     test.world.setBlock(0, 10, 0, TNT);
-    test.world.setBlock(1, 10, 0, LEVER, { metadata: 8 | 2 }); // Points West to TNT
+    test.world.setBlock(1, 10, 0, LEVER, { metadata: 8 | 2 });
     test.world.notifyNeighborsOfStateChange(0, 10, 0, LEVER);
     
     assert(test.world.getBlock(0, 10, 0) === 0, 'TNT block removed after priming');

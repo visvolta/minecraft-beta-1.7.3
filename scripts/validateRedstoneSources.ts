@@ -4,7 +4,6 @@ import type { BlockId } from '../src/blocks/BlockId.ts';
 import { BlockIds } from '../src/blocks/BlockId.ts';
 import { BlockRegistry } from '../src/blocks/BlockRegistry.ts';
 import { BlockBehaviourRegistry } from '../src/world/BlockBehaviour.ts';
-import { ALL_BLOCK_DIRECTIONS, directionOffset } from '../src/world/BlockDirections.ts';
 import { BlockUpdateWorld } from '../src/world/BlockUpdateWorld.ts';
 import { ChunkManager } from '../src/world/ChunkManager.ts';
 import { LightEngine } from '../src/world/generation/lighting/LightEngine.ts';
@@ -16,7 +15,6 @@ import { RedstoneTorchBehaviour } from '../src/world/behaviours/RedstoneTorchBeh
 import { LeverBehaviour } from '../src/world/behaviours/LeverBehaviour.ts';
 import { ButtonBehaviour } from '../src/world/behaviours/ButtonBehaviour.ts';
 import { PressurePlateBehaviour } from '../src/world/behaviours/PressurePlateBehaviour.ts';
-import { LivingEntity } from '../src/entities/living/LivingEntity.ts';
 
 function assert(value: boolean, message: string): void {
   if (!value) throw new Error(message);
@@ -106,8 +104,7 @@ function setBlock(test: TestWorld, x: number, y: number, z: number, id: BlockId,
 function testTorchInversion(): void {
     const test = createTestWorld();
     setBlock(test, 0, 9, 0, SOLID);
-    setBlock(test, 0, 10, 0, TORCH_ON); 
-    test.world.setBlockMetadata(0, 10, 0, 5);
+    setBlock(test, 0, 10, 0, TORCH_ON, 5); 
     
     assert(test.world.getBlock(0, 10, 0) === TORCH_ON, 'Torch starts ON');
     
@@ -153,7 +150,7 @@ function testPressurePlateActivation(): void {
     setBlock(test, 0, 10, 0, PLATE_STONE);
     
     test.entities.getEntitiesInAABB = (_box: any, _predicate: any) => {
-        return [new LivingEntity({} as any, 0, 0, 0)];
+        return [{}]; 
     };
     
     test.behaviours.get(PLATE_STONE).onEntityCollidedWithBlock?.({ world: test.world, entities: test.entities, gameTick: 0 } as any, 0, 10, 0, {} as any);

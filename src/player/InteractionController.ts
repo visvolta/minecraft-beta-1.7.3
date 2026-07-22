@@ -19,6 +19,7 @@ import { InventoryTransferService } from '../inventory/InventoryTransferService'
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 import type { EntityManager } from '../entities/core/EntityManager';
 import { LivingEntity } from '../entities/living/LivingEntity';
+import { MinecartEntity } from '../entities/MinecartEntity';
 import { DamageSource } from '../entities/damage/DamageSource';
 import { selectMeleeTarget } from './MeleeTargeting';
 import { MELEE_REACH, PLAYER_MELEE_DAMAGE } from './PlayerConstants';import { combatDurabilityCost } from '../items/ItemDurability';
@@ -225,6 +226,22 @@ export class InteractionController {
     }
 
     if (this.input.isMouseButtonJustPressed('right')) {
+      const selectedId = this.getSelectedBlockId();
+      if (selectedId === 328) {
+          // Special minecart placement
+          const rx = this.currentHit.blockPos.x;
+          const ry = this.currentHit.blockPos.y;
+          const rz = this.currentHit.blockPos.z;
+          const targetId = this.blockUpdateWorld.getBlock(rx, ry, rz);
+          if (targetId === BlockIds.Rail || targetId === BlockIds.PoweredRail) {
+              const cart = new MinecartEntity(this.entityManager.context, rx + 0.5, ry + 0.5, rz + 0.5);
+              this.entityManager.add(cart);
+              this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+              this.player.swingItem();
+              return;
+          }
+      }
+
       const { x, y, z } = this.currentHit.blockPos;
       const targetId = this.blockUpdateWorld.getBlock(x, y, z);
       
@@ -240,6 +257,18 @@ export class InteractionController {
       if (this.blockInteractionHandler && this.blockInteractionHandler(targetId, x, y, z)) {
         this.player.swingItem();
         return;
+      }
+
+      // Minecart mounting
+      const targetedEntity = this.getTargetedEntity();
+      if (targetedEntity instanceof MinecartEntity && this.player.ridingEntity === null) {
+          this.player.mountEntity(targetedEntity);
+          this.player.swingItem();
+          return;
+      } else if (this.player.ridingEntity instanceof MinecartEntity) {
+          this.player.mountEntity(null);
+          this.player.swingItem();
+          return;
       }
 
       const placed = this.placeBlock(this.currentHit);

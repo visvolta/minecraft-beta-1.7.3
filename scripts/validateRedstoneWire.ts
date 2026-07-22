@@ -1,10 +1,8 @@
-import { FaceDirection } from '../src/blocks/BlockFace.ts';
 import type { BlockDefinition, BlockRenderType } from '../src/blocks/BlockDefinition.ts';
 import type { BlockId } from '../src/blocks/BlockId.ts';
 import { BlockIds } from '../src/blocks/BlockId.ts';
 import { BlockRegistry } from '../src/blocks/BlockRegistry.ts';
 import { BlockBehaviourRegistry } from '../src/world/BlockBehaviour.ts';
-import { ALL_BLOCK_DIRECTIONS, directionOffset, offsetBlockPosition } from '../src/world/BlockDirections.ts';
 import { BlockUpdateWorld } from '../src/world/BlockUpdateWorld.ts';
 import { ChunkManager } from '../src/world/ChunkManager.ts';
 import { LightEngine } from '../src/world/generation/lighting/LightEngine.ts';

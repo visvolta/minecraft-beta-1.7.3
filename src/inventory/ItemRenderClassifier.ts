@@ -83,7 +83,8 @@ export function classifyItemRender(
     def.id === BlockIds.WallSign ||
     def.id === BlockIds.Ladder ||
     def.id === BlockIds.Torch ||
-    def.id === BlockIds.RedstoneTorch ||
+    def.id === BlockIds.RedstoneTorchOn ||
+    def.id === BlockIds.RedstoneTorchOff ||
     def.renderType === 'cross' ||
     def.renderType === 'cactus' ||
     def.renderType === 'snow' ||

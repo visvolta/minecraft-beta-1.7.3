@@ -25,6 +25,9 @@ export abstract class Entity {
   /** Persistent identifier used to de-duplicate across save/load. */
   public uuid: string = generateEntityUuid();
 
+  public ridingEntity: Entity | null = null;
+  public riddenByEntity: Entity | null = null;
+
   /** Numeric entity-type id (see EntityTypeIds). */
   public abstract readonly typeId: number;
   /** Beta-style string type id written to the NBT `id` field (e.g. "Item"). */
@@ -175,6 +178,27 @@ export abstract class Entity {
 
   public markRemoved(): void {
     this.removed = true;
+    if (this.ridingEntity) {
+      this.mountEntity(null);
+    }
+    if (this.riddenByEntity) {
+      this.riddenByEntity.mountEntity(null);
+    }
+  }
+
+  public mountEntity(vehicle: Entity | null): void {
+    if (this.ridingEntity === vehicle) return;
+
+    // Dismount current
+    if (this.ridingEntity) {
+      this.ridingEntity.riddenByEntity = null;
+    }
+
+    this.ridingEntity = vehicle;
+
+    if (this.ridingEntity) {
+      this.ridingEntity.riddenByEntity = this;
+    }
   }
 
   /**

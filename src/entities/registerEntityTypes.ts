@@ -11,6 +11,8 @@ import { SkeletonEntity } from './hostile/SkeletonEntity';
 import { SpiderEntity } from './hostile/SpiderEntity';
 import { CreeperEntity } from './hostile/CreeperEntity';
 import { ArrowEntity } from './projectiles/ArrowEntity';
+import { PrimedTntEntity } from './PrimedTntEntity';
+import { MinecartEntity } from './MinecartEntity';
 
 /**
  * Registers every entity type's string id, numeric id and deserialiser with
@@ -32,4 +34,6 @@ export function registerEntityTypes(registry: EntityTypeRegistry): void {
   registry.register(EntityTypeIds.Spider, 'Spider', SpiderEntity.deserialize);
   registry.register(EntityTypeIds.Creeper, 'Creeper', CreeperEntity.deserialize);
   registry.register(EntityTypeIds.Arrow, 'Arrow', ArrowEntity.deserialize);
+  registry.register(EntityTypeIds.PrimedTnt, 'PrimedTnt', PrimedTntEntity.deserialize);
+  registry.register(EntityTypeIds.Minecart, 'Minecart', MinecartEntity.deserialize);
 }

@@ -39,23 +39,6 @@ class LadderBehaviour extends SupportedBehaviour {
   }
 }
 
-class DoorBehaviour extends SupportedBehaviour {
-  public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
-    return y > 0 && solid(this.blocks, ctx.world.getBlock(x, y - 1, z)) &&
-      ctx.world.getBlock(x, y + 1, z) === BlockIds.WoodDoor;
-  }
-
-  public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
-    const otherY = ctx.world.getBlock(x, y - 1, z) === BlockIds.WoodDoor ? y - 1 : y + 1;
-    if (!this.canSurvive(ctx, x, y, z) && ctx.world.getBlock(x, otherY, z) === BlockIds.WoodDoor) {
-      ctx.world.setBlock(x, otherY, z, BlockIds.Air, { reason: 'neighbour', notifyNeighbours: true, updateLighting: true });
-    }
-    if (!this.canSurvive(ctx, x, y, z)) {
-      ctx.world.setBlock(x, y, z, BlockIds.Air, { reason: 'neighbour', notifyNeighbours: true, updateLighting: true });
-    }
-  }
-}
-
 class GenericAttachedBehaviour extends SupportedBehaviour {
   public canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
     const meta = ctx.world.getBlockMetadata(x, y, z);
@@ -69,12 +52,7 @@ class GenericAttachedBehaviour extends SupportedBehaviour {
 
 export function registerSupportBehaviours(registry: BlockBehaviourRegistry, blocks: BlockRegistry): void {
   registry.register(BlockIds.Torch, new TorchBehaviour(blocks));
-  registry.register(BlockIds.RedstoneTorchOn, new TorchBehaviour(blocks));
   registry.register(BlockIds.Ladder, new LadderBehaviour(blocks));
   registry.register(BlockIds.SignPost, new GenericAttachedBehaviour(blocks));
   registry.register(BlockIds.WallSign, new GenericAttachedBehaviour(blocks));
-  registry.register(BlockIds.StoneButton, new GenericAttachedBehaviour(blocks));
-  registry.register(BlockIds.Lever, new GenericAttachedBehaviour(blocks));
-  registry.register(BlockIds.StonePressurePlate, new GenericAttachedBehaviour(blocks));
-  registry.register(BlockIds.WoodDoor, new DoorBehaviour(blocks));
 }

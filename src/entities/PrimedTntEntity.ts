@@ -86,12 +86,11 @@ export class PrimedTntEntity extends Entity {
     }
   }
 
-  public override onRestore(ctx: EntityWorldContext): void {
-    this.ctx = ctx;
+  public override onRestore(_ctx: EntityWorldContext): void {
     this.buildRender();
   }
 
-  public onTick(ctx: EntityTickContext): void {
+  public onTick(_ctx: EntityTickContext): void {
     this.fuse -= 1;
     if (this.fuse <= 0) {
       this.markRemoved();
@@ -126,7 +125,9 @@ export class PrimedTntEntity extends Entity {
   }
 
   private explode(): void {
+    if (this.ctx.explode) {
       this.ctx.explode(this, this.position.x, this.position.y, this.position.z, 4.0, false);
+    }
   }
 
   protected writeEntityNbt(map: Map<string, NbtTag>): void {
