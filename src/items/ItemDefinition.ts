@@ -8,6 +8,7 @@ export interface ItemDefinition {
   readonly id: string;
   readonly numericId?: number;
   readonly displayName?: string;
+  readonly iconKey?: string;
   readonly stackSize: number;
   readonly durability?: number;
   readonly foodValue?: number;

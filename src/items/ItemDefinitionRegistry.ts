@@ -107,6 +107,10 @@ const GENERIC_ITEMS: readonly ItemDefinition[] = CURRENT_ITEM_IDS.map((id) => {
   return { id, stackSize: 64, useAction: 'none', placeBlockId, creativeVisible: true, creativeTab: 'misc' };
 });
 
+function humanizeItemId(id: string): string {
+  return id.split('_').map((part) => part.length === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
 const NUMERIC_ALIASES: Readonly<Record<number, string>> = {
   262: 'arrow', 263: 'coal', 264: 'diamond', 265: 'iron_ingot', 266: 'gold_ingot', 280: 'stick',
   281: 'bowl', 288: 'feather', 289: 'gunpowder', 295: 'seeds_wheat', 296: 'wheat', 323: 'sign',
@@ -120,8 +124,9 @@ export class ItemDefinitionRegistry {
 
   public constructor(definitions: readonly ItemDefinition[] = [...GENERIC_ITEMS, ...FOODS, ...TOOLS, ...ARMOURS]) {
     for (const definition of definitions) {
-      this.byId.set(definition.id, definition);
-      if (definition.numericId !== undefined) this.byId.set(String(definition.numericId), definition);
+      const normalized: ItemDefinition = { ...definition, displayName: definition.displayName ?? humanizeItemId(definition.id), iconKey: definition.iconKey ?? definition.id };
+      this.byId.set(normalized.id, normalized);
+      if (normalized.numericId !== undefined) this.byId.set(String(normalized.numericId), normalized);
     }
     for (const [numeric, id] of Object.entries(NUMERIC_ALIASES)) {
       const definition = this.byId.get(id);

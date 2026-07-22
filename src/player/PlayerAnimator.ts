@@ -63,11 +63,12 @@ export class PlayerAnimator {
     else if (state === 'flying') limbSwingAmount *= ANIMATION_FLYING_SWING_MULTIPLIER;
 
     const horizontalSpeed = Math.hypot(player.velocity.x, player.velocity.z);
-    const movementYaw = horizontalSpeed > 0.05 ? Math.atan2(player.velocity.x, player.velocity.z) : player.bodyYaw;
+    const movementYaw = horizontalSpeed > 0.05 ? Math.atan2(-player.velocity.x, -player.velocity.z) : player.bodyYaw;
     const headDeltaBefore = normalizeAngle(headYaw - player.bodyYaw);
     let bodyTarget = player.bodyYaw;
-    const movementForwardBias = Math.abs(Math.cos(normalizeAngle(movementYaw - player.bodyYaw)));
-    if (state !== 'minecart_sitting' && horizontalSpeed > 0.08 && movementForwardBias > 0.35) {
+    const movementDeltaForTarget = normalizeAngle(movementYaw - player.bodyYaw);
+    const movementForward = Math.cos(movementDeltaForTarget);
+    if (state !== 'minecart_sitting' && horizontalSpeed > 0.08 && movementForward > 0.35) {
       bodyTarget = movementYaw;
     } else if (Math.abs(headDeltaBefore) > ANIMATION_BODY_HEAD_DEADZONE) {
       bodyTarget = headYaw - Math.sign(headDeltaBefore) * ANIMATION_BODY_HEAD_DEADZONE;
@@ -95,8 +96,10 @@ export class PlayerAnimator {
 
     this.applyPoseBase(model, state);
 
-    const localForward = horizontalSpeed > 0.001 ? Math.cos(normalizeAngle(movementYaw - bodyYaw)) : 0;
-    const localStrafe = horizontalSpeed > 0.001 ? Math.sin(normalizeAngle(movementYaw - bodyYaw)) : 0;
+    const localDelta = normalizeAngle(movementYaw - bodyYaw);
+    const localForward = horizontalSpeed > 0.001 ? Math.cos(localDelta) : 0;
+    const rawLocalStrafe = horizontalSpeed > 0.001 ? Math.sin(localDelta) : 0;
+    const localStrafe = Math.abs(rawLocalStrafe) < 1e-4 ? 0 : rawLocalStrafe;
     const backward = localForward < -0.15;
     const phaseDirection = backward ? -1 : 1;
     let rightArmX = -Math.cos(limbSwingPhase * phaseDirection) * ANIMATION_ARM_SWING_LIMIT * limbSwingAmount * 0.5;
