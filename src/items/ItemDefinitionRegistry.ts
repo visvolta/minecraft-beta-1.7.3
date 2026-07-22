@@ -76,7 +76,7 @@ const CURRENT_ITEM_IDS = [
   'fish_cod_cooked', 'fish_salmon_raw', 'fish_salmon_cooked', 'potato', 'potato_baked', 'flint',
   'flint_and_steel', 'gold_ingot', 'gunpowder', 'iron_ingot', 'leather', 'redstone_dust', 'seeds_wheat',
   'shears', 'sign', 'stick', 'string', 'sugar', 'wheat',
-  'redstone_torch', 'lever', 'stone_button', 'stone_pressure_plate', 'wood_pressure_plate',
+  'redstone_torch', 'lever', 'stone_button', 'stone_pressure_plate', 'wood_pressure_plate', 'trapdoor',
 ] as const;
 
 const SPECIAL_PLACE_BLOCKS: Readonly<Record<string, number>> = {
@@ -86,6 +86,7 @@ const SPECIAL_PLACE_BLOCKS: Readonly<Record<string, number>> = {
   'stone_button': 77,
   'stone_pressure_plate': 70,
   'wood_pressure_plate': 72,
+  'trapdoor': 96,
 };
 
 const GENERIC_ITEMS: readonly ItemDefinition[] = CURRENT_ITEM_IDS.map((id) => {
@@ -103,6 +104,7 @@ const NUMERIC_ALIASES: Readonly<Record<number, string>> = {
   281: 'bowl', 288: 'feather', 289: 'gunpowder', 295: 'seeds_wheat', 296: 'wheat', 323: 'sign',
   324: 'door_wood', 330: 'door_iron', 331: 'redstone_dust', 334: 'leather', 344: 'egg', 352: 'bone',
   76: 'redstone_torch', 69: 'lever', 77: 'stone_button', 70: 'stone_pressure_plate', 72: 'wood_pressure_plate',
+  96: 'trapdoor',
 };
 
 export class ItemDefinitionRegistry {

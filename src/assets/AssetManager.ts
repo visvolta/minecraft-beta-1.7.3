@@ -48,6 +48,12 @@ export class AssetManager {
     textureNames.add('door_wood_upper');
     textureNames.add('door_iron_upper');
 
+    // Redstone wire shapes and overlays (Beta 1.7.3)
+    textureNames.add('redstone_dust_cross');
+    textureNames.add('redstone_dust_line');
+    textureNames.add('redstone_dust_cross_overlay');
+    textureNames.add('redstone_dust_line_overlay');
+
     // Add destruction stage textures to the atlas.
     for (let i = 0; i < 10; i++) {
       textureNames.add(`destroy_stage_${i}`);

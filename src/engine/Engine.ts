@@ -91,6 +91,10 @@ import { registerButtonBehaviour } from '../world/behaviours/ButtonBehaviour';
 import { registerLeverBehaviour } from '../world/behaviours/LeverBehaviour';
 import { registerRedstoneWireBehaviour } from '../world/behaviours/RedstoneWireBehaviour';
 import { registerRedstoneTorchBehaviour } from '../world/behaviours/RedstoneTorchBehaviour';
+import { registerTntBehaviour } from '../world/behaviours/TntBehaviour';
+import { registerDoorBehaviour } from '../world/behaviours/DoorBehaviour';
+import { registerTrapdoorBehaviour } from '../world/behaviours/TrapdoorBehaviour';
+import { registerPoweredRailBehaviour } from '../world/behaviours/PoweredRailBehaviour';
 import { SlabBehaviour } from '../world/behaviours/SlabBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
@@ -481,6 +485,10 @@ export class Engine {
     registerLeverBehaviour(this.blockBehaviourRegistry);
     registerRedstoneWireBehaviour(this.blockBehaviourRegistry);
     registerRedstoneTorchBehaviour(this.blockBehaviourRegistry);
+    registerTntBehaviour(this.blockBehaviourRegistry);
+    registerDoorBehaviour(this.blockBehaviourRegistry);
+    registerTrapdoorBehaviour(this.blockBehaviourRegistry);
+    registerPoweredRailBehaviour(this.blockBehaviourRegistry);
     this.blockBehaviourRegistry.register(BlockIds.Slab, new SlabBehaviour());
     // Fire needs WeatherController + ChunkManager for rain/sky-exposure checks.
     this.weatherController = new WeatherController(worldSeed);

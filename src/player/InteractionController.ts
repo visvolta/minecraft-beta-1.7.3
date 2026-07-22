@@ -315,66 +315,21 @@ export class InteractionController {
         return false;
       }
 
-      // Calculate orientation based on player yaw (Beta 1.7.3)
       let yaw = Math.atan2(-this.lookDirection.x, -this.lookDirection.z);
       while (yaw < 0) yaw += Math.PI * 2;
       while (yaw >= Math.PI * 2) yaw -= Math.PI * 2;
 
       let meta = 0;
-      if (yaw >= Math.PI * 0.25 && yaw < Math.PI * 0.75) meta = 0; // East (+X)
-      else if (yaw >= Math.PI * 0.75 && yaw < Math.PI * 1.25) meta = 1; // South (+Z)
-      else if (yaw >= Math.PI * 1.25 && yaw < Math.PI * 1.75) meta = 2; // West (-X)
-      else meta = 3; // North (-Z)
+      if (yaw >= Math.PI * 0.25 && yaw < Math.PI * 0.75) meta = 1; // North (-Z)
+      else if (yaw >= Math.PI * 0.75 && yaw < Math.PI * 1.25) meta = 2; // East (+X)
+      else if (yaw >= Math.PI * 1.25 && yaw < Math.PI * 1.75) meta = 3; // South (+Z)
+      else meta = 0; // West (-X)
 
-      // Double-door hinge mirroring logic
-      let dx = 0, dz = 0;
-      if (meta === 0) dz = 1;
-      if (meta === 1) dx = -1;
-      if (meta === 2) dz = -1;
-      if (meta === 3) dx = 1;
-
-      const isSolid = (vx: number, vy: number, vz: number) => {
-        const def = this.blockRegistry.getById(this.blockUpdateWorld.getBlock(vx, vy, vz));
-        return def ? def.solid && def.renderType === 'opaque' : false;
-      };
-
-      const solidLeft = (isSolid(targetX - dx, targetY, targetZ - dz) ? 1 : 0) + (isSolid(targetX - dx, targetY + 1, targetZ - dz) ? 1 : 0);
-      const solidRight = (isSolid(targetX + dx, targetY, targetZ + dz) ? 1 : 0) + (isSolid(targetX + dx, targetY + 1, targetZ + dz) ? 1 : 0);
-      const hasDoorLeft = this.blockUpdateWorld.getBlock(targetX - dx, targetY, targetZ - dz) === selectedId || this.blockUpdateWorld.getBlock(targetX - dx, targetY + 1, targetZ - dz) === selectedId;
-      const hasDoorRight = this.blockUpdateWorld.getBlock(targetX + dx, targetY, targetZ + dz) === selectedId || this.blockUpdateWorld.getBlock(targetX + dx, targetY + 1, targetZ + dz) === selectedId;
-
-      let mirror = false;
-      if (hasDoorLeft && !hasDoorRight) mirror = true;
-      else if (solidRight > solidLeft) mirror = true;
-
-      if (mirror) {
-        meta = (meta - 1 & 3) + 4;
-      }
-
-      // Validate supporting block below
-      const behaviour = this.behaviourRegistry.get(selectedId);
-      if (behaviour.canPlaceBlockAt) {
-        if (!behaviour.canPlaceBlockAt({ world: this.blockUpdateWorld, gameTick: 0, player: this.player } as any, targetX, targetY, targetZ)) {
-          return false;
-        }
-      }
-
-      // Place lower half
       this.blockUpdateWorld.setBlock(targetX, targetY, targetZ, selectedId, {
-        metadata: meta,
-        reason: 'player',
-        notifyNeighbours: true,
-        updateLighting: true,
-        player: this.player,
+        metadata: meta, reason: 'player', notifyNeighbours: true, updateLighting: true, player: this.player,
       });
-
-      // Place upper half
       this.blockUpdateWorld.setBlock(targetX, targetY + 1, targetZ, selectedId, {
-        metadata: meta + 8,
-        reason: 'player',
-        notifyNeighbours: true,
-        updateLighting: true,
-        player: this.player,
+        metadata: meta | 8, reason: 'player', notifyNeighbours: true, updateLighting: true, player: this.player,
       });
 
       this.blockPlacedHandler?.(selectedId, targetX, targetY, targetZ);
@@ -433,6 +388,13 @@ export class InteractionController {
       if (hit.face.x === 1) return 1;
       if (hit.face.z === -1) return 4;
       if (hit.face.z === 1) return 3;
+    }
+
+    if (blockId === BlockIds.Trapdoor) {
+      if (hit.face.z === 1) return 0;
+      if (hit.face.z === -1) return 1;
+      if (hit.face.x === 1) return 2;
+      if (hit.face.x === -1) return 3;
     }
 
     if (blockId === BlockIds.Chest) {

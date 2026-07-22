@@ -26,6 +26,7 @@ import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
+type Quad8 = readonly [number, number, number, number, number, number, number, number];
 
 interface FaceDef {
   readonly nx: number;
@@ -922,6 +923,10 @@ export class ChunkMesher {
               this.buildTrapdoor(buffers, chunk, x, y, z, blockId, definition);
               continue;
             }
+            if (blockId === BlockIds.PoweredRail) {
+              this.buildPoweredRail(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
             if (blockId === BlockIds.StonePressurePlate || blockId === BlockIds.WoodPressurePlate) {
               this.buildPressurePlate(buffers, chunk, x, y, z, blockId, definition);
               continue;
@@ -1674,82 +1679,86 @@ export class ChunkMesher {
       x, y, z,
       (id) => {
         if (id === BlockIds.RedstoneWire) return true;
-        // Check for other connectable types by ID or renderType heuristic
-        return id === BlockIds.RedstoneTorch || id === BlockIds.Lever || 
-               id === BlockIds.StoneButton || id === BlockIds.StonePressurePlate ||
-               id === BlockIds.WoodPressurePlate;
+        return id === BlockIds.RedstoneTorchOn || id === BlockIds.RedstoneTorchOff || 
+               id === BlockIds.Lever || id === BlockIds.StoneButton || 
+               id === BlockIds.StonePressurePlate || id === BlockIds.WoodPressurePlate;
       }
     );
 
+    const isW = connections.west !== WireConnection.NONE;
+    const isE = connections.east !== WireConnection.NONE;
     const isN = connections.north !== WireConnection.NONE;
     const isS = connections.south !== WireConnection.NONE;
-    const isE = connections.east !== WireConnection.NONE;
-    const isW = connections.west !== WireConnection.NONE;
 
-    // Beta wire orientation and shape logic
     let straightPass = 0;
-    if ((isW || isE) && !isN && !isS) straightPass = 1; // East-West
-    if ((isN || isS) && !isW && !isE) straightPass = 2; // North-South
+    if ((isW || isE) && !isN && !isS) straightPass = 1; // EW
+    if ((isN || isS) && !isW && !isE) straightPass = 2; // NS
 
-    const textureName = straightPass !== 0 ? 'redstone_dust_line' : 'redstone_dust_cross';
-    const uvRect = this.getSafeUvRect(textureName);
-    if (!uvRect) return;
+    const textureBase = straightPass !== 0 ? 'redstone_dust_line' : 'redstone_dust_cross';
+    const textureOver = straightPass !== 0 ? 'redstone_dust_line_overlay' : 'redstone_dust_cross_overlay';
+    
+    const uvBase = this.getSafeUvRect(textureBase);
+    const uvOver = this.getSafeUvRect(textureOver);
+    if (!uvBase || !uvOver) return;
 
     let minX = 0, maxX = 1, minZ = 0, maxZ = 1;
-    let u0 = uvRect.u0, v0 = uvRect.v0, u1 = uvRect.u1, v1 = uvRect.v1;
+    let u0 = uvBase.u0, v0 = uvBase.v0, u1 = uvBase.u1, v1 = uvBase.v1;
+    let ou0 = uvOver.u0, ov0 = uvOver.v0, ou1 = uvOver.u1, ov1 = uvOver.v1;
 
-    // Cropping logic for cross texture in Beta
     if (straightPass === 0 && (isN || isS || isE || isW)) {
-        if (!isW) { minX += 0.3125; u0 += (u1 - u0) * 0.3125; }
-        if (!isE) { maxX -= 0.3125; u1 -= (u1 - u0) * 0.3125; } // Wait cropping math needs to be careful
-        if (!isN) { minZ += 0.3125; v0 += (v1 - v0) * 0.3125; }
-        if (!isS) { maxZ -= 0.3125; v1 -= (v1 - v0) * 0.3125; }
+        // Beta cropping: arms are 5/16 thick (0.3125)
+        if (!isW) { minX += 0.3125; u0 += (u1 - u0) * 0.3125; ou0 += (ou1 - ou0) * 0.3125; }
+        if (!isE) { maxX -= 0.3125; u1 -= (u1 - u0) * 0.3125; ou1 -= (ou1 - ou0) * 0.3125; }
+        if (!isN) { minZ += 0.3125; v0 += (v1 - v0) * 0.3125; ov0 += (ov1 - ov0) * 0.3125; }
+        if (!isS) { maxZ -= 0.3125; v1 -= (v1 - v0) * 0.3125; ov1 -= (ov1 - ov0) * 0.3125; }
     }
 
     const h = 0.015625;
-    const floorVertices: [Corner, Corner, Corner, Corner] = [
+    const floorV: [Corner, Corner, Corner, Corner] = [
         [minX, h, maxZ], [maxX, h, maxZ], [maxX, h, minZ], [minX, h, minZ]
     ];
 
-    const rotate = straightPass === 1; // Rotate line for East-West
-    const finalUvs: [number, number, number, number, number, number, number, number] = rotate 
+    const rotate = straightPass === 1;
+    const finalUvs: Quad8 = rotate 
         ? [u1, v0, u1, v1, u0, v1, u0, v0] 
         : [u0, v1, u1, v1, u1, v0, u0, v0];
+    const finalOverUvs: Quad8 = rotate
+        ? [ou1, ov0, ou1, ov1, ou0, ov1, ou0, ov0]
+        : [ou0, ov1, ou1, ov1, ou1, ov0, ou0, ov0];
 
-    buffers.pushQuad(
-        floorVertices.map(v => [x + v[0], y + v[1], z + v[2]]) as any,
-        [0, 1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, finalUvs
-    );
+    const worldFloorV = floorV.map(v => [x + v[0], y + v[1], z + v[2]]) as [Corner, Corner, Corner, Corner];
+    
+    // Pass 1: Tinted
+    buffers.pushQuad(worldFloorV, [0, 1, 0], uvBase, tint, light, 1, FluidTextureKind.WaterStill, finalUvs);
+    // Pass 2: White overlay
+    buffers.pushQuad(worldFloorV, [0, 1, 0], uvOver, [1, 1, 1], light, 1, FluidTextureKind.WaterStill, finalOverUvs);
 
-    // Vertical climbing strips
-    const lineRect = this.getSafeUvRect('redstone_dust_line');
-    if (lineRect) {
-        const lu0 = lineRect.u0, lv0 = lineRect.v0, lu1 = lineRect.u1, lv1 = lineRect.v1;
-        const vUvs: [number, number, number, number, number, number, number, number] = [lu0, lv1, lu1, lv1, lu1, lv0, lu0, lv0];
+    // Vertical strips
+    const vBase = this.getSafeUvRect('redstone_dust_line');
+    const vOver = this.getSafeUvRect('redstone_dust_line_overlay');
+    if (vBase && vOver) {
+        const vUvs: Quad8 = [vBase.u0, vBase.v1, vBase.u1, vBase.v1, vBase.u1, vBase.v0, vBase.u0, vBase.v0];
+        const vOverUvs: Quad8 = [vOver.u0, vOver.v1, vOver.u1, vOver.v1, vOver.u1, vOver.v0, vOver.u0, vOver.v0];
 
         if (connections.north === WireConnection.UP) {
-            buffers.pushQuad(
-                [[x, y + 1, z + h], [x + 1, y + 1, z + h], [x + 1, y, z + h], [x, y, z + h]],
-                [0, 0, 1], lineRect, tint, light, 1, FluidTextureKind.WaterStill, vUvs
-            );
+            const v = [[x, y + 1, z + h], [x + 1, y + 1, z + h], [x + 1, y, z + h], [x, y, z + h]] as [Corner, Corner, Corner, Corner];
+            buffers.pushQuad(v, [0, 0, 1], vBase, tint, light, 1, FluidTextureKind.WaterStill, vUvs);
+            buffers.pushQuad(v, [0, 0, 1], vOver, [1, 1, 1], light, 1, FluidTextureKind.WaterStill, vOverUvs);
         }
         if (connections.south === WireConnection.UP) {
-            buffers.pushQuad(
-                [[x + 1, y + 1, z + 1 - h], [x, y + 1, z + 1 - h], [x, y, z + 1 - h], [x + 1, y, z + 1 - h]],
-                [0, 0, -1], lineRect, tint, light, 1, FluidTextureKind.WaterStill, vUvs
-            );
+            const v = [[x + 1, y + 1, z + 1 - h], [x, y + 1, z + 1 - h], [x, y, z + 1 - h], [x + 1, y, z + 1 - h]] as [Corner, Corner, Corner, Corner];
+            buffers.pushQuad(v, [0, 0, -1], vBase, tint, light, 1, FluidTextureKind.WaterStill, vUvs);
+            buffers.pushQuad(v, [0, 0, -1], vOver, [1, 1, 1], light, 1, FluidTextureKind.WaterStill, vOverUvs);
         }
         if (connections.west === WireConnection.UP) {
-            buffers.pushQuad(
-                [[x + h, y + 1, z + 1], [x + h, y + 1, z], [x + h, y, z], [x + h, y, z + 1]],
-                [1, 0, 0], lineRect, tint, light, 1, FluidTextureKind.WaterStill, vUvs
-            );
+            const v = [[x + h, y + 1, z + 1], [x + h, y + 1, z], [x + h, y, z], [x + h, y, z + 1]] as [Corner, Corner, Corner, Corner];
+            buffers.pushQuad(v, [1, 0, 0], vBase, tint, light, 1, FluidTextureKind.WaterStill, vUvs);
+            buffers.pushQuad(v, [1, 0, 0], vOver, [1, 1, 1], light, 1, FluidTextureKind.WaterStill, vOverUvs);
         }
         if (connections.east === WireConnection.UP) {
-            buffers.pushQuad(
-                [[x + 1 - h, y + 1, z], [x + 1 - h, y + 1, z + 1], [x + 1 - h, y, z + 1], [x + 1 - h, y, z]],
-                [-1, 0, 0], lineRect, tint, light, 1, FluidTextureKind.WaterStill, vUvs
-            );
+            const v = [[x + 1 - h, y + 1, z], [x + 1 - h, y + 1, z + 1], [x + 1 - h, y, z + 1], [x + 1 - h, y, z]] as [Corner, Corner, Corner, Corner];
+            buffers.pushQuad(v, [-1, 0, 0], vBase, tint, light, 1, FluidTextureKind.WaterStill, vUvs);
+            buffers.pushQuad(v, [-1, 0, 0], vOver, [1, 1, 1], light, 1, FluidTextureKind.WaterStill, vOverUvs);
         }
     }
   }
@@ -2235,5 +2244,24 @@ export class ChunkMesher {
     pushQuadFromBounds(FaceDirection.BOTTOM, [minX, minY, minZ], [maxX, minY, minZ], [maxX, minY, maxZ], [minX, minY, maxZ], [0, -1, 0]);
     pushQuadFromBounds(FaceDirection.SOUTH, [minX, minY, maxZ], [maxX, minY, maxZ], [maxX, maxY, maxZ], [minX, maxY, maxZ], [0, 0, 1]);
     pushQuadFromBounds(FaceDirection.NORTH, [maxX, minY, minZ], [minX, minY, minZ], [minX, maxY, minZ], [maxX, maxY, minZ], [0, 0, -1]);
+  }
+
+  private buildPoweredRail(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, _blockId: BlockId, _definition: BlockDefinition): void {
+    const meta = chunk.getBlockMetadata(x, y, z);
+    const orientation = meta & 7;
+    const isPowered = (meta & 8) !== 0;
+    const uvRect = this.getSafeUvRect(isPowered ? 'rail_golden_powered' : 'rail_golden');
+    if (!uvRect) return;
+    const tint: [number, number, number] = [1, 1, 1];
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const h = 0.0625;
+    let v0: Corner = [0, h, 1], v1: Corner = [1, h, 1], v2: Corner = [1, h, 0], v3: Corner = [0, h, 0];
+    if (orientation === 1) { v0 = [0, h, 0]; v1 = [0, h, 1]; v2 = [1, h, 1]; v3 = [1, h, 0]; }
+    else if (orientation === 2) { v0 = [0, h, 1]; v1 = [1, 1 + h, 1]; v2 = [1, 1 + h, 0]; v3 = [0, h, 0]; }
+    else if (orientation === 3) { v0 = [0, 1 + h, 1]; v1 = [1, h, 1]; v2 = [1, h, 0]; v3 = [0, 1 + h, 0]; }
+    else if (orientation === 4) { v0 = [0, h, 1]; v1 = [1, h, 1]; v2 = [1, 1 + h, 0]; v3 = [0, 1 + h, 0]; }
+    else if (orientation === 5) { v0 = [0, 1 + h, 1]; v1 = [1, 1 + h, 1]; v2 = [1, h, 0]; v3 = [0, h, 0]; }
+    const worldV = [v0, v1, v2, v3].map(v => [x + v[0], y + v[1], z + v[2]]) as [Corner, Corner, Corner, Corner];
+    buffers.pushQuad(worldV, [0, 1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
   }
 }
