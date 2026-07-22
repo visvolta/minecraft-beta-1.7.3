@@ -3,6 +3,7 @@ import type { WorldStorage } from '../storage/WorldStorage';
 import type { ChunkPersistenceQueue } from '../queue/ChunkPersistenceQueue';
 import type { ChunkManager } from '../../world/ChunkManager';
 import { Difficulty } from '../../world/Difficulty';
+import { GameMode } from '../../player/GameMode';
 
 export interface SaveMetrics { readonly dirty:boolean; readonly saves:number; readonly failures:number; readonly lastError:string|undefined; }
 const KEY='metadata.json';
@@ -46,4 +47,4 @@ export class WorldSaveCoordinator {
     }
   }
 }
-export function createDefaultMetadata():WorldMetadata{return{formatVersion:WORLD_METADATA_VERSION,worldId:'default',name:'Default World',seed:'-47',spawn:{x:8,y:140,z:8},player:{x:8,y:140,z:8,yaw:0,pitch:0},playerHealth:{health:20,maxHealth:20},playerFood:{hunger:20,saturation:5,exhaustion:0},timeTicks:0,difficulty:Difficulty.Normal,weather:{raining:false,thundering:false,rainTime:0,thunderTime:0},autosave:{enabled:true,intervalSeconds:30},lastPlayedMs:0};}
+export function createDefaultMetadata():WorldMetadata{return{formatVersion:WORLD_METADATA_VERSION,worldId:'default',name:'Default World',seed:'-47',spawn:{x:8,y:140,z:8},player:{x:8,y:140,z:8,yaw:0,pitch:0},playerHealth:{health:20,maxHealth:20},playerFood:{hunger:20,saturation:5,exhaustion:0},gameMode:GameMode.Creative,timeTicks:0,difficulty:Difficulty.Normal,weather:{raining:false,thundering:false,rainTime:0,thunderTime:0},autosave:{enabled:true,intervalSeconds:30},lastPlayedMs:0};}

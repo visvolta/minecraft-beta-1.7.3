@@ -14,6 +14,9 @@ function registerBlock(registry: BlockRegistry, definition: BlockDefinition): vo
   registry.register({
     ...definition,
     explosionResistance: definition.explosionResistance ?? BETA_EXPLOSION_RESISTANCE[definition.name] ?? (definition.solid ? 1 : 0),
+    creativeVisible: definition.creativeVisible ?? (definition.id !== BlockIds.Air && definition.id < 249),
+    creativeTab: definition.creativeTab ?? 'all',
+    creativeOrder: definition.creativeOrder ?? definition.id,
   });
 }
 

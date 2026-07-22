@@ -5,7 +5,7 @@ import type { Player } from '../player/Player';
 import { AABB } from './AABB';
 import type { BlockBehaviourRegistry } from '../world/BlockBehaviour';
 import { getBlockBounds } from '../world/BlockBehaviour';
-import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';import { isLavaInAABB,isWaterInAABB } from '../entities/living/HazardDetection';import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
+import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';import { CREATIVE_FLIGHT_ACCELERATION, CREATIVE_FLIGHT_DRAG_PER_SECOND, CREATIVE_FLIGHT_VERTICAL_SPEED } from '../player/PlayerConstants';import { isLavaInAABB,isWaterInAABB } from '../entities/living/HazardDetection';import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 
 /**
  * How quickly horizontal velocity is steered toward wishVelocity while
@@ -51,7 +51,7 @@ export class PlayerPhysics {
    * against solid blocks. Jumping itself is applied by PlayerController
    * before this runs; this only reacts to whatever velocity.y already is.
    */
-  public update(player:Player,deltaSeconds:number,isJumpPressed=false):PlayerMovementResult{
+  public update(player:Player,deltaSeconds:number,isJumpPressed=false,isDescendPressed=false):PlayerMovementResult{
     const previousX=player.position.x,previousY=player.position.y,previousZ=player.position.z,wasGrounded=player.grounded;
     if (player.ridingEntity !== null) {
       player.wishVelocity.x = 0;
@@ -62,6 +62,8 @@ export class PlayerPhysics {
       player.grounded = false;
       return { previousX, previousY, previousZ, currentX: player.position.x, currentY: player.position.y, currentZ: player.position.z, wasGrounded, grounded: false, climbing: false, inWater: false, inLava: false };
     }
+    if (player.isFlying && !player.canFly()) player.isFlying = false;
+    if (player.isFlying) return this.updateFlying(player, deltaSeconds, isJumpPressed, isDescendPressed, previousX, previousY, previousZ, wasGrounded);
     const playerBox = player.getAABB();
     const climbRange = this.blockRangeCoveringBox(playerBox);
     let isClimbing = false;
@@ -110,6 +112,27 @@ export class PlayerPhysics {
     const inWater=isWaterInAABB(this.blockUpdateWorld,playerBox),inLava=isLavaInAABB(this.blockUpdateWorld,playerBox);player.inWater=inWater;player.inLava=inLava;if(inLava)player.isSprinting=false;
     if(inWater||inLava){this.applyFluidAcceleration(player,deltaSeconds,inLava?0.2:0.38);const fx=Math.floor(player.position.x),fy=Math.floor(player.position.y),fz=Math.floor(player.position.z),fluidId=this.blockUpdateWorld.getBlock(fx,fy,fz),flow=computeFluidFlowVector({getBlock:(x,y,z)=>this.blockUpdateWorld.getBlock(x,y,z),getMetadata:(x,y,z)=>this.blockUpdateWorld.getBlockMetadata(x,y,z),isSolid:id=>this.blockRegistry.getById(id)?.solid??false},fx,fy,fz,fluidId);player.velocity.x+=flow.x*deltaSeconds*.8;player.velocity.z+=flow.z*deltaSeconds*.8;const before=player.velocity.y;if(isJumpPressed)player.velocity.y+=deltaSeconds*(inLava?2:4);else player.velocity.y-=deltaSeconds*(inLava?2.5:1.5);this.moveAndCollide(player,deltaSeconds,(before+player.velocity.y)/2);const drag=Math.pow(inLava?0.5:0.8,deltaSeconds*20);player.velocity.x*=drag;player.velocity.y*=drag;player.velocity.z*=drag;}else{this.applyHorizontalAcceleration(player,deltaSeconds);const velocityYBeforeGravity=player.velocity.y;if(!isClimbing)this.applyGravity(player,deltaSeconds);this.moveAndCollide(player,deltaSeconds,(velocityYBeforeGravity+player.velocity.y)/2);}
     return{previousX,previousY,previousZ,currentX:player.position.x,currentY:player.position.y,currentZ:player.position.z,wasGrounded,grounded:player.grounded,climbing:isClimbing,inWater,inLava};
+  }
+
+
+
+  private updateFlying(player: Player, deltaSeconds: number, ascend: boolean, descend: boolean, previousX: number, previousY: number, previousZ: number, wasGrounded: boolean): PlayerMovementResult {
+    player.fallDistance = 0;
+    player.grounded = false;
+    player.inWater = false;
+    player.inLava = false;
+    const maxStep = CREATIVE_FLIGHT_ACCELERATION * deltaSeconds;
+    player.velocity.x = this.stepToward(player.velocity.x, player.wishVelocity.x, maxStep);
+    player.velocity.z = this.stepToward(player.velocity.z, player.wishVelocity.z, maxStep);
+    const verticalTarget = ascend && !descend ? CREATIVE_FLIGHT_VERTICAL_SPEED : (descend && !ascend ? -CREATIVE_FLIGHT_VERTICAL_SPEED : 0);
+    player.velocity.y = this.stepToward(player.velocity.y, verticalTarget, maxStep);
+    this.moveAndCollide(player, deltaSeconds, player.velocity.y);
+    if (player.isCollidedVertically) player.velocity.y = 0;
+    const drag = Math.max(0, 1 - CREATIVE_FLIGHT_DRAG_PER_SECOND * deltaSeconds);
+    if (Math.abs(player.wishVelocity.x) < 1e-6) player.velocity.x *= drag;
+    if (Math.abs(player.wishVelocity.z) < 1e-6) player.velocity.z *= drag;
+    if (!ascend && !descend) player.velocity.y *= drag;
+    return { previousX, previousY, previousZ, currentX: player.position.x, currentY: player.position.y, currentZ: player.position.z, wasGrounded, grounded: player.grounded, climbing: false, inWater: false, inLava: false };
   }
 
   private applyFluidAcceleration(player:Player,deltaSeconds:number,speedFactor:number):void{const maxStep=3*deltaSeconds;player.velocity.x=this.stepToward(player.velocity.x,player.wishVelocity.x*speedFactor,maxStep);player.velocity.z=this.stepToward(player.velocity.z,player.wishVelocity.z*speedFactor,maxStep);}
@@ -162,7 +185,7 @@ export class PlayerPhysics {
       z: player.velocity.z * deltaSeconds,
     };
 
-    let grounded=false,collidedHorizontally=false;
+    let grounded=false,collidedHorizontally=false,collidedVertically=false;
 
     for (const axis of COLLISION_AXIS_ORDER) {
       const box = player.getAABB();
@@ -187,12 +210,13 @@ export class PlayerPhysics {
             grounded = true;
           }
 
+          collidedVertically = true;
           player.velocity.y = 0;
         }
       }
     }
 
-    player.grounded=grounded;player.collidedHorizontally=collidedHorizontally;
+    player.grounded=grounded;player.onGround=grounded;player.collidedHorizontally=collidedHorizontally;player.isCollidedHorizontally=collidedHorizontally;player.isCollidedVertically=collidedVertically;
   }
 
   /**

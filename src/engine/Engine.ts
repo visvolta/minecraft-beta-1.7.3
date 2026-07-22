@@ -10,6 +10,7 @@ import { CameraController } from '../camera/CameraController';
 import { Input } from '../input/Input';
 import { Player } from '../player/Player';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
+import { GameMode } from '../player/GameMode';
 import { PlayerController } from '../player/PlayerController';
 import { InteractionController } from '../player/InteractionController';
 import { PlayerPhysics } from '../physics/PlayerPhysics';
@@ -36,6 +37,7 @@ import { SprintFovController } from '../player/SprintFovController';
 import type { EntityTextureAssets } from '../assets/EntityTextureAssets';
 import { SimpleEntityParticleSink } from '../entities/particles/EntityParticleSink';
 import { Inventory } from '../inventory/Inventory';
+import type { ItemStack } from '../inventory/ItemStack';
 import { InventorySerializer } from '../inventory/InventorySerializer';
 import { HotbarHudRenderer } from '../inventory/HotbarHudRenderer';
 import { InventoryUi } from '../inventory/InventoryUi';
@@ -47,6 +49,8 @@ import { ChestRenderer } from '../chest/ChestRenderer';
 import { CursorHeldItemRenderer } from '../inventory/CursorHeldItemRenderer';
 import { InventoryController } from '../inventory/InventoryController';
 import { InventoryInputController } from '../inventory/InventoryInputController';
+import { CreativeInventoryUi } from '../inventory/CreativeInventoryUi';
+import { CreativeInventoryController } from '../inventory/CreativeInventoryController';
 import { RecipeRegistry } from '../crafting/RecipeRegistry';
 import { registerDefaultRecipes } from '../crafting/registerDefaultRecipes';
 import { CraftingTableUi } from '../crafting/CraftingTableUi';
@@ -115,7 +119,6 @@ import { RainSplashRenderer } from '../rendering/weather/RainSplashRenderer';
 import { LightningRenderer } from '../rendering/weather/LightningRenderer';
 import { LightningManager } from '../world/weather/LightningManager';
 import { buildAtmosphericState, previewWeatherFade } from '../rendering/AtmosphericState';
-import { DebugController } from '../debug/DebugController';
 import { DebugOverlay } from '../debug/DebugOverlay';
 import { DebugStatsCollector } from '../debug/DebugStatsCollector';
 import { PerformanceProfiler } from '../debug/PerformanceProfiler';
@@ -207,6 +210,8 @@ export class Engine {
   private readonly cursorHeldRenderer: CursorHeldItemRenderer;
   private readonly inventoryController: InventoryController;
   private readonly inventoryInputController: InventoryInputController;
+  private readonly creativeInventoryUi: CreativeInventoryUi;
+  private readonly creativeInventoryController: CreativeInventoryController;
   private readonly recipeRegistry: RecipeRegistry;
   private readonly craftingTableUi: CraftingTableUi;
   private readonly craftingTableController: CraftingTableController;
@@ -257,11 +262,9 @@ export class Engine {
   private readonly updatables: IUpdatable[] = [];
 
   private readonly debugOverlay: DebugOverlay;
-  private readonly debugController: DebugController;
   private readonly debugStatsCollector: DebugStatsCollector;
   private readonly blockTestGrid: BlockTestGrid;
   private readonly performanceProfiler = new PerformanceProfiler();
-  private noClipEnabled = false;
   private rawLightDebugMode = false;
   private ambientOcclusionDebugMode = false;
 
@@ -327,7 +330,7 @@ export class Engine {
     );
     this.cameraController.setRotation(metadata.player.yaw, metadata.player.pitch);
 
-    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
+    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setGameMode(metadata.gameMode ?? GameMode.Creative);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
     this.playerController = new PlayerController(
       this.input,
       this.cameraController,
@@ -603,6 +606,8 @@ export class Engine {
     };
     this.inventoryController.setDisplayNameResolver(displayNameResolver as any);
     this.inventoryInputController = new InventoryInputController(this.inventoryController, this.hotbarHudRenderer.getLayout());
+    this.creativeInventoryUi = new CreativeInventoryUi(this.hotbarHudRenderer.getSlotContentRenderer());
+    this.creativeInventoryController = new CreativeInventoryController(this.creativeInventoryUi, this.inventoryController, blockRegistry, this.hotbarHudRenderer.getSlotContentRenderer(), this.inventoryTooltip, displayNameResolver as (stack: ItemStack) => string);
 
     this.craftingTableUi = new CraftingTableUi();
     this.craftingTableController = new CraftingTableController(
@@ -668,7 +673,9 @@ export class Engine {
       this.furnaceController,
       this.chestController,
       this.signController,
-      this.hotbarHudRenderer.getLayout()
+      this.hotbarHudRenderer.getLayout(),
+      this.creativeInventoryController,
+      this.player
     );
 
     this.interactionController.setBlockInteractionHandler((targetId, _x, _y, _z) => {
@@ -784,7 +791,6 @@ export class Engine {
     this.signTextRenderer = new SignTextRenderer(this.renderer.scene, this.signManager, this.blockUpdateWorld);
     this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
     this.debugOverlay = new DebugOverlay();
-    this.debugController = new DebugController(this.input, this.cameraController, this.player);
     this.debugStatsCollector = new DebugStatsCollector(this.player, this.chunkManager, this.chunkRenderer, this.renderer, this.skyRenderer, this.cloudRenderer, this.weatherController, this.precipitationRenderer, this.rainSplashRenderer, this.lightningRenderer, this.renderer.renderer, worldSeed, this.worldTime, this.performanceProfiler, this.worldTickScheduler, this.fallingBlockManager, this.worldEventQueue);
 
     const validationHarness = new WorkerValidationHarness(worldSeed, this.atlas);
@@ -861,7 +867,7 @@ export class Engine {
     if (!this.running) return;
     if (this.animationFrameId !== null) { cancelAnimationFrame(this.animationFrameId); this.animationFrameId = null; }
     this.lastFrameTimeMs = null;
-    this.renderer.stop(); this.input.stop(); this.debugOverlay.dispose(); this.blockHighlight.dispose(); this.destroyOverlayRenderer.dispose(); this.hudRenderer.dispose(); this.deathScreen.dispose(); this.inventoryInputController.dispose(); this.inventoryController.dispose(); this.craftingTableInputController.dispose(); this.furnaceInputController.dispose(); this.menuInputRouter.dispose(); this.craftingTableController.dispose(); this.furnaceController.dispose(); this.furnaceManager.clear(); this.contextMenuSuppressor.dispose(); this.heldItemRenderer.dispose(); this.playerArmourRenderer.dispose(); this.playerModel.dispose(); this.minecartRenderSystem.dispose(); this.entityManager.dispose(); this.entityParticles.dispose(); this.chunkStreamer.dispose(); this.fallingBlockManager.dispose(); this.lightningRenderer.dispose(); this.rainSplashRenderer.dispose(); this.precipitationRenderer.dispose(); this.cloudRenderer.dispose(); this.skyRenderer.dispose(); this.chunkRenderer.dispose(); this.fluidAnimationSystem.dispose(); this.fireAnimationSystem.dispose(); this.armourMaterialCache.dispose(); this.armourGeometryCache.dispose(); this.armourTextures.dispose(); this.atlas.dispose(); this.entityTextures.dispose(); this.chunkManager.clear(); this.renderer.domElement.remove(); this.running = false;
+    this.renderer.stop(); this.input.stop(); this.debugOverlay.dispose(); this.blockHighlight.dispose(); this.destroyOverlayRenderer.dispose(); this.hudRenderer.dispose(); this.deathScreen.dispose(); this.inventoryInputController.dispose(); this.creativeInventoryController.dispose(); this.inventoryController.dispose(); this.craftingTableInputController.dispose(); this.furnaceInputController.dispose(); this.menuInputRouter.dispose(); this.craftingTableController.dispose(); this.furnaceController.dispose(); this.furnaceManager.clear(); this.contextMenuSuppressor.dispose(); this.heldItemRenderer.dispose(); this.playerArmourRenderer.dispose(); this.playerModel.dispose(); this.minecartRenderSystem.dispose(); this.entityManager.dispose(); this.entityParticles.dispose(); this.chunkStreamer.dispose(); this.fallingBlockManager.dispose(); this.lightningRenderer.dispose(); this.rainSplashRenderer.dispose(); this.precipitationRenderer.dispose(); this.cloudRenderer.dispose(); this.skyRenderer.dispose(); this.chunkRenderer.dispose(); this.fluidAnimationSystem.dispose(); this.fireAnimationSystem.dispose(); this.armourMaterialCache.dispose(); this.armourGeometryCache.dispose(); this.armourTextures.dispose(); this.atlas.dispose(); this.entityTextures.dispose(); this.chunkManager.clear(); this.renderer.domElement.remove(); this.running = false;
   }
 
   private tick = (timeMs: number): void => {
@@ -883,7 +889,6 @@ export class Engine {
     }
     if (this.input.isDebugKeyJustPressed('F4')) { this.rawLightDebugMode = !this.rawLightDebugMode; if (this.rawLightDebugMode) { this.ambientOcclusionDebugMode = false; this.chunkRenderer.setAmbientOcclusionDebugMode(false); } this.chunkRenderer.setRawLightDebugMode(this.rawLightDebugMode); }
     if (this.input.isDebugKeyJustPressed('F7')) { this.ambientOcclusionDebugMode = !this.ambientOcclusionDebugMode; if (this.ambientOcclusionDebugMode) { this.rawLightDebugMode = false; this.chunkRenderer.setRawLightDebugMode(false); } this.chunkRenderer.setAmbientOcclusionDebugMode(this.ambientOcclusionDebugMode); }
-    if (this.input.isDebugKeyJustPressed('F6')) { this.noClipEnabled = !this.noClipEnabled; this.debugController.resetPhysicsState(); }
     if (this.input.isDebugKeyJustPressed('F5')) this.weatherController.setAuto();
     if (this.input.isDebugKeyJustPressed('F8')) this.weatherController.forceMode('clear');
     if (this.input.isDebugKeyJustPressed('F9')) this.weatherController.forceMode('rain');
@@ -920,17 +925,16 @@ export class Engine {
     this.worldEventQueue.drainNoop();
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.cameraController.update();
+    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.cameraController.update();
     if(!this.player.isAlive()){this.player.wishVelocity.x=this.player.wishVelocity.z=0;}
-    else if (this.noClipEnabled) { this.player.fallDistance=0; this.debugController.update(deltaSeconds); }
     else {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
-        if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
-          this.playerController.update();
+        if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
+          this.playerController.update(deltaSeconds);
         } else { this.player.wishVelocity.x = 0; this.player.wishVelocity.z = 0; }
-        const movement=this.playerPhysics.update(this.player,deltaSeconds,this.input.isActionActive('jump'));
+        const movement=this.playerPhysics.update(this.player,deltaSeconds,this.input.isActionActive('jump'),this.input.isActionActive('sprint'));
         this.playerSurvivalController.recordMovement(movement);
       } else { this.chunkStreamer.dispatchCriticalLoad(chunkX, chunkZ); }
     }
@@ -940,7 +944,7 @@ export class Engine {
     const camera = this.renderer.camera;
     this.cameraModeController.applyTransform(camera, this.player, this.cameraController.getYaw(), this.cameraController.getPitch());
     this.cameraHurtController.update(camera,this.player,deltaSeconds);
-    const survivalUiSuppressed=this.inventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;
+    const survivalUiSuppressed=this.inventoryController.isOpen||this.creativeInventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;
     if(survivalUiSuppressed){this.player.isSprinting=false;this.foodUseController.cancel();this.interactionController.breakingController.reset();}
     this.sprintFovController.update(camera,this.player,deltaSeconds,survivalUiSuppressed);
 
@@ -949,11 +953,11 @@ export class Engine {
       this.firstPersonMotionController.update(camera, this.player, this.firstPersonArmRenderer, 1.0);
       const hasHeldContent = this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
       this.firstPersonArmRenderer.setArmMeshVisible(!hasHeldContent);
-      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0);
+      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds);
     } else {
       this.playerModel.setVisible(true); this.playerModel.setFirstPersonMode(false); this.firstPersonArmRenderer.setVisible(false);
       this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
-      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0);
+      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds);
     }
     this.playerArmourRenderer.sync();
 
@@ -977,14 +981,14 @@ export class Engine {
     this.performanceProfiler.setQueues(generationStats.queued, meshingStats.queued + meshingStats.pendingUploads, generationStats.activeWorkers + meshingStats.activeWorkers, generationStats.oldestCriticalAgeMs);
     this.performanceProfiler.setWorkerCounters(generationStats.completed, generationStats.stale, generationStats.errors);
 
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.interactionController.update(deltaSeconds);
+    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.interactionController.update(deltaSeconds);
 
     const currentSlot = this.interactionController.getSelectedSlotIndex();
     const currentStack = this.inventory.getStack(currentSlot);
     const currentStackKey = currentStack === null ? 'empty' : `${currentStack.identity.id}_${currentStack.count}`;
     if (this.selectedSlot !== currentSlot || this.lastSelectedStackKey !== currentStackKey) { this.selectedSlot = currentSlot; this.lastSelectedStackKey = currentStackKey; this.updateHeldItemMesh(); }
 
-    if (!this.inventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && this.input.isKeyJustPressed('KeyQ')) {
+    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && this.input.isKeyJustPressed('KeyQ')) {
       const selectedSlotIndex = this.interactionController.getSelectedSlotIndex();
       const stack = this.inventory.getStack(selectedSlotIndex);
       if (stack !== null) {
@@ -1027,7 +1031,7 @@ export class Engine {
     this.minecartRenderSystem.update(entityAlpha);
     this.entityParticles.update(deltaSeconds);
     this.debugStatsCollector.recordFrame(deltaSeconds);
-    if (this.debugOverlay.isVisible()) this.debugOverlay.render(this.debugStatsCollector.collect(this.noClipEnabled));
+    if (this.debugOverlay.isVisible()) this.debugOverlay.render(this.debugStatsCollector.collect(false));
     for (const system of this.updatables) system.update(deltaSeconds);
 
     this.performanceProfiler.recordMeshUpload(this.chunkRenderer.getMeshUploadsThisFrame());
@@ -1050,7 +1054,7 @@ export class Engine {
 
   private snapshotMetadata(): WorldMetadata {
     const weather = this.weatherController.getState(); const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);
-    return { ...this.saveCoordinator.getMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize() };
+    return { ...this.saveCoordinator.getMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize() };
   }
 
   private async saveMetadata(force: boolean): Promise<void> { if (this.metadataSaveInFlight !== null) return this.metadataSaveInFlight; this.saveCoordinator.update(this.snapshotMetadata()); this.metadataSaveInFlight = this.saveCoordinator.save(force).finally(() => { this.metadataSaveInFlight = null; }); return this.metadataSaveInFlight; }

@@ -2,6 +2,10 @@ import type { CameraController } from '../camera/CameraController';
 import type { Input } from '../input/Input';
 import { GRAVITY } from '../physics/physicsConstants';
 import type { Player } from './Player';
+import {
+  CREATIVE_DOUBLE_JUMP_WINDOW_SECONDS,
+  CREATIVE_FLIGHT_MAX_SPEED,
+} from './PlayerConstants';
 
 /** Beta 1.7.3 walk speed, blocks per second. */
 export const WALK_SPEED = 4.317;
@@ -23,6 +27,7 @@ export const JUMP_VELOCITY = Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
  */
 export class PlayerController {
   private sprintTapWindow=0;
+  private jumpTapWindowSeconds = 0;
   private readonly input: Input;
   private readonly camera: CameraController;
   private readonly player: Player;
@@ -34,9 +39,12 @@ export class PlayerController {
   }
 
   public tickSprintWindow():void{if(this.sprintTapWindow>0)this.sprintTapWindow--;}
-  public updateSprintState(forwardHeld:boolean,shiftHeld:boolean,forwardPressed:boolean):void{if(forwardPressed){if(this.sprintTapWindow>0&&this.player.canSprint()){this.player.isSprinting=true;this.sprintTapWindow=0;}else this.sprintTapWindow=7;}if(shiftHeld&&forwardHeld&&this.player.canSprint())this.player.isSprinting=true;if(!forwardHeld||!this.player.canSprint()||this.player.collidedHorizontally)this.player.isSprinting=false;}
+  public updateSprintState(forwardHeld:boolean,shiftHeld:boolean,forwardPressed:boolean):void{if(this.player.isFlying){this.player.isSprinting=false;return;}if(forwardPressed){if(this.sprintTapWindow>0&&this.player.canSprint()){this.player.isSprinting=true;this.sprintTapWindow=0;}else this.sprintTapWindow=7;}if(shiftHeld&&forwardHeld&&this.player.canSprint())this.player.isSprinting=true;if(!forwardHeld||!this.player.canSprint()||this.player.collidedHorizontally)this.player.isSprinting=false;}
+
   /** Reads input and updates the player's wish velocity; applies jumps immediately. */
-  public update(): void {
+  public update(deltaSeconds = 0): void {
+    if (this.jumpTapWindowSeconds > 0) this.jumpTapWindowSeconds = Math.max(0, this.jumpTapWindowSeconds - deltaSeconds);
+
     if (this.player.ridingEntity !== null) {
       this.player.wishVelocity.x = 0;
       this.player.wishVelocity.z = 0;
@@ -78,17 +86,24 @@ export class PlayerController {
 
     if (lengthSq > 0) {
       const length = Math.sqrt(lengthSq);
-      const speed=WALK_SPEED*(this.player.isSprinting?1.3:1);this.player.wishVelocity.x=moveX/length*speed;this.player.wishVelocity.z=moveZ/length*speed;
+      const speed=this.player.isFlying?CREATIVE_FLIGHT_MAX_SPEED:WALK_SPEED*(this.player.isSprinting?1.3:1);this.player.wishVelocity.x=moveX/length*speed;this.player.wishVelocity.z=moveZ/length*speed;
     } else {
       this.player.wishVelocity.x = 0;
       this.player.wishVelocity.z = 0;
     }
 
-    // Jumping only takes effect while grounded; grounded itself is only
-    // ever set by PlayerPhysics's collision resolution from the previous
-    // physics step (this runs before physics in the frame order).
-    if (this.input.isActionActive('jump') && this.player.grounded) {
-      this.player.velocity.y=JUMP_VELOCITY;if(this.player.isSprinting){this.player.velocity.x+=forwardX*1.5;this.player.velocity.z+=forwardZ*1.5;this.player.addExhaustion(.8);}else this.player.addExhaustion(.2);this.player.grounded=false;
+    if (this.input.isActionJustPressed('jump')) {
+      if (this.player.canFly() && this.jumpTapWindowSeconds > 0) {
+        this.player.isFlying = !this.player.isFlying;
+        this.player.velocity.y = 0;
+        this.player.fallDistance = 0;
+        this.jumpTapWindowSeconds = 0;
+        return;
+      }
+      this.jumpTapWindowSeconds = CREATIVE_DOUBLE_JUMP_WINDOW_SECONDS;
+      if (!this.player.isFlying && this.player.grounded) {
+        this.player.velocity.y=JUMP_VELOCITY;if(this.player.isSprinting){this.player.velocity.x+=forwardX*1.5;this.player.velocity.z+=forwardZ*1.5;this.player.addExhaustion(.8);}else this.player.addExhaustion(.2);this.player.grounded=false;
+      }
     }
   }
 }

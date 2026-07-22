@@ -304,7 +304,7 @@ export class InteractionController {
       }
 
       const placed = this.placeBlock(this.currentHit);
-      if (placed) {
+      if (placed && this.shouldConsumeHeldItem()) {
         this.inventory.decrementSlot(this.selectedSlotIndex, 1);
       }
       this.player.swingItem();
@@ -330,7 +330,7 @@ export class InteractionController {
     if (this.entityManager.getEntitiesInAABB(cart.getAABB(), (entity) => entity.canBeCollidedWith()).length > 0) return false;
 
     this.entityManager.add(cart);
-    this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+    if (this.shouldConsumeHeldItem()) this.inventory.decrementSlot(this.selectedSlotIndex, 1);
     return true;
   }
 
@@ -380,6 +380,10 @@ export class InteractionController {
       }
     }
     return true;
+  }
+
+  private shouldConsumeHeldItem(): boolean {
+    return !this.player.isCreativeMode();
   }
 
   private updateSelectedSlot(): void {

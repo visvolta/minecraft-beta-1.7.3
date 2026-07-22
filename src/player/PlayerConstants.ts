@@ -123,3 +123,20 @@ export const ANIMATION_PLACEMENT_SWING_STRENGTH = 1;
 export const MELEE_REACH = 3.0;
 /** Base bare-hand player melee damage (Beta fist = 1 half-heart). Centralized, no weapon bonuses. */
 export const PLAYER_MELEE_DAMAGE = 1;
+
+// Creative flight tuning (project extension; Beta 1.7.3 has no full modern Creative flight).
+export const CREATIVE_DOUBLE_JUMP_WINDOW_SECONDS = 0.28;
+export const CREATIVE_FLIGHT_ACCELERATION = 35;
+export const CREATIVE_FLIGHT_MAX_SPEED = 8.0;
+export const CREATIVE_FLIGHT_VERTICAL_SPEED = 5.5;
+export const CREATIVE_FLIGHT_DRAG_PER_SECOND = 10;
+
+// Player render animation tuning.
+export const ANIMATION_BODY_HEAD_DEADZONE = Math.PI / 3;
+export const ANIMATION_BODY_HEAD_MAX_DELTA = Math.PI * 0.62;
+export const ANIMATION_BODY_TURN_SPEED = 8.5;
+export const ANIMATION_MOVEMENT_BODY_TURN_SPEED = 10.5;
+export const ANIMATION_AIRBORNE_SWING_MULTIPLIER = 0.55;
+export const ANIMATION_FLYING_SWING_MULTIPLIER = 0.45;
+export const ANIMATION_STRAFE_LEAN_LIMIT = 0.16;
+export const ANIMATION_FLYING_PITCH_LIMIT = 0.28;

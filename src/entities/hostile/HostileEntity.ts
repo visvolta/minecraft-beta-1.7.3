@@ -105,7 +105,7 @@ export abstract class HostileEntity extends LivingEntity {
   }
 
   private isValidTarget(player: Player, requireVisibility: boolean): boolean {
-    if (!player.isAlive() || !this.ctx.blockUpdateWorld.isLoaded(player.position.x, player.position.z)) return false;
+    if (!player.isAlive() || player.isCreativeMode() || !this.ctx.blockUpdateWorld.isLoaded(player.position.x, player.position.z)) return false;
     const dx = player.position.x - this.position.x;
     const dy = player.position.y - this.position.y;
     const dz = player.position.z - this.position.z;

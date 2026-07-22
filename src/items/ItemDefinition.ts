@@ -23,4 +23,7 @@ export interface ItemDefinition {
   readonly armourMaterial?: ArmourMaterialId;
   readonly protection?: number;
   readonly placeBlockId?: number;
+  readonly creativeVisible?: boolean;
+  readonly creativeTab?: string;
+  readonly creativeOrder?: number;
 }

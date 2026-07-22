@@ -3,6 +3,7 @@ import { Entity } from '../entities/core/Entity';
 import type { EntityTickContext } from '../entities/core/EntityContext';
 import type { NbtCompound, NbtTag } from '../persistence/nbt/Nbt';
 import { DamageSource, type DamageAttacker } from '../entities/damage/DamageSource';
+import { GameMode, isCreativeMode, isSurvivalMode } from './GameMode';
 import type { PlayerEquipment } from '../inventory/PlayerEquipment';
 import { reduceDamageByArmour } from './ArmourProtection';
 import {
@@ -33,6 +34,8 @@ export const PLAYER_EYE_HEIGHT = FIRST_PERSON_CAMERA_OFFSET_Y;
 export class Player extends Entity {
   public readonly typeId = 0;
   public readonly typeStringId = 'Player';
+  public gameMode: GameMode = GameMode.Creative;
+  public isFlying = false;
   public maxHealth = 20;
   public health = 20;
   public fallDistance = 0;
@@ -113,12 +116,17 @@ export class Player extends Entity {
 
   public isAlive(): boolean { return this.health > 0; }
   public get isDead():boolean{return this.health<=0;}
+  public isCreativeMode(): boolean { return isCreativeMode(this.gameMode); }
+  public isSurvivalMode(): boolean { return isSurvivalMode(this.gameMode); }
+  public setGameMode(mode: GameMode): void { this.gameMode = mode; if (!this.isCreativeMode()) { this.isFlying = false; } this.fallDistance = 0; }
+  public canFly(): boolean { return this.isCreativeMode(); }
+
 
   public setHealth(value:number):void{this.health=Math.max(0,Math.min(this.maxHealth,value));}
   public setFoodState(hunger:number,saturation:number,exhaustion=0):void{this.hunger=Math.max(0,Math.min(20,hunger));this.saturation=Math.max(0,Math.min(this.hunger,saturation));this.exhaustion=Math.max(0,exhaustion);}
   public addFood(food:number,saturationModifier:number):void{this.hunger=Math.min(20,this.hunger+food);this.saturation=Math.min(this.hunger,this.saturation+food*saturationModifier*2);}
-  public addExhaustion(amount:number):void{this.exhaustion=Math.min(40,this.exhaustion+Math.max(0,amount));}
-  public canSprint():boolean{return this.isAlive()&&this.hunger>6&&!this.isEating&&!this.inLava;}
+  public addExhaustion(amount:number):void{if(this.isCreativeMode())return;this.exhaustion=Math.min(40,this.exhaustion+Math.max(0,amount));}
+  public canSprint():boolean{return this.isAlive()&&(this.isCreativeMode()||this.hunger>6)&&!this.isEating&&!this.inLava&&!this.isFlying;}
   public setMaxHealth(value:number):void{this.maxHealth=Math.max(1,Math.floor(value));this.setHealth(this.health);}
   public setEquipment(equipment: PlayerEquipment): void { this.equipment = equipment; }
   public getArmourValue(): number { return this.equipment?.getArmourValue() ?? 0; }
@@ -126,7 +134,7 @@ export class Player extends Entity {
 
   /** Single authoritative entry point for every Player damage source. */
   public attackEntityFrom(source:DamageSource,amount:number):boolean{
-    if(!this.isAlive()||amount<=0)return false;
+    if(!this.isAlive()||amount<=0||this.isCreativeMode())return false;
     let acceptedDamage=amount,fullHit=true;
     if(!source.bypassesInvulnerability&&this.hurtResistantTime>10){
       if(amount<=this.lastDamageAmount)return false;
@@ -154,7 +162,7 @@ export class Player extends Entity {
   }
   public attackFromMob(amount:number,attacker:DamageAttacker):boolean{return this.attackEntityFrom(DamageSource.mob(attacker),amount);}
 
-  public resetForRespawn(x:number,y:number,z:number):void{this.mountEntity(null);this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.armourDamageRemainder=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.inLava=this.headUnderwater=this.collidedHorizontally=false;this.stopBreakingAnimation();}
+  public resetForRespawn(x:number,y:number,z:number):void{this.mountEntity(null);this.isFlying=false;this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.armourDamageRemainder=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.inLava=this.headUnderwater=this.collidedHorizontally=false;this.stopBreakingAnimation();}
 
   public tickCombatState(): void {
     if (this.hurtResistantTime > 0) this.hurtResistantTime -= 1;
@@ -189,8 +197,9 @@ export class Player extends Entity {
 
     const speed = this.ridingEntity === null ? Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z) : 0;
     let targetSwingAmount = 0;
-    if (this.ridingEntity === null && this.grounded && speed > 0.05) {
-      targetSwingAmount = Math.min(speed * ANIMATION_MOVEMENT_SPEED_SCALING, 1.0);
+    if (this.ridingEntity === null && speed > 0.05) {
+      const airborneScale = this.isFlying ? 0.8 : (this.grounded ? 1 : 0.55);
+      targetSwingAmount = Math.min(speed * ANIMATION_MOVEMENT_SPEED_SCALING * airborneScale, 1.0);
     }
 
     const deltaSwing = targetSwingAmount - this.limbSwingAmount;

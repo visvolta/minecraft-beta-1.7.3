@@ -82,6 +82,9 @@ export interface BlockDefinition {
   readonly hardness?:number;readonly preferredToolClass?:ToolClass;readonly requiresCorrectToolForDrops?:boolean;readonly minimumHarvestLevel?:number;readonly harvestToolClass?:ToolClass;readonly instantBreak?:boolean;readonly unbreakable?:boolean;
   /** Beta block explosion resistance consumed by shared explosion sources. */
   readonly explosionResistance?: number;
+  readonly creativeVisible?: boolean;
+  readonly creativeTab?: string;
+  readonly creativeOrder?: number;
   /** True if the block is harvestable with an empty hand (e.g., dirt, sand, wood log/planks). */
   readonly harvestableByHand?: boolean;
 }

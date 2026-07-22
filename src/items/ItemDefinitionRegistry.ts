@@ -9,19 +9,19 @@ import type { ItemDefinition, ToolClass } from './ItemDefinition';
 import { TOOL_MATERIALS, type ToolMaterialId } from './ToolMaterial';
 
 const FOODS: readonly ItemDefinition[] = [
-  { id: 'apple', numericId: 260, stackSize: 64, foodValue: 4, saturationValue: 0.3, useAction: 'eat' },
-  { id: 'bread', numericId: 297, stackSize: 64, foodValue: 5, saturationValue: 0.6, useAction: 'eat' },
-  { id: 'mushroom_stew', numericId: 282, stackSize: 1, foodValue: 10, saturationValue: 0.6, useAction: 'eat', containerItem: 'bowl' },
-  { id: 'porkchop_raw', numericId: 319, stackSize: 64, foodValue: 3, saturationValue: 0.3, useAction: 'eat' },
-  { id: 'porkchop_cooked', numericId: 320, stackSize: 64, foodValue: 8, saturationValue: 0.8, useAction: 'eat' },
-  { id: 'fish_cod_raw', numericId: 349, stackSize: 64, foodValue: 2, saturationValue: 0.3, useAction: 'eat' },
-  { id: 'fish_cod_cooked', numericId: 350, stackSize: 64, foodValue: 5, saturationValue: 0.6, useAction: 'eat' },
-  { id: 'cookie', numericId: 357, stackSize: 64, foodValue: 1, saturationValue: 0.1, useAction: 'eat' },
-  { id: 'melon', numericId: 360, stackSize: 64, foodValue: 2, saturationValue: 0.3, useAction: 'eat' },
-  { id: 'beef_raw', numericId: 363, stackSize: 64, foodValue: 3, saturationValue: 0.3, useAction: 'eat' },
-  { id: 'beef_cooked', numericId: 364, stackSize: 64, foodValue: 8, saturationValue: 0.8, useAction: 'eat' },
-  { id: 'chicken_raw', numericId: 365, stackSize: 64, foodValue: 2, saturationValue: 0.3, useAction: 'eat' },
-  { id: 'chicken_cooked', numericId: 366, stackSize: 64, foodValue: 6, saturationValue: 0.6, useAction: 'eat' },
+  { id: 'apple', numericId: 260, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 4, saturationValue: 0.3, useAction: 'eat' },
+  { id: 'bread', numericId: 297, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 5, saturationValue: 0.6, useAction: 'eat' },
+  { id: 'mushroom_stew', numericId: 282, stackSize: 1, creativeVisible: true, creativeTab: 'food', foodValue: 10, saturationValue: 0.6, useAction: 'eat', containerItem: 'bowl' },
+  { id: 'porkchop_raw', numericId: 319, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 3, saturationValue: 0.3, useAction: 'eat' },
+  { id: 'porkchop_cooked', numericId: 320, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 8, saturationValue: 0.8, useAction: 'eat' },
+  { id: 'fish_cod_raw', numericId: 349, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 2, saturationValue: 0.3, useAction: 'eat' },
+  { id: 'fish_cod_cooked', numericId: 350, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 5, saturationValue: 0.6, useAction: 'eat' },
+  { id: 'cookie', numericId: 357, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 1, saturationValue: 0.1, useAction: 'eat' },
+  { id: 'melon', numericId: 360, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 2, saturationValue: 0.3, useAction: 'eat' },
+  { id: 'beef_raw', numericId: 363, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 3, saturationValue: 0.3, useAction: 'eat' },
+  { id: 'beef_cooked', numericId: 364, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 8, saturationValue: 0.8, useAction: 'eat' },
+  { id: 'chicken_raw', numericId: 365, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 2, saturationValue: 0.3, useAction: 'eat' },
+  { id: 'chicken_cooked', numericId: 366, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 6, saturationValue: 0.6, useAction: 'eat' },
 ];
 
 const TOOL_IDS: Readonly<Record<ToolMaterialId, Readonly<Record<ToolClass, number>>>> = {
@@ -41,6 +41,9 @@ for (const materialId of Object.keys(TOOL_MATERIALS) as ToolMaterialId[]) {
       id: `${materialId}_${toolClass}`,
       numericId: TOOL_IDS[materialId][toolClass],
       stackSize: 1,
+      creativeVisible: true,
+      creativeTab: 'tools',
+      creativeOrder: TOOL_IDS[materialId][toolClass],
       durability: material.durability,
       useAction: 'none',
       toolClass,
@@ -61,6 +64,9 @@ for (const materialId of Object.keys(ARMOUR_MATERIALS) as ArmourMaterialId[]) {
       id: `${textureMaterial}_${armourSlot}`,
       numericId: ARMOUR_ITEM_IDS[materialId][armourSlot],
       stackSize: 1,
+      creativeVisible: true,
+      creativeTab: 'combat',
+      creativeOrder: ARMOUR_ITEM_IDS[materialId][armourSlot],
       durability: material.durability[armourSlot],
       useAction: 'none',
       armourSlot,
@@ -91,14 +97,14 @@ const SPECIAL_PLACE_BLOCKS: Readonly<Record<string, number>> = {
 };
 
 const GENERIC_ITEMS: readonly ItemDefinition[] = CURRENT_ITEM_IDS.map((id) => {
-  if (id === 'shears') return { id, stackSize: 1, durability: 238, useAction: 'none' };
-  if (id === 'flint_and_steel') return { id, stackSize: 1, durability: 64, useAction: 'none' };
-  if (id === 'sign') return { id, stackSize: 16, useAction: 'none' };
-  if (id === 'minecart') return { id, numericId: 328, displayName: 'Minecart', stackSize: 1, useAction: 'none' };
-  if (id.startsWith('bucket_')) return { id, stackSize: 1, useAction: 'none' };
+  if (id === 'shears') return { id, stackSize: 1, durability: 238, useAction: 'none', creativeVisible: true, creativeTab: 'tools', creativeOrder: 359 };
+  if (id === 'flint_and_steel') return { id, stackSize: 1, durability: 64, useAction: 'none', creativeVisible: true, creativeTab: 'tools', creativeOrder: 259 };
+  if (id === 'sign') return { id, stackSize: 16, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 323 };
+  if (id === 'minecart') return { id, numericId: 328, displayName: 'Minecart', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'transportation', creativeOrder: 328 };
+  if (id.startsWith('bucket_')) return { id, stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc' };
   
   const placeBlockId = (SPECIAL_PLACE_BLOCKS as any)[id];
-  return { id, stackSize: 64, useAction: 'none', placeBlockId };
+  return { id, stackSize: 64, useAction: 'none', placeBlockId, creativeVisible: true, creativeTab: 'misc' };
 });
 
 const NUMERIC_ALIASES: Readonly<Record<number, string>> = {

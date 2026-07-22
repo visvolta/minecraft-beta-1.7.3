@@ -1,4 +1,6 @@
 import type { InventoryController } from '../inventory/InventoryController';
+import type { CreativeInventoryController } from '../inventory/CreativeInventoryController';
+import type { Player } from '../player/Player';
 import type { CraftingTableController } from '../crafting/CraftingTableController';
 import type { FurnaceController } from '../furnace/FurnaceController';
 import type { ChestController } from '../chest/ChestController';
@@ -13,14 +15,21 @@ import type { SignController } from '../sign/SignController';
 export class MenuInputRouter {
   private readonly keydownHandler = (e: KeyboardEvent) => this.handleKeyDown(e);
 
+  private readonly creativeInventoryController: CreativeInventoryController | undefined;
+  private readonly player: Player | undefined;
+
   public constructor(
     private readonly inventoryController: InventoryController,
     private readonly craftingTableController: CraftingTableController,
     private readonly furnaceController: FurnaceController,
     private readonly chestController: ChestController,
     private readonly signController: SignController,
-    private readonly layout: HotbarLayout
+    private readonly layout: HotbarLayout,
+    creativeInventoryController?: CreativeInventoryController,
+    player?: Player,
   ) {
+    this.creativeInventoryController = creativeInventoryController;
+    this.player = player;
     if (typeof window !== 'undefined') {
       window.addEventListener('keydown', this.keydownHandler);
     }
@@ -51,13 +60,19 @@ export class MenuInputRouter {
         return;
       }
 
+      if (this.creativeInventoryController?.isOpen === true) {
+        this.creativeInventoryController.close();
+        return;
+      }
+
       if (this.inventoryController.isOpen) {
         this.inventoryController.updateScale(this.layout.scale);
         this.inventoryController.close();
         return;
       }
 
-      this.inventoryController.open(this.layout.scale);
+      if (this.player?.isCreativeMode() === true && this.creativeInventoryController !== undefined) this.creativeInventoryController.open(this.layout.scale);
+      else this.inventoryController.open(this.layout.scale);
       return;
     }
 
@@ -88,6 +103,12 @@ export class MenuInputRouter {
         this.craftingTableController.close();
         return;
       }
+      if (this.creativeInventoryController?.isOpen === true) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.creativeInventoryController.close();
+        return;
+      }
       if (this.inventoryController.isOpen) {
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -116,6 +137,12 @@ export class MenuInputRouter {
           e.preventDefault();
           e.stopImmediatePropagation();
           this.craftingTableController.handleNumberKey(digit);
+          return;
+        }
+        if (this.creativeInventoryController?.isOpen === true) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          this.inventoryController.handleNumberKey(digit);
           return;
         }
         if (this.inventoryController.isOpen) {
