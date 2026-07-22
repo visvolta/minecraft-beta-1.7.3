@@ -121,9 +121,18 @@ export class PlayerSkinManager {
    * Rects are returned in Three.js BoxGeometry face order:
    * 0: +X (Right), 1: -X (Left), 2: +Y (Top), 3: -Y (Bottom), 4: +Z (Front), 5: -Z (Back)
    */
-  public getPartUVs(tx: number, ty: number, w: number, h: number, d: number, mirror = false): PartUVs {
-    const skinW = 64;
-    const skinH = this.isLegacySkin ? 32 : 64;
+  public getPartUVs(
+    tx: number,
+    ty: number,
+    w: number,
+    h: number,
+    d: number,
+    mirror = false,
+    textureWidth = 64,
+    textureHeight = this.isLegacySkin ? 32 : 64,
+  ): PartUVs {
+    const skinW = textureWidth;
+    const skinH = textureHeight;
 
     const makeRect = (x: number, y: number, rw: number, rh: number, flipH = false): SkinUVRect => {
       let u0 = x / skinW;

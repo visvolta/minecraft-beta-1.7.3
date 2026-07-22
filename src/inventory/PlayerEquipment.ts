@@ -18,8 +18,13 @@ export class PlayerEquipment {
     boots: null,
   };
   private onBreak: ((piece: BrokenArmourPiece) => void) | undefined;
+  private equipmentRevision = 0;
 
   public constructor(private readonly definitions: ItemDefinitionRegistry = DEFAULT_ITEM_DEFINITIONS) {}
+
+  public get revision(): number {
+    return this.equipmentRevision;
+  }
 
   public setBreakHandler(handler: ((piece: BrokenArmourPiece) => void) | undefined): void {
     this.onBreak = handler;
@@ -48,13 +53,19 @@ export class PlayerEquipment {
 
   public setStack(slot: ArmourSlot, stack: ItemStack | null): boolean {
     if (!this.accepts(slot, stack)) return false;
-    this.stacks[slot] = stack;
+    if (this.stacks[slot] !== stack) {
+      this.stacks[slot] = stack;
+      this.equipmentRevision++;
+    }
     return true;
   }
 
   public takeStack(slot: ArmourSlot): ItemStack | null {
     const stack = this.stacks[slot];
-    this.stacks[slot] = null;
+    if (stack !== null) {
+      this.stacks[slot] = null;
+      this.equipmentRevision++;
+    }
     return stack;
   }
 
@@ -74,6 +85,7 @@ export class PlayerEquipment {
       const result = stack.damageItem(durabilityDamage, this.definitions);
       if (result.status !== 'broken') continue;
       this.stacks[slot] = null;
+      this.equipmentRevision++;
       const piece = { slot, stack, result };
       broken.push(piece);
       this.onBreak?.(piece);
@@ -83,6 +95,11 @@ export class PlayerEquipment {
   }
 
   public clear(): void {
-    for (const slot of ARMOUR_SLOTS) this.stacks[slot] = null;
+    let changed = false;
+    for (const slot of ARMOUR_SLOTS) {
+      if (this.stacks[slot] !== null) changed = true;
+      this.stacks[slot] = null;
+    }
+    if (changed) this.equipmentRevision++;
   }
 }

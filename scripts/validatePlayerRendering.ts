@@ -292,7 +292,7 @@ function testStage1PresentationFixes() {
   playerModel.setFirstPersonMode(true);
   assert(playerModel.headGroup.visible === false, 'Head hidden in first person');
   assert(playerModel.rightArmGroup.visible === false, 'Right arm hidden in first person');
-  assert(playerModel.bodyGroup.visible === true && playerModel.leftArmGroup.visible === true && playerModel.leftLegGroup.visible === true && playerModel.rightLegGroup.visible === true, 'Torso, left arm, and legs visible in first person');
+  assert(playerModel.bodyGroup.visible === false && playerModel.leftArmGroup.visible === false && playerModel.leftLegGroup.visible === false && playerModel.rightLegGroup.visible === false, 'Full Player body remains hidden in first person');
   playerModel.setFirstPersonMode(false);
   assert(playerModel.headGroup.visible === true && playerModel.rightArmGroup.visible === true, 'All body parts restored in third person');
 }

@@ -37,7 +37,8 @@
     "validate:player-survival": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePlayerSurvival.js",
     "validate:mining": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateMining.js",
     "validate:durability": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateDurability.js",
-    "validate:armour": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateArmour.js"
+    "validate:armour": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateArmour.js",
+    "validate:armour-rendering": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateArmourRendering.js"
   },
   "dependencies": {
     "three": "^0.185.1"

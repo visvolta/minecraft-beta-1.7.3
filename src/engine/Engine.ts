@@ -125,6 +125,10 @@ import { FirstPersonMotionController } from '../player/FirstPersonMotionControll
 import { CameraModeController, CameraMode } from '../camera/CameraModeController';
 import * as THREE from 'three';
 import { PlayerSkinManager } from '../player/PlayerSkinManager';
+import type { ArmourTextureAssets } from '../assets/ArmourTextureAssets';
+import { ArmourGeometryCache } from '../rendering/armour/ArmourGeometryCache';
+import { ArmourMaterialCache } from '../rendering/armour/ArmourMaterialCache';
+import { PlayerArmourRenderer } from '../player/PlayerArmourRenderer';
 import {
   FIRST_PERSON_HELD_BLOCK_X,
   FIRST_PERSON_HELD_BLOCK_Y,
@@ -282,6 +286,9 @@ export class Engine {
   private deathSavePending=false;
   private readonly playerModel: PlayerModel;
   private readonly playerAnimator: PlayerAnimator;
+  private readonly armourGeometryCache: ArmourGeometryCache;
+  private readonly armourMaterialCache: ArmourMaterialCache;
+  private readonly playerArmourRenderer: PlayerArmourRenderer;
   private readonly firstPersonArmRenderer: FirstPersonArmRenderer;
   private readonly firstPersonMotionController: FirstPersonMotionController;
   private readonly heldItemRenderer: FirstPersonHeldItemRenderer;
@@ -301,6 +308,7 @@ export class Engine {
     atlas: TextureAtlas,
     itemAtlas: ItemTextureAtlas,
     private readonly entityTextures: EntityTextureAssets,
+    private readonly armourTextures: ArmourTextureAssets,
     private readonly saveCoordinator: WorldSaveCoordinator,
     private readonly storage: WorldStorage,
     skinManager: PlayerSkinManager
@@ -311,6 +319,8 @@ export class Engine {
     this.itemAtlas = itemAtlas;
     this.blockRegistry = blockRegistry;
     this.skinManager = skinManager;
+    this.armourGeometryCache = new ArmourGeometryCache(skinManager);
+    this.armourMaterialCache = new ArmourMaterialCache(armourTextures);
     this.chunkManager = new ChunkManager();
     this.worldGenerator = new BetaWorldGenerator(worldSeed);
     this.regionCoordinator = new RegionCoordinator(this.storage, metadata.worldId);
@@ -546,6 +556,19 @@ export class Engine {
     const playerEquipment = this.inventory.getEquipment();
     if (playerEquipment === undefined) throw new Error('Player inventory equipment was not initialized');
     this.player.setEquipment(playerEquipment);
+    this.playerArmourRenderer = new PlayerArmourRenderer(
+      {
+        head: this.playerModel.headGroup,
+        body: this.playerModel.bodyGroup,
+        rightArm: this.playerModel.rightArmGroup,
+        leftArm: this.playerModel.leftArmGroup,
+        rightLeg: this.playerModel.rightLegGroup,
+        leftLeg: this.playerModel.leftLegGroup,
+      },
+      playerEquipment,
+      this.armourGeometryCache,
+      this.armourMaterialCache,
+    );
     this.selectedSlot = metadata.selectedHotbarSlot ?? 0;
 
     this.itemEntityManager = new ItemEntityManager(
@@ -1097,6 +1120,8 @@ export class Engine {
     this.furnaceManager.clear();
     this.contextMenuSuppressor.dispose();
     this.heldItemRenderer.dispose();
+    this.playerArmourRenderer.dispose();
+    this.playerModel.dispose();
     this.entityManager.dispose();
     this.entityParticles.dispose();
     this.chunkStreamer.dispose();
@@ -1109,6 +1134,9 @@ export class Engine {
     this.chunkRenderer.dispose();
     this.fluidAnimationSystem.dispose();
     this.fireAnimationSystem.dispose();
+    this.armourMaterialCache.dispose();
+    this.armourGeometryCache.dispose();
+    this.armourTextures.dispose();
     this.atlas.dispose();
     this.entityTextures.dispose();
     this.chunkManager.clear();
@@ -1351,6 +1379,7 @@ export class Engine {
         1.0
       );
     }
+    this.playerArmourRenderer.sync();
 
     // 7b. Stage 18: advance weather simulation. Renderer-independent;
     //     only produces a WeatherState the rest of the frame reads from.
@@ -1509,6 +1538,7 @@ export class Engine {
 
     this.firstPersonArmRenderer.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
     this.heldItemRenderer.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
+    this.armourMaterialCache.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
 
     if (this.playerModelUniforms && this.playerModelUniforms.uStaticSkyLight && this.playerModelUniforms.uStaticBlockLight) {
       this.playerModelUniforms.uStaticSkyLight.value = skyLight;

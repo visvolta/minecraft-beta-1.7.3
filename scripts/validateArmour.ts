@@ -207,7 +207,7 @@ function testProtectionAndDurability(): void {
 }
 
 function testHudAssetsAndStates(): void {
-  for (const [name, expectedHeight] of [['armourfill_full', 9], ['armourfill_half', 9], ['armour_empty', 10]] as const) {
+  for (const [name, expectedHeight] of [['armourfill_full', 9], ['armourfill_half', 9], ['armour_empty', 9]] as const) {
     const bytes = readFileSync(`public/textures/gui/${name}.png`);
     assert(bytes.toString('ascii', 1, 4) === 'PNG', `${name} PNG signature`);
     assert(bytes.readUInt32BE(16) === 9 && bytes.readUInt32BE(20) === expectedHeight, `${name} supplied native dimensions preserved`);

@@ -182,11 +182,11 @@ export class PlayerModel {
 
       // Hide all outer overlays except Headwear/Hat
       this.hatMesh.visible = true;
-      this.jacketMesh.visible = false;
-      this.leftSleeveMesh.visible = false;
-      this.rightSleeveMesh.visible = false;
-      this.leftTrouserMesh.visible = false;
-      this.rightTrouserMesh.visible = false;
+      this.jacketMesh.visible = true;
+      this.leftSleeveMesh.visible = true;
+      this.rightSleeveMesh.visible = true;
+      this.leftTrouserMesh.visible = true;
+      this.rightTrouserMesh.visible = true;
     } else {
       // Modern skins: use distinct texture coords
       skinManager.applyUVsToGeometry(this.leftArmGeo, skinManager.getPartUVs(32, 48, 4, 12, 4));
@@ -207,5 +207,24 @@ export class PlayerModel {
       this.leftTrouserMesh.visible = true;
       this.rightTrouserMesh.visible = true;
     }
+  }
+
+  public dispose(): void {
+    this.root.removeFromParent();
+    for (const geometry of [
+      this.headGeo,
+      this.hatGeo,
+      this.bodyGeo,
+      this.jacketGeo,
+      this.leftArmGeo,
+      this.leftSleeveGeo,
+      this.rightArmGeo,
+      this.rightSleeveGeo,
+      this.leftLegGeo,
+      this.leftTrouserGeo,
+      this.rightLegGeo,
+      this.rightTrouserGeo,
+    ]) geometry.dispose();
+    this.material.dispose();
   }
 }
