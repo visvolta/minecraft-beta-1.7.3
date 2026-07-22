@@ -37,6 +37,12 @@ export class PlayerController {
   public updateSprintState(forwardHeld:boolean,shiftHeld:boolean,forwardPressed:boolean):void{if(forwardPressed){if(this.sprintTapWindow>0&&this.player.canSprint()){this.player.isSprinting=true;this.sprintTapWindow=0;}else this.sprintTapWindow=7;}if(shiftHeld&&forwardHeld&&this.player.canSprint())this.player.isSprinting=true;if(!forwardHeld||!this.player.canSprint()||this.player.collidedHorizontally)this.player.isSprinting=false;}
   /** Reads input and updates the player's wish velocity; applies jumps immediately. */
   public update(): void {
+    if (this.player.ridingEntity !== null) {
+      this.player.wishVelocity.x = 0;
+      this.player.wishVelocity.z = 0;
+      this.player.isSprinting = false;
+      return;
+    }
     const yaw = this.camera.getYaw();
 
     // Camera-relative forward/right on the horizontal plane only.

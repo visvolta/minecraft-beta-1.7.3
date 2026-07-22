@@ -13,7 +13,12 @@ export class RedstoneWireBehaviour implements BlockBehaviour {
   private wiresProvidePower = true;
 
   public canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
-    return ctx.world.isNormalCube(x, y - 1, z);
+    if (ctx.world.isNormalCube(x, y - 1, z)) return true;
+    for (const direction of HORIZONTAL_BLOCK_DIRECTIONS) {
+      const offset = directionOffset(direction);
+      if (ctx.world.isNormalCube(x + offset.x, y, z + offset.z)) return true;
+    }
+    return false;
   }
 
   public onPlaced(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
@@ -48,11 +53,11 @@ export class RedstoneWireBehaviour implements BlockBehaviour {
     let maxPower = 0;
 
     this.wiresProvidePower = false;
-    const isGettingPowered = ctx.power?.isBlockIndirectlyPowered({ x, y, z }) ?? false;
+    const directPower = ctx.power?.getMaximumPowerAround({ x, y, z }) ?? 0;
     this.wiresProvidePower = true;
 
-    if (isGettingPowered) {
-      maxPower = 15;
+    if (directPower > 0) {
+      maxPower = directPower;
     } else {
       for (const direction of HORIZONTAL_BLOCK_DIRECTIONS) {
         const offset = directionOffset(direction);

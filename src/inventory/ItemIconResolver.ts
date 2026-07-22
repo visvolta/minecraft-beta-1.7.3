@@ -34,6 +34,8 @@ const ITEM_ALIASES: Record<string, string> = {
   '320': 'porkchop_cooked',
   '331': 'redstone_dust',
   '351': 'dye_powder_blue',
+  '328': 'minecart_normal',
+  'minecart': 'minecart_normal',
   // Weapons and Tools
   '268': 'wood_sword',
   '269': 'wood_shovel',

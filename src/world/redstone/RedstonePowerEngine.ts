@@ -1,3 +1,4 @@
+import { BlockIds } from '../../blocks/BlockId';
 import type { BlockRegistry } from '../../blocks/BlockRegistry';
 import type { FaceDirection } from '../../blocks/BlockFace';
 import type { BlockBehaviourRegistry } from '../BlockBehaviour';
@@ -45,7 +46,11 @@ export class RedstonePowerEngine {
     if (context === undefined) return NO_REDSTONE_POWER;
     const behaviour = this.behaviours.get(context.sourceBlockId);
     if (behaviour.canProvidePower !== true || behaviour.getWeakPower === undefined) return NO_REDSTONE_POWER;
-    return clampRedstonePower(behaviour.getWeakPower(context));
+    const power = clampRedstonePower(behaviour.getWeakPower(context));
+    if (context.sourceBlockId === BlockIds.RedstoneTorchOn && this.hasRedstoneWireOppositeReceiver(context.sourcePosition, directionToSource)) {
+      return clampRedstonePower(Math.max(0, power - 1));
+    }
+    return power;
   }
 
   public getStrongPowerFrom(receiver: BlockPosition, directionToSource: FaceDirection): RedstonePower {
@@ -122,6 +127,11 @@ export class RedstonePowerEngine {
       indirectQueries: this.indirectQueries,
       unloadedQueries: this.unloadedQueries,
     };
+  }
+
+  private hasRedstoneWireOppositeReceiver(source: BlockPosition, directionToSource: FaceDirection): boolean {
+    const candidate = offsetBlockPosition(source, directionToSource);
+    return this.world.getBlock(candidate.x, candidate.y, candidate.z) === BlockIds.RedstoneWire;
   }
 
   private createContext(receiver: BlockPosition, directionToSource: FaceDirection): PowerQueryContext | undefined {

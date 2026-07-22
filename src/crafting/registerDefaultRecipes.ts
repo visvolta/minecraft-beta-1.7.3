@@ -137,6 +137,11 @@ export function registerDefaultRecipes(
     { id: 'iron_ingot' }, { id: 'iron_ingot' }
   ], new ItemStack('door_iron', 'item', 1, 0), false);
 
+  tryRegisterShaped('minecart', 3, 2, [
+    { id: 'iron_ingot' }, null, { id: 'iron_ingot' },
+    { id: 'iron_ingot' }, { id: 'iron_ingot' }, { id: 'iron_ingot' }
+  ], new ItemStack(328, 'item', 1, 0), false);
+
   tryRegisterShaped('trapdoor', 3, 2, [
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 },
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }

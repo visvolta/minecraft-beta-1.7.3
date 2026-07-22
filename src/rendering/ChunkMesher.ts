@@ -23,6 +23,7 @@ import { FluidTextureKind } from '../world/fluid/FluidTextureKind';
 import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 import { getBetaFluidCornerHeight } from './fluid/FluidSurfaceGeometry';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
+import { getRailShapeForBlock } from '../world/rails/RailShapes';
 
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
@@ -923,8 +924,8 @@ export class ChunkMesher {
               this.buildTrapdoor(buffers, chunk, x, y, z, blockId, definition);
               continue;
             }
-            if (blockId === BlockIds.PoweredRail) {
-              this.buildPoweredRail(buffers, chunk, x, y, z, blockId, definition);
+            if (blockId === BlockIds.Rail || blockId === BlockIds.PoweredRail || blockId === BlockIds.DetectorRail) {
+              this.buildRail(buffers, chunk, x, y, z, blockId);
               continue;
             }
             if (blockId === BlockIds.StonePressurePlate || blockId === BlockIds.WoodPressurePlate) {
@@ -2246,22 +2247,49 @@ export class ChunkMesher {
     pushQuadFromBounds(FaceDirection.NORTH, [maxX, minY, minZ], [minX, minY, minZ], [minX, maxY, minZ], [maxX, maxY, minZ], [0, 0, -1]);
   }
 
-  private buildPoweredRail(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, _blockId: BlockId, _definition: BlockDefinition): void {
+  private buildRail(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId): void {
     const meta = chunk.getBlockMetadata(x, y, z);
-    const orientation = meta & 7;
-    const isPowered = (meta & 8) !== 0;
-    const uvRect = this.getSafeUvRect(isPowered ? 'rail_golden_powered' : 'rail_golden');
+    const shape = getRailShapeForBlock(blockId, meta);
+    if (shape === undefined) return;
+
+    const powered = blockId === BlockIds.PoweredRail;
+    const textureName = powered
+      ? ((meta & 8) !== 0 ? 'rail_golden_powered' : 'rail_golden')
+      : (blockId === BlockIds.DetectorRail ? 'rail_detector' : (shape.curve ? 'rail_normal_turned' : 'rail_normal'));
+    const uvRect = this.getSafeUvRect(textureName);
     if (!uvRect) return;
+
     const tint: [number, number, number] = [1, 1, 1];
     const light = this.getLightComponentsAt(chunk, x, y, z);
-    const h = 0.0625;
-    let v0: Corner = [0, h, 1], v1: Corner = [1, h, 1], v2: Corner = [1, h, 0], v3: Corner = [0, h, 0];
-    if (orientation === 1) { v0 = [0, h, 0]; v1 = [0, h, 1]; v2 = [1, h, 1]; v3 = [1, h, 0]; }
-    else if (orientation === 2) { v0 = [0, h, 1]; v1 = [1, 1 + h, 1]; v2 = [1, 1 + h, 0]; v3 = [0, h, 0]; }
-    else if (orientation === 3) { v0 = [0, 1 + h, 1]; v1 = [1, h, 1]; v2 = [1, h, 0]; v3 = [0, 1 + h, 0]; }
-    else if (orientation === 4) { v0 = [0, h, 1]; v1 = [1, h, 1]; v2 = [1, 1 + h, 0]; v3 = [0, 1 + h, 0]; }
-    else if (orientation === 5) { v0 = [0, 1 + h, 1]; v1 = [1, 1 + h, 1]; v2 = [1, h, 0]; v3 = [0, h, 0]; }
-    const worldV = [v0, v1, v2, v3].map(v => [x + v[0], y + v[1], z + v[2]]) as unknown as [Corner, Corner, Corner, Corner];
-    buffers.pushQuad(worldV, [0, 1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
+    const h = 0.015625;
+    let vertices: [Corner, Corner, Corner, Corner] = [
+      [x, y + h, z + 1],
+      [x + 1, y + h, z + 1],
+      [x + 1, y + h, z],
+      [x, y + h, z],
+    ];
+
+    if (shape.metadata === 2) {
+      vertices = [[x, y + h, z + 1], [x + 1, y + 1 + h, z + 1], [x + 1, y + 1 + h, z], [x, y + h, z]];
+    } else if (shape.metadata === 3) {
+      vertices = [[x, y + 1 + h, z + 1], [x + 1, y + h, z + 1], [x + 1, y + h, z], [x, y + 1 + h, z]];
+    } else if (shape.metadata === 4) {
+      vertices = [[x, y + h, z + 1], [x + 1, y + h, z + 1], [x + 1, y + 1 + h, z], [x, y + 1 + h, z]];
+    } else if (shape.metadata === 5) {
+      vertices = [[x, y + 1 + h, z + 1], [x + 1, y + 1 + h, z + 1], [x + 1, y + h, z], [x, y + h, z]];
+    }
+
+    const u0 = uvRect.u0;
+    const v0 = uvRect.v0;
+    const u1 = uvRect.u1;
+    const v1 = uvRect.v1;
+    const rotations: readonly Quad8[] = [
+      [u0, v1, u1, v1, u1, v0, u0, v0],
+      [u1, v1, u1, v0, u0, v0, u0, v1],
+      [u1, v0, u0, v0, u0, v1, u1, v1],
+      [u0, v0, u0, v1, u1, v1, u1, v0],
+    ];
+    const uv = rotations[shape.textureRotationQuarterTurns] ?? rotations[0]!;
+    buffers.pushQuad(vertices, [0, 1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, uv);
   }
 }

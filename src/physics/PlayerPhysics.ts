@@ -53,6 +53,15 @@ export class PlayerPhysics {
    */
   public update(player:Player,deltaSeconds:number,isJumpPressed=false):PlayerMovementResult{
     const previousX=player.position.x,previousY=player.position.y,previousZ=player.position.z,wasGrounded=player.grounded;
+    if (player.ridingEntity !== null) {
+      player.wishVelocity.x = 0;
+      player.wishVelocity.z = 0;
+      player.velocity.x = 0;
+      player.velocity.y = 0;
+      player.velocity.z = 0;
+      player.grounded = false;
+      return { previousX, previousY, previousZ, currentX: player.position.x, currentY: player.position.y, currentZ: player.position.z, wasGrounded, grounded: false, climbing: false, inWater: false, inLava: false };
+    }
     const playerBox = player.getAABB();
     const climbRange = this.blockRangeCoveringBox(playerBox);
     let isClimbing = false;

@@ -9,6 +9,7 @@ import type { TextureAtlas } from '../assets/TextureAtlas';
 import { CameraController } from '../camera/CameraController';
 import { Input } from '../input/Input';
 import { Player } from '../player/Player';
+import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 import { PlayerController } from '../player/PlayerController';
 import { InteractionController } from '../player/InteractionController';
 import { PlayerPhysics } from '../physics/PlayerPhysics';
@@ -95,6 +96,7 @@ import { registerRedstoneWireBehaviour } from '../world/behaviours/RedstoneWireB
 import { registerRedstoneTorchBehaviour } from '../world/behaviours/RedstoneTorchBehaviour';
 import { registerTntBehaviour } from '../world/behaviours/TntBehaviour';
 import { registerPoweredRailBehaviour } from '../world/behaviours/PoweredRailBehaviour';
+import { registerRailBehaviour } from '../world/behaviours/RailBehaviour';
 import { SlabBehaviour } from '../world/behaviours/SlabBehaviour';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
@@ -128,6 +130,7 @@ import type { WorldMetadata } from '../persistence/metadata/WorldMetadata';
 import { PlayerModel } from '../player/PlayerModel';
 import { PlayerAnimator } from '../player/PlayerAnimator';
 import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
+import { MinecartRenderSystem } from '../rendering/MinecartRenderer';
 import { FirstPersonHeldItemRenderer } from '../rendering/FirstPersonHeldItemRenderer.ts';
 import { FirstPersonMotionController } from '../player/FirstPersonMotionController';
 import { CameraModeController, CameraMode } from '../camera/CameraModeController';
@@ -193,6 +196,7 @@ export class Engine {
   private readonly naturalMobSpawner: NaturalMobSpawner;
   private readonly explosionService: ExplosionService;
   private readonly entityParticles: SimpleEntityParticleSink;
+  private readonly minecartRenderSystem: MinecartRenderSystem;
   private simulationAccumulatorTicks = 0;
   private simulationTick = 0;
   private readonly inventory: Inventory;
@@ -391,6 +395,7 @@ export class Engine {
       entityTextures: this.entityTextures,
       sounds:this.mobSoundSink,
     });
+    this.minecartRenderSystem = new MinecartRenderSystem(this.entityManager, this.renderer.scene, this.entityTextures);
     this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng);
 
     this.chunkPersistenceQueue.setEntityHooks({
@@ -431,6 +436,7 @@ export class Engine {
     registerRedstoneWireBehaviour(this.blockBehaviourRegistry);
     registerRedstoneTorchBehaviour(this.blockBehaviourRegistry);
     registerTntBehaviour(this.blockBehaviourRegistry);
+    registerRailBehaviour(this.blockBehaviourRegistry);
     registerPoweredRailBehaviour(this.blockBehaviourRegistry);
     this.blockBehaviourRegistry.register(BlockIds.Slab, new SlabBehaviour());
     this.weatherController = new WeatherController(worldSeed);
@@ -581,7 +587,11 @@ export class Engine {
       this.recipeRegistry
     );
     const displayNameResolver = (stack: { identity: { type: string; id: string | number } }) => {
-      if(stack.identity.type==='item'&&(stack.identity.id===262||stack.identity.id==='262'||stack.identity.id==='arrow'))return 'Arrow';
+      if (stack.identity.type === 'item') {
+        const item = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+        if (item?.displayName !== undefined) return item.displayName;
+        if (item !== undefined) return item.id.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      }
       if (stack.identity.type === 'block') {
         const def = blockRegistry.getById(stack.identity.id);
         if (def && def.displayName) return def.displayName;
@@ -851,7 +861,7 @@ export class Engine {
     if (!this.running) return;
     if (this.animationFrameId !== null) { cancelAnimationFrame(this.animationFrameId); this.animationFrameId = null; }
     this.lastFrameTimeMs = null;
-    this.renderer.stop(); this.input.stop(); this.debugOverlay.dispose(); this.blockHighlight.dispose(); this.destroyOverlayRenderer.dispose(); this.hudRenderer.dispose(); this.deathScreen.dispose(); this.inventoryInputController.dispose(); this.inventoryController.dispose(); this.craftingTableInputController.dispose(); this.furnaceInputController.dispose(); this.menuInputRouter.dispose(); this.craftingTableController.dispose(); this.furnaceController.dispose(); this.furnaceManager.clear(); this.contextMenuSuppressor.dispose(); this.heldItemRenderer.dispose(); this.playerArmourRenderer.dispose(); this.playerModel.dispose(); this.entityManager.dispose(); this.entityParticles.dispose(); this.chunkStreamer.dispose(); this.fallingBlockManager.dispose(); this.lightningRenderer.dispose(); this.rainSplashRenderer.dispose(); this.precipitationRenderer.dispose(); this.cloudRenderer.dispose(); this.skyRenderer.dispose(); this.chunkRenderer.dispose(); this.fluidAnimationSystem.dispose(); this.fireAnimationSystem.dispose(); this.armourMaterialCache.dispose(); this.armourGeometryCache.dispose(); this.armourTextures.dispose(); this.atlas.dispose(); this.entityTextures.dispose(); this.chunkManager.clear(); this.renderer.domElement.remove(); this.running = false;
+    this.renderer.stop(); this.input.stop(); this.debugOverlay.dispose(); this.blockHighlight.dispose(); this.destroyOverlayRenderer.dispose(); this.hudRenderer.dispose(); this.deathScreen.dispose(); this.inventoryInputController.dispose(); this.inventoryController.dispose(); this.craftingTableInputController.dispose(); this.furnaceInputController.dispose(); this.menuInputRouter.dispose(); this.craftingTableController.dispose(); this.furnaceController.dispose(); this.furnaceManager.clear(); this.contextMenuSuppressor.dispose(); this.heldItemRenderer.dispose(); this.playerArmourRenderer.dispose(); this.playerModel.dispose(); this.minecartRenderSystem.dispose(); this.entityManager.dispose(); this.entityParticles.dispose(); this.chunkStreamer.dispose(); this.fallingBlockManager.dispose(); this.lightningRenderer.dispose(); this.rainSplashRenderer.dispose(); this.precipitationRenderer.dispose(); this.cloudRenderer.dispose(); this.skyRenderer.dispose(); this.chunkRenderer.dispose(); this.fluidAnimationSystem.dispose(); this.fireAnimationSystem.dispose(); this.armourMaterialCache.dispose(); this.armourGeometryCache.dispose(); this.armourTextures.dispose(); this.atlas.dispose(); this.entityTextures.dispose(); this.chunkManager.clear(); this.renderer.domElement.remove(); this.running = false;
   }
 
   private tick = (timeMs: number): void => {
@@ -1012,7 +1022,9 @@ export class Engine {
     const activeMiningPos = this.interactionController.breakingController.getMiningBlockPos(); const progress = this.interactionController.breakingController.getProgress();
     this.destroyOverlayRenderer.update(activeMiningPos, progress);
     const totalTicksForAlpha = this.worldTime.getTotalTicks();
-    this.entityManager.render(totalTicksForAlpha - Math.floor(totalTicksForAlpha));
+    const entityAlpha = totalTicksForAlpha - Math.floor(totalTicksForAlpha);
+    this.entityManager.render(entityAlpha);
+    this.minecartRenderSystem.update(entityAlpha);
     this.entityParticles.update(deltaSeconds);
     this.debugStatsCollector.recordFrame(deltaSeconds);
     if (this.debugOverlay.isVisible()) this.debugOverlay.render(this.debugStatsCollector.collect(this.noClipEnabled));

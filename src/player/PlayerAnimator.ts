@@ -19,6 +19,14 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+export type PlayerPoseState = 'standing' | 'walking' | 'minecart_sitting';
+
+export function getPlayerPoseState(player: Player): PlayerPoseState {
+  if (player.ridingEntity !== null) return 'minecart_sitting';
+  const speed = Math.hypot(player.velocity.x, player.velocity.z);
+  return speed > 0.05 && player.grounded ? 'walking' : 'standing';
+}
+
 function normalizeAngle(angle: number): number {
   let a = angle % (Math.PI * 2);
   if (a < -Math.PI) a += Math.PI * 2;
@@ -31,8 +39,9 @@ export class PlayerAnimator {
 
   public update(player: Player, model: PlayerModel, headYaw: number, headPitch: number, partialTick: number): void {
     const normalSwing=player.prevSwingProgress+(player.swingProgress-player.prevSwingProgress)*partialTick,breaking=(player.prevBreakingSwingPhase+((player.breakingSwingPhase-player.prevBreakingSwingPhase+1)%1)*partialTick)%1,swingProgress=player.armAction!=='none'?breaking:normalSwing;
+    const pose = getPlayerPoseState(player);
     const limbSwingPhase = player.prevLimbSwingPhase + (player.limbSwingPhase - player.prevLimbSwingPhase) * partialTick;
-    const limbSwingAmount = player.prevLimbSwingAmount + (player.limbSwingAmount - player.prevLimbSwingAmount) * partialTick;
+    const limbSwingAmount = pose === 'minecart_sitting' ? 0 : player.prevLimbSwingAmount + (player.limbSwingAmount - player.prevLimbSwingAmount) * partialTick;
     const bodyYaw = player.prevBodyYaw + (player.bodyYaw - player.prevBodyYaw) * partialTick;
 
     // Body follow head
@@ -59,6 +68,8 @@ export class PlayerAnimator {
       headYaw,
       clamp(headPitch, -ANIMATION_HEAD_PITCH_LIMIT, ANIMATION_HEAD_PITCH_LIMIT)
     );
+
+    this.applyPoseBase(model, pose);
 
     // Walking animation
     let rightArmX = -Math.cos(limbSwingPhase) * ANIMATION_ARM_SWING_LIMIT * limbSwingAmount * 0.5;
@@ -89,11 +100,16 @@ export class PlayerAnimator {
       rightArmZ += Math.sin(swingProgress * Math.PI) * -0.4 * ANIMATION_PLACEMENT_SWING_STRENGTH;
     }
 
-    if (!player.grounded) {
+    if (!player.grounded && pose !== 'minecart_sitting') {
       rightArmX += ANIMATION_AIRBORNE_ARM_ROTATION;
       leftArmX += ANIMATION_AIRBORNE_ARM_ROTATION;
       rightLegX += ANIMATION_AIRBORNE_LEG_ROTATION;
       leftLegX += ANIMATION_AIRBORNE_LEG_ROTATION;
+    }
+
+    if (pose === 'minecart_sitting') {
+      rightLegX = 1.5;
+      leftLegX = 1.5;
     }
 
     model.rightArmGroup.rotation.set(rightArmX, 0, rightArmZ);
@@ -101,4 +117,11 @@ export class PlayerAnimator {
     model.rightLegGroup.rotation.set(rightLegX, 0, 0);
     model.leftLegGroup.rotation.set(leftLegX, 0, 0);
   }
+
+  private applyPoseBase(model: PlayerModel, pose: PlayerPoseState): void {
+    const px = 1 / 16;
+    model.rightLegGroup.position.set(2 * px, pose === 'minecart_sitting' ? 10 * px : 12 * px, pose === 'minecart_sitting' ? 3 * px : 0);
+    model.leftLegGroup.position.set(-2 * px, pose === 'minecart_sitting' ? 10 * px : 12 * px, pose === 'minecart_sitting' ? 3 * px : 0);
+  }
 }
+

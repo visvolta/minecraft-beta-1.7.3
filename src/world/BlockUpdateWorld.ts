@@ -247,6 +247,8 @@ export class BlockUpdateWorld {
     if (this.eventQueue && this.getGameTick) {
       if (blockId === BlockIds.RedstoneWire) {
         this.eventQueue.enqueueItemDrop(this.getGameTick(), worldX, worldY, worldZ, 331, 0, 1, 'support-loss');
+      } else if (blockId === BlockIds.Rail || blockId === BlockIds.PoweredRail || blockId === BlockIds.DetectorRail) {
+        this.eventQueue.enqueueItemDrop(this.getGameTick(), worldX, worldY, worldZ, blockId, 0, 1, 'support-loss');
       }
     }
   }

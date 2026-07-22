@@ -141,6 +141,7 @@ export abstract class Entity {
    * render resources must override `disposeRender` to free them.
    */
   public onRemove(): void {
+    this.clearMountLinks();
     this.disposeRender();
     this.detachRenderObject();
   }
@@ -151,6 +152,7 @@ export abstract class Entity {
    * its render resources are freed and it stops ticking until restored.
    */
   public onPark(): void {
+    this.clearMountLinks();
     this.disposeRender();
     this.detachRenderObject();
   }
@@ -178,27 +180,28 @@ export abstract class Entity {
 
   public markRemoved(): void {
     this.removed = true;
-    if (this.ridingEntity) {
-      this.mountEntity(null);
-    }
-    if (this.riddenByEntity) {
-      this.riddenByEntity.mountEntity(null);
-    }
+    this.clearMountLinks();
   }
 
-  public mountEntity(vehicle: Entity | null): void {
-    if (this.ridingEntity === vehicle) return;
+  public mountEntity(vehicle: Entity | null): boolean {
+    if (vehicle === this || vehicle?.removed === true || this.removed) return false;
+    if (this.ridingEntity === vehicle) return true;
+    if (vehicle !== null && vehicle.riddenByEntity !== null && vehicle.riddenByEntity !== this) return false;
 
-    // Dismount current
-    if (this.ridingEntity) {
-      this.ridingEntity.riddenByEntity = null;
-    }
-
+    const previousVehicle = this.ridingEntity;
+    if (previousVehicle !== null) previousVehicle.riddenByEntity = null;
     this.ridingEntity = vehicle;
+    if (vehicle !== null) vehicle.riddenByEntity = this;
+    return true;
+  }
 
-    if (this.ridingEntity) {
-      this.ridingEntity.riddenByEntity = this;
-    }
+  protected clearMountLinks(): void {
+    const vehicle = this.ridingEntity;
+    const passenger = this.riddenByEntity;
+    this.ridingEntity = null;
+    this.riddenByEntity = null;
+    if (vehicle !== null && vehicle.riddenByEntity === this) vehicle.riddenByEntity = null;
+    if (passenger !== null && passenger.ridingEntity === this) passenger.ridingEntity = null;
   }
 
   /**

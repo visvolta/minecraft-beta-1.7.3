@@ -7,6 +7,7 @@ export type ToolClass = 'hand' | 'pickaxe' | 'axe' | 'shovel' | 'sword' | 'hoe';
 export interface ItemDefinition {
   readonly id: string;
   readonly numericId?: number;
+  readonly displayName?: string;
   readonly stackSize: number;
   readonly durability?: number;
   readonly foodValue?: number;

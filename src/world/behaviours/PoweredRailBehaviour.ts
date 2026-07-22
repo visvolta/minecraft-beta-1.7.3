@@ -1,14 +1,24 @@
 import { BlockIds } from '../../blocks/BlockId';
-import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
+import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry, BoundingBoxType } from '../BlockBehaviour';
+import { AABB } from '../../physics/AABB';
+import { dropRailOnce, getRailSelectionBounds, railSupportLost } from './RailBehaviour';
 
 export class PoweredRailBehaviour implements BlockBehaviour {
+    public canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+        return ctx.world.isNormalCube(x, y - 1, z);
+    }
+
+    public getBoundingBoxes(ctx: BlockBehaviourContext, x: number, y: number, z: number, type: BoundingBoxType): AABB[] | undefined {
+        if (type === 'collision') return [];
+        return getRailSelectionBounds(ctx, x, y, z);
+    }
+
     public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
         const meta = ctx.world.getBlockMetadata(x, y, z);
         const orientation = meta & 7;
         
-        if (!ctx.world.isNormalCube(x, y - 1, z)) {
-            ctx.world.dropBlockAsItem(x, y, z, BlockIds.PoweredRail);
-            ctx.world.setBlockWithNotify(x, y, z, 0);
+        if (railSupportLost(ctx, x, y, z)) {
+            dropRailOnce(ctx, x, y, z, BlockIds.PoweredRail);
             return;
         }
 

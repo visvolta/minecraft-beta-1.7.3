@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 
-export type EntityTextureKey = 'pig'|'cow'|'sheep'|'sheepFur'|'chicken'|'zombie'|'skeleton'|'spider'|'spiderEyes'|'creeper'|'arrows'|'bowStandby'|'bowPulling0'|'bowPulling1'|'bowPulling2';
+export type EntityTextureKey = 'pig'|'cow'|'sheep'|'sheepFur'|'chicken'|'zombie'|'skeleton'|'spider'|'spiderEyes'|'creeper'|'arrows'|'minecart'|'bowStandby'|'bowPulling0'|'bowPulling1'|'bowPulling2';
 
 const PATHS: Readonly<Record<EntityTextureKey,string>>={
-  pig:'/textures/entity/pig.png',cow:'/textures/entity/cow.png',sheep:'/textures/entity/sheep.png',sheepFur:'/textures/entity/sheep_fur.png',chicken:'/textures/entity/chicken.png',zombie:'/textures/entity/zombie.png',skeleton:'/textures/entity/skeleton.png',spider:'/textures/entity/spider.png',spiderEyes:'/textures/entity/spider_eyes.png',creeper:'/textures/entity/creeper.png',arrows:'/textures/entity/arrows.png',bowStandby:'/textures/items/bow_standby.png',bowPulling0:'/textures/items/bow_pulling_0.png',bowPulling1:'/textures/items/bow_pulling_1.png',bowPulling2:'/textures/items/bow_pulling_2.png',
+  pig:'/textures/entity/pig.png',cow:'/textures/entity/cow.png',sheep:'/textures/entity/sheep.png',sheepFur:'/textures/entity/sheep_fur.png',chicken:'/textures/entity/chicken.png',zombie:'/textures/entity/zombie.png',skeleton:'/textures/entity/skeleton.png',spider:'/textures/entity/spider.png',spiderEyes:'/textures/entity/spider_eyes.png',creeper:'/textures/entity/creeper.png',arrows:'/textures/entity/arrows.png',minecart:'/textures/entity/minecart.png',bowStandby:'/textures/items/bow_standby.png',bowPulling0:'/textures/items/bow_pulling_0.png',bowPulling1:'/textures/items/bow_pulling_1.png',bowPulling2:'/textures/items/bow_pulling_2.png',
 };
 export function configureEntityTexture(texture:THREE.Texture):void{texture.magFilter=THREE.NearestFilter;texture.minFilter=THREE.NearestFilter;texture.generateMipmaps=false;texture.wrapS=THREE.ClampToEdgeWrapping;texture.wrapT=THREE.ClampToEdgeWrapping;texture.colorSpace=THREE.SRGBColorSpace;texture.flipY=false;texture.needsUpdate=true;}
 export class EntityTextureAssets{

@@ -1,4 +1,7 @@
 import { AABB } from '../physics/AABB';
+import { Entity } from '../entities/core/Entity';
+import type { EntityTickContext } from '../entities/core/EntityContext';
+import type { NbtCompound, NbtTag } from '../persistence/nbt/Nbt';
 import { DamageSource, type DamageAttacker } from '../entities/damage/DamageSource';
 import type { PlayerEquipment } from '../inventory/PlayerEquipment';
 import { reduceDamageByArmour } from './ArmourProtection';
@@ -27,7 +30,9 @@ export const PLAYER_EYE_HEIGHT = FIRST_PERSON_CAMERA_OFFSET_Y;
  * Position is the feet centre (bottom-centre of the hitbox), matching
  * Beta's own convention and keeping ground/eye-height math simple.
  */
-export class Player {
+export class Player extends Entity {
+  public readonly typeId = 0;
+  public readonly typeStringId = 'Player';
   public maxHealth = 20;
   public health = 20;
   public fallDistance = 0;
@@ -48,12 +53,6 @@ export class Player {
   public isSprinting=false;public inWater=false;public inLava=false;public headUnderwater=false;public collidedHorizontally=false;
   private equipment: PlayerEquipment | undefined;
   private armourDamageRemainder = 0;
-
-  /** Feet position (bottom-centre of the hitbox), world space. */
-  public readonly position = { x: 0, y: 0, z: 0 };
-
-  /** Current velocity, blocks per second. */
-  public readonly velocity = { x: 0, y: 0, z: 0 };
 
   /**
    * Horizontal velocity movement input is steering toward, set each frame
@@ -85,6 +84,9 @@ export class Player {
   public prevBodyYaw = 0;
 
   public constructor(spawnX: number, spawnY: number, spawnZ: number) {
+    super();
+    this.setSize(PLAYER_WIDTH, PLAYER_HEIGHT);
+    this.setPosition(spawnX, spawnY, spawnZ);
     this.position.x = spawnX;
     this.position.y = spawnY;
     this.position.z = spawnZ;
@@ -152,7 +154,7 @@ export class Player {
   }
   public attackFromMob(amount:number,attacker:DamageAttacker):boolean{return this.attackEntityFrom(DamageSource.mob(attacker),amount);}
 
-  public resetForRespawn(x:number,y:number,z:number):void{this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.armourDamageRemainder=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.inLava=this.headUnderwater=this.collidedHorizontally=false;this.stopBreakingAnimation();}
+  public resetForRespawn(x:number,y:number,z:number):void{this.mountEntity(null);this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.armourDamageRemainder=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.inLava=this.headUnderwater=this.collidedHorizontally=false;this.stopBreakingAnimation();}
 
   public tickCombatState(): void {
     if (this.hurtResistantTime > 0) this.hurtResistantTime -= 1;
@@ -165,15 +167,29 @@ export class Player {
   public finishBreakingAnimation():void{if(this.armAction==='breaking')this.armAction='breakingRecover';}
   public stopBreakingAnimation():void{this.armAction='none';this.breakingSwingPhase=this.prevBreakingSwingPhase=0;}
 
+
+
+  public onTick(_ctx: EntityTickContext): void {
+    // The local player is advanced by PlayerController/PlayerPhysics, not by EntityManager.
+  }
+
+  protected writeEntityNbt(_map: Map<string, NbtTag>): void {
+    // Player persistence is handled by WorldMetadata, not chunk entity NBT.
+  }
+
+  protected readEntityNbt(_data: NbtCompound): void {
+    // Player persistence is handled by WorldMetadata, not chunk entity NBT.
+  }
+
   public updateAnimationState(deltaSeconds: number): void {
     this.prevLimbSwingPhase = this.limbSwingPhase;
     this.prevLimbSwingAmount = this.limbSwingAmount;
     this.prevSwingProgress=this.swingProgress;this.prevBreakingSwingPhase=this.breakingSwingPhase;if(this.armAction==='breaking')this.breakingSwingPhase=(this.breakingSwingPhase+deltaSeconds*3)%1;else if(this.armAction==='breakingRecover'){this.breakingSwingPhase=Math.min(1,this.breakingSwingPhase+deltaSeconds*3);if(this.breakingSwingPhase>=1)this.stopBreakingAnimation();}
     this.prevBodyYaw = this.bodyYaw;
 
-    const speed = Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z);
+    const speed = this.ridingEntity === null ? Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z) : 0;
     let targetSwingAmount = 0;
-    if (this.grounded && speed > 0.05) {
+    if (this.ridingEntity === null && this.grounded && speed > 0.05) {
       targetSwingAmount = Math.min(speed * ANIMATION_MOVEMENT_SPEED_SCALING, 1.0);
     }
 

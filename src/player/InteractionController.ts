@@ -18,6 +18,7 @@ import { Inventory } from '../inventory/Inventory';
 import { InventoryTransferService } from '../inventory/InventoryTransferService';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 import type { EntityManager } from '../entities/core/EntityManager';
+import { Entity } from '../entities/core/Entity';
 import { LivingEntity } from '../entities/living/LivingEntity';
 import { MinecartEntity } from '../entities/MinecartEntity';
 import { DamageSource } from '../entities/damage/DamageSource';
@@ -25,6 +26,10 @@ import { selectMeleeTarget } from './MeleeTargeting';
 import { MELEE_REACH, PLAYER_MELEE_DAMAGE } from './PlayerConstants';import { combatDurabilityCost } from '../items/ItemDurability';
 import { AnimalEntity } from '../entities/living/AnimalEntity';
 import type { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';import type { FoodUseController } from './FoodUseController';
+import { getRailBlockInfoAt } from '../world/rails/RailShapes';
+import { getMinecartBaseYOnRail, railYawRadians } from '../entities/minecart/RailPhysics';
+import { getBlockBounds } from '../world/BlockBehaviour';
+import { PLAYER_HEIGHT, PLAYER_WIDTH } from './Player';
 
 /** Maximum block interaction reach, in blocks. */
 export const INTERACTION_REACH = 4.75;
@@ -46,6 +51,7 @@ export class InteractionController {
   private currentHit: RaycastHit | undefined;
   /** Nearest valid living entity under the crosshair this frame (for melee + debug). */
   private targetedEntity: LivingEntity | undefined;
+  private targetedInteractEntity: Entity | undefined;
   private blockInteractionHandler?: (blockId: number, x: number, y: number, z: number) => boolean;
 
   public setBlockInteractionHandler(handler: (blockId: number, x: number, y: number, z: number) => boolean): void {
@@ -102,6 +108,10 @@ export class InteractionController {
     return this.targetedEntity;
   }
 
+  public getTargetedInteractEntity(): Entity | undefined {
+    return this.targetedInteractEntity;
+  }
+
   /**
    * Finds the nearest valid melee target using the existing raycast architecture:
    * candidates come from a chunk-first AABB query over the swept look ray, then
@@ -134,6 +144,31 @@ export class InteractionController {
 
     const target = selectMeleeTarget({ x: eyeX, y: eyeY, z: eyeZ }, { x: lx, y: ly, z: lz }, reach, candidates);
     return target?.entity;
+  }
+
+  private findInteractTarget(): Entity | undefined {
+    const eyeX = this.camera.position.x;
+    const eyeY = this.camera.position.y;
+    const eyeZ = this.camera.position.z;
+    const lx = this.lookDirection.x;
+    const ly = this.lookDirection.y;
+    const lz = this.lookDirection.z;
+    const blockDistance = this.currentHit?.distance ?? INTERACTION_REACH;
+    const reach = Math.min(INTERACTION_REACH, blockDistance);
+    const endX = eyeX + lx * reach;
+    const endY = eyeY + ly * reach;
+    const endZ = eyeZ + lz * reach;
+    const sweepBox = new AABB(
+      Math.min(eyeX, endX), Math.min(eyeY, endY), Math.min(eyeZ, endZ),
+      Math.max(eyeX, endX), Math.max(eyeY, endY), Math.max(eyeZ, endZ),
+    ).expand(1, 1, 1);
+    let best: { entity: Entity; distance: number } | undefined;
+    for (const entity of this.entityManager.getEntitiesInAABB(sweepBox, (candidate) => candidate.canBeCollidedWith())) {
+      const hit = entity.getAABB().expand(0.1, 0.1, 0.1).intersectRay(eyeX, eyeY, eyeZ, lx, ly, lz);
+      if (hit === undefined || hit.distance > reach) continue;
+      if (best === undefined || hit.distance < best.distance) best = { entity, distance: hit.distance };
+    }
+    return best?.entity;
   }
 
   /** Applies a player melee hit through the shared living-entity damage flow. */
@@ -193,13 +228,18 @@ export class InteractionController {
     // Target the nearest valid living entity under the crosshair (melee reach,
     // capped at the block-hit distance so attacks can't pass through walls).
     this.targetedEntity = this.findMeleeTarget();
+    this.targetedInteractEntity = this.findInteractTarget();
 
     const isLeftClickHeld = this.input.isMouseButtonPressed('left');
     // Block breaking yields to a targeted entity (don't break the block behind it).
-    this.breakingController.update(this.currentHit, isLeftClickHeld && this.targetedEntity === undefined, deltaSeconds);
+    this.breakingController.update(this.currentHit, isLeftClickHeld && this.targetedInteractEntity === undefined, deltaSeconds);
 
-    // Melee attack triggers on the left-click edge: one hit per press, which the
-    // target's invulnerability frames then gate against rapid re-clicks.
+    // Entity attacks trigger on the left-click edge: one hit per press.
+    if (this.input.isMouseButtonJustPressed('left') && this.targetedInteractEntity instanceof MinecartEntity) {
+      this.player.swingItem();
+      this.targetedInteractEntity.attackMinecart(PLAYER_MELEE_DAMAGE);
+      return;
+    }
     if (this.input.isMouseButtonJustPressed('left') && this.targetedEntity !== undefined) {
       this.player.swingItem();
       this.attackTargetedEntity(this.targetedEntity);
@@ -216,6 +256,21 @@ export class InteractionController {
       }
     }
 
+    if (this.input.isMouseButtonJustPressed('right') && this.player.ridingEntity instanceof MinecartEntity) {
+      this.dismountPlayerFromMinecart();
+      this.player.swingItem();
+      return;
+    }
+
+    if (this.input.isMouseButtonJustPressed('right') && this.targetedInteractEntity instanceof MinecartEntity) {
+      if (this.targetedInteractEntity.riddenByEntity === null && this.player.ridingEntity === null) {
+        this.player.mountEntity(this.targetedInteractEntity);
+        this.targetedInteractEntity.updatePassengerPosition();
+        this.player.swingItem();
+        return;
+      }
+    }
+
     if (this.currentHit === undefined) {
       if (this.input.isMouseButtonJustPressed('left')) {
         this.player.swingItem();
@@ -226,20 +281,9 @@ export class InteractionController {
     }
 
     if (this.input.isMouseButtonJustPressed('right')) {
-      const selectedId = this.getSelectedBlockId();
-      if (selectedId === 328) {
-          // Special minecart placement
-          const rx = this.currentHit.blockPos.x;
-          const ry = this.currentHit.blockPos.y;
-          const rz = this.currentHit.blockPos.z;
-          const targetId = this.blockUpdateWorld.getBlock(rx, ry, rz);
-          if (targetId === BlockIds.Rail || targetId === BlockIds.PoweredRail) {
-              const cart = new MinecartEntity(this.entityManager.context, rx + 0.5, ry + 0.5, rz + 0.5);
-              this.entityManager.add(cart);
-              this.inventory.decrementSlot(this.selectedSlotIndex, 1);
-              this.player.swingItem();
-              return;
-          }
+      if (this.tryUseMinecartItem(this.currentHit)) {
+        this.player.swingItem();
+        return;
       }
 
       const { x, y, z } = this.currentHit.blockPos;
@@ -259,24 +303,83 @@ export class InteractionController {
         return;
       }
 
-      // Minecart mounting
-      const targetedEntity = this.getTargetedEntity();
-      if (targetedEntity instanceof MinecartEntity && this.player.ridingEntity === null) {
-          this.player.mountEntity(targetedEntity);
-          this.player.swingItem();
-          return;
-      } else if (this.player.ridingEntity instanceof MinecartEntity) {
-          this.player.mountEntity(null);
-          this.player.swingItem();
-          return;
-      }
-
       const placed = this.placeBlock(this.currentHit);
       if (placed) {
         this.inventory.decrementSlot(this.selectedSlotIndex, 1);
       }
       this.player.swingItem();
     }
+  }
+
+  private tryUseMinecartItem(hit: RaycastHit): boolean {
+    const stack = this.inventory.getStack(this.selectedSlotIndex);
+    if (stack === null || stack.identity.type !== 'item') return false;
+    const id = stack.identity.id;
+    if (id !== 328 && id !== 'minecart') return false;
+
+    const { x, y, z } = hit.blockPos;
+    const rail = getRailBlockInfoAt(this.blockUpdateWorld, x, y, z);
+    if (rail === undefined || (rail.blockId !== BlockIds.Rail && rail.blockId !== BlockIds.PoweredRail)) return false;
+
+    const spawnX = x + 0.5;
+    const spawnZ = z + 0.5;
+    const spawnY = getMinecartBaseYOnRail(spawnX, spawnZ, rail);
+    const cart = new MinecartEntity(this.entityManager.context, spawnX, spawnY, spawnZ);
+    cart.yaw = railYawRadians(rail.shape) * 180 / Math.PI;
+    cart.previousYaw = cart.yaw;
+    if (this.entityManager.getEntitiesInAABB(cart.getAABB(), (entity) => entity.canBeCollidedWith()).length > 0) return false;
+
+    this.entityManager.add(cart);
+    this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+    return true;
+  }
+
+  private dismountPlayerFromMinecart(): void {
+    const vehicle = this.player.ridingEntity;
+    this.player.mountEntity(null);
+    if (vehicle === null) return;
+    const candidates = [
+      { x: vehicle.position.x + 1, y: vehicle.position.y, z: vehicle.position.z },
+      { x: vehicle.position.x - 1, y: vehicle.position.y, z: vehicle.position.z },
+      { x: vehicle.position.x, y: vehicle.position.y, z: vehicle.position.z + 1 },
+      { x: vehicle.position.x, y: vehicle.position.y, z: vehicle.position.z - 1 },
+      { x: vehicle.position.x, y: vehicle.position.y + 1, z: vehicle.position.z },
+    ];
+    for (const candidate of candidates) {
+      if (this.isPlayerSpaceClear(candidate.x, candidate.y, candidate.z)) {
+        this.player.position.x = candidate.x;
+        this.player.position.y = candidate.y;
+        this.player.position.z = candidate.z;
+        this.player.velocity.x = 0;
+        this.player.velocity.y = 0;
+        this.player.velocity.z = 0;
+        return;
+      }
+    }
+    this.player.position.x = vehicle.position.x;
+    this.player.position.y = vehicle.position.y + 1;
+    this.player.position.z = vehicle.position.z;
+  }
+
+  private isPlayerSpaceClear(x: number, y: number, z: number): boolean {
+    const half = PLAYER_WIDTH / 2;
+    const box = new AABB(x - half, y, z - half, x + half, y + PLAYER_HEIGHT, z + half);
+    const minX = Math.floor(box.minX);
+    const maxX = Math.ceil(box.maxX) - 1;
+    const minY = Math.floor(box.minY);
+    const maxY = Math.ceil(box.maxY) - 1;
+    const minZ = Math.floor(box.minZ);
+    const maxZ = Math.ceil(box.maxZ) - 1;
+    for (let bx = minX; bx <= maxX; bx++) {
+      for (let by = minY; by <= maxY; by++) {
+        for (let bz = minZ; bz <= maxZ; bz++) {
+          for (const bounds of getBlockBounds(this.blockRegistry, this.behaviourRegistry, this.blockUpdateWorld, bx, by, bz, 'collision')) {
+            if (box.intersects(bounds)) return false;
+          }
+        }
+      }
+    }
+    return true;
   }
 
   private updateSelectedSlot(): void {
