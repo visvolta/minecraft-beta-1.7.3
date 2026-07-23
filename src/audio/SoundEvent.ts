@@ -7,6 +7,7 @@ export type SemanticSoundEvent =
   | { readonly type: 'block.mine'; readonly material: DigSoundMaterial; readonly x: number; readonly y: number; readonly z: number }
   | { readonly type: 'step'; readonly material: StepSoundMaterial; readonly x: number; readonly y: number; readonly z: number; readonly volume?: number; readonly pitch?: number }
   | { readonly type: 'entity.legacy'; readonly id: string; readonly kind: string; readonly x: number; readonly y: number; readonly z: number; readonly volume: number; readonly pitch: number; readonly attenuationDistance: number }
+  | { readonly type: 'player.damage'; readonly kind: 'hurt' | 'fall-small' | 'fall-big'; readonly x: number; readonly y: number; readonly z: number }
   | { readonly type: 'random.explode'; readonly x: number; readonly y: number; readonly z: number }
   | { readonly type: 'random.splash'; readonly x: number; readonly y: number; readonly z: number; readonly volume?: number }
   | { readonly type: 'weather.thunder'; readonly x: number; readonly y: number; readonly z: number; readonly distance: number };

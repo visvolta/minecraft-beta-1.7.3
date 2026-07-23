@@ -53,6 +53,9 @@ export class ApplicationController {
   private activeLoadToken = 0;
   private loadInProgress = false;
   private spawnPreparation: SpawnPreparationState | null = null;
+  private readonly resize = (): void => applyGuiScaleCssVariables();
+  private readonly audioActivation = (): void => { void this.audio.activate(); };
+  private started = false;
   private readonly keydown = (event: KeyboardEvent): void => {
     if (!this.settings.controls.bindings.pause.includes(event.code)) return;
     if (this.state === 'pause_menu') {
@@ -80,7 +83,8 @@ export class ApplicationController {
     this.storagePromise = IndexedDbWorldStorage.open();
   }
 
-  public async start(): Promise<void> { const storage = await this.storagePromise; this.settings = await loadGameSettings(storage); setGlobalGuiScaleSetting(this.settings.video.guiScale); this.audio.applySettings(this.settings); this.installAudioActivation(); await this.loadFont(); window.addEventListener('resize', () => applyGuiScaleCssVariables()); window.addEventListener('keydown', this.keydown); window.addEventListener('keyup', this.keyup); await this.showMainMenu(); }
+  public async start(): Promise<void> { if(this.started)return; this.started=true; const storage = await this.storagePromise; this.settings = await loadGameSettings(storage); setGlobalGuiScaleSetting(this.settings.video.guiScale); this.audio.applySettings(this.settings); this.installAudioActivation(); await this.loadFont(); window.addEventListener('resize', this.resize); window.addEventListener('keydown', this.keydown); window.addEventListener('keyup', this.keyup); await this.showMainMenu(); }
+  public async dispose(): Promise<void> { if(!this.started)return; this.started=false; this.cancelActiveLoadOperation(); this.screen?.dispose(); this.screen=null; await this.unloadWorld(); window.removeEventListener('resize', this.resize); window.removeEventListener('keydown', this.keydown); window.removeEventListener('keyup', this.keyup); window.removeEventListener('pointerdown', this.audioActivation, { capture: true }); window.removeEventListener('keydown', this.audioActivation, { capture: true }); await this.audio.dispose(); const storage=await this.storagePromise; await storage.close?.(); }
   public getState(): ApplicationState { return this.state; }
   public hasEngine(): boolean { return this.engine !== null; }
 
@@ -204,9 +208,8 @@ export class ApplicationController {
 
   private installAudioActivation(): void {
     if (typeof window === 'undefined') return;
-    const activate = (): void => { void this.audio.activate(); };
-    window.addEventListener('pointerdown', activate, { capture: true });
-    window.addEventListener('keydown', activate, { capture: true });
+    window.addEventListener('pointerdown', this.audioActivation, { capture: true });
+    window.addEventListener('keydown', this.audioActivation, { capture: true });
   }
 
   private async loadFont(): Promise<void> {

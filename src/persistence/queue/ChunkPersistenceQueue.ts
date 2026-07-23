@@ -45,6 +45,8 @@ export class ChunkPersistenceQueue {
   private readonly regionCoordinator: RegionCoordinator;
 
   private pendingPeriodicFlush: ReturnType<typeof setTimeout> | null = null;
+  private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
+  private lastFailure: string | undefined;
   private stats = { saved: 0, failed: 0, loaded: 0 };
   private entityHooks: ChunkEntityHooks | null = null;
   private simulationTickProvider: () => number = () => 0;
@@ -72,6 +74,7 @@ export class ChunkPersistenceQueue {
       chunksLoaded: this.stats.loaded,
       chunksSaved: this.stats.saved,
       saveFailures: this.stats.failed,
+      lastFailure: this.lastFailure,
     };
   }
 
@@ -121,6 +124,8 @@ export class ChunkPersistenceQueue {
     while (this.reads.length > 0) this.reads.shift()!.resolve(undefined);
     for (const unload of this.unloads.values()) unload.resolve();
     this.unloads.clear();
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
   }
 
   private pumpReads(): void {
@@ -183,7 +188,7 @@ export class ChunkPersistenceQueue {
     if (this.pendingPeriodicFlush === null) {
       this.pendingPeriodicFlush = setTimeout(() => {
         this.pendingPeriodicFlush = null;
-        this.regionCoordinator.commitAll().catch(() => {});
+        this.regionCoordinator.commitAll().catch((error) => { this.stats.failed++; this.lastFailure = error instanceof Error ? error.message : String(error); });
       }, 5000);
     }
   }
@@ -218,6 +223,7 @@ export class ChunkPersistenceQueue {
     }
     try {
       const snapshotRevision = await this.saveChunk(unload.chunk);
+      if (this.disposed) { unload.resolve(); return; }
       if (!unload.canceled) {
         const rx = Math.floor(unload.chunk.chunkX / 32);
         const rz = Math.floor(unload.chunk.chunkZ / 32);
@@ -232,10 +238,12 @@ export class ChunkPersistenceQueue {
       }
     } catch (err) {
       this.stats.failed++;
+      this.lastFailure = err instanceof Error ? err.message : String(err);
       unload.retries++;
       if (!unload.canceled && !this.disposed) {
-        // Backoff and retry
-        setTimeout(() => this.processUnload(unload), Math.min(30000, 1000 * Math.pow(2, unload.retries)));
+        // Backoff and retry. Timer ownership is explicit so a disposed world cannot retry later.
+        const timer = setTimeout(() => { this.retryTimers.delete(timer); void this.processUnload(unload); }, Math.min(30000, 1000 * Math.pow(2, unload.retries)));
+        this.retryTimers.add(timer);
       }
       return;
     }

@@ -85,14 +85,16 @@ export class AudioManager implements MobSoundSink {
   private rainFadeTimer: number | undefined;
   private rainGeneration = 0;
   private rainStartPending = false;
+  private readonly onUiClick = (): void => { void this.activate().then(() => this.play({ type: 'ui.click' })); };
+  private readonly onVisibilityChange = (): void => this.handleVisibility();
   private readonly pendingLoopStarts = new Map<string, number>();
   private nextLoopStartToken = 0;
   private readonly activeLoops = new Map<string, { source: AudioBufferSourceNode; gain: GainNode; session: number; volume: number }>();
 
   public constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('mc-ui-click', () => void this.activate().then(() => this.play({ type: 'ui.click' })));
-      document.addEventListener('visibilitychange', () => this.handleVisibility());
+      window.addEventListener('mc-ui-click', this.onUiClick);
+      document.addEventListener('visibilitychange', this.onVisibilityChange);
     }
   }
 
@@ -129,6 +131,7 @@ export class AudioManager implements MobSoundSink {
       case 'block.place': this.playBlockMaterial(event.material, event.x, event.y, event.z, 0.8, 0.8, 'place'); break;
       case 'block.mine': this.playBlockMaterial(event.material, event.x, event.y, event.z, 0.25, 0.5, 'mine'); break;
       case 'step': this.playStepMaterial(event.material, event.x, event.y, event.z, event.volume ?? 0.15, event.pitch ?? 1); break;
+      case 'player.damage': { const key = event.kind === 'hurt' ? this.randomVariant('damage.hit', ['damage.hit1','damage.hit2','damage.hit3']) : event.kind === 'fall-big' ? 'damage.fallbig' : 'damage.fallsmall'; this.playPositional(key, event.x, event.y, event.z, 1, 1, 16, 'important', `player.damage.${event.kind}`); break; }
       case 'random.explode': this.playPositional(this.randomKey(['random.explode1','random.explode2','random.explode3']), event.x, event.y, event.z, 4, 0.7 + Math.random() * 0.2, 64, 'critical', 'random.explode'); break;
       case 'random.splash': this.playPositional('random.splash', event.x, event.y, event.z, event.volume ?? 0.7, 1 + (Math.random() - Math.random()) * 0.2, 16, 'ambient', 'random.splash', WORLD_AUDIO_LIMITS.splashDedupeMs); break;
       case 'weather.thunder': this.playPositional(this.randomKey(['ambient.weather.thunder1','ambient.weather.thunder2','ambient.weather.thunder3']), event.x, event.y, event.z, Math.max(4, 10 - event.distance / 32), 1, 256, 'important', 'weather.thunder'); break;
@@ -197,6 +200,7 @@ export class AudioManager implements MobSoundSink {
     this.recentWorldEvents.clear();
   }
   public getDebugInfo(): Readonly<AudioTelemetry & { activeWorldSources: number; activeLoops: number }> { return { ...this.telemetry, pending: this.pendingWorldStarts, activeWorldSources: this.activeWorldSources.size, activeLoops: this.activeLoops.size + (this.rainPrimary === undefined ? 0 : 1) + (this.rainFading === undefined ? 0 : 1) }; }
+  public async dispose(): Promise<void> { this.endWorldSession(); this.stopCurrentMusic(); if (typeof window !== 'undefined') { window.removeEventListener('mc-ui-click', this.onUiClick); document.removeEventListener('visibilitychange', this.onVisibilityChange); } const context=this.context; this.context=undefined; if(context!==undefined&&context.state!=='closed')await context.close(); }
   public getManifest(): readonly AudioEntry[] { return AUDIO_MANIFEST; }
   public getMusicTiming(): { min: number; max: number; menuMin: number; menuMax: number } { return { min: GAME_MUSIC_MIN_SILENCE_MS, max: GAME_MUSIC_MAX_SILENCE_MS, menuMin: MENU_MUSIC_MIN_SILENCE_MS, menuMax: MENU_MUSIC_MAX_SILENCE_MS }; }
 

@@ -88,8 +88,8 @@ export class RegionFileCodec {
     try {
       const stream = new DecompressionStream('deflate');
       const writer = stream.writable.getWriter();
-      writer.write(compressed as any).catch(() => {});
-      writer.close().catch(() => {});
+      await writer.write(compressed);
+      await writer.close();
       const reader = stream.readable.getReader();
       const chunks: Uint8Array[] = [];
       while (true) {
@@ -115,8 +115,8 @@ export class RegionFileCodec {
   public async setChunkData(x: number, z: number, data: Uint8Array, timestamp: number): Promise<void> {
     const stream = new CompressionStream('deflate');
     const writer = stream.writable.getWriter();
-    writer.write(data as any).catch(() => {});
-    writer.close().catch(() => {});
+    await writer.write(new Uint8Array(data));
+    await writer.close();
     const reader = stream.readable.getReader();
     const chunks: Uint8Array[] = [];
     while (true) {

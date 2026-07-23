@@ -31,6 +31,8 @@ export const PLAYER_EYE_HEIGHT = FIRST_PERSON_CAMERA_OFFSET_Y;
  * Position is the feet centre (bottom-centre of the hitbox), matching
  * Beta's own convention and keeping ground/eye-height math simple.
  */
+export interface PlayerDamageEvent { readonly source: DamageSource; readonly amount: number; readonly lethal: boolean; }
+
 export class Player extends Entity {
   public readonly typeId = 0;
   public readonly typeStringId = 'Player';
@@ -56,6 +58,7 @@ export class Player extends Entity {
   public isSprinting=false;public inWater=false;public wasInWater=false;public enteredWaterThisTick=false;public inLava=false;public headUnderwater=false;public collidedHorizontally=false;public viewBobbingEnabled=true;
   private equipment: PlayerEquipment | undefined;
   private armourDamageRemainder = 0;
+  private damageListener: ((event: PlayerDamageEvent) => void) | undefined;
 
   /**
    * Horizontal velocity movement input is steering toward, set each frame
@@ -131,6 +134,7 @@ export class Player extends Entity {
   public setEquipment(equipment: PlayerEquipment): void { this.equipment = equipment; }
   public getArmourValue(): number { return this.equipment?.getArmourValue() ?? 0; }
   public getArmourDamageRemainder(): number { return this.armourDamageRemainder; }
+  public setDamageListener(listener: ((event: PlayerDamageEvent) => void) | undefined): void { this.damageListener = listener; }
 
   /** Single authoritative entry point for every Player damage source. */
   public attackEntityFrom(source:DamageSource,amount:number):boolean{
@@ -158,7 +162,7 @@ export class Player extends Entity {
 
     this.lastDamageSource=source;this.lastAttacker=source.attacker;this.recentHealth=this.health;this.healthFlashTicks=20;
     if(fullHit&&source.appliesKnockback&&source.attacker){const dx=this.position.x-source.attacker.position.x,dz=this.position.z-source.attacker.position.z,length=Math.hypot(dx,dz);if(length>1e-6){this.velocity.x+=dx/length*8;this.velocity.z+=dz/length*8;}this.velocity.y=Math.max(this.velocity.y,8);this.attackedAtYaw=Math.atan2(dz,dx)-this.bodyYaw;}
-    this.setHealth(this.health-healthDamage);this.addExhaustion(.3);if(this.health===0)this.deathSequence++;return true;
+    this.setHealth(this.health-healthDamage);this.addExhaustion(.3);if(this.health===0)this.deathSequence++;this.damageListener?.({ source, amount: healthDamage, lethal: this.health === 0 });return true;
   }
   public attackFromMob(amount:number,attacker:DamageAttacker):boolean{return this.attackEntityFrom(DamageSource.mob(attacker),amount);}
 

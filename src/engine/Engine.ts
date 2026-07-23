@@ -340,7 +340,7 @@ export class Engine {
     );
     this.cameraController.setRotation(metadata.player.yaw, metadata.player.pitch);
 
-    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.viewBobbingEnabled=this.settings.video.viewBobbing;this.player.setGameMode(metadata.gameMode ?? GameMode.Creative);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
+    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setDamageListener((event)=>{const kind=event.source.category==='fall'?(event.amount>4?'fall-big':'fall-small'):'hurt';this.audioManager.play({type:'player.damage',kind,x:this.player.position.x,y:this.player.position.y,z:this.player.position.z});});this.player.viewBobbingEnabled=this.settings.video.viewBobbing;this.player.setGameMode(metadata.gameMode ?? GameMode.Creative);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
     this.playerController = new PlayerController(
       this.input,
       this.cameraController,
