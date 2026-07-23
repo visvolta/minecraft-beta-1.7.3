@@ -19,9 +19,11 @@ export class ExplosionService {
     private readonly entities: EntityManager,
     private readonly player: Player,
     private readonly rng: JavaRandom,
+    private readonly onExplosionSound?: (x: number, y: number, z: number) => void,
   ) {}
 
   public explode(source: Entity, x: number, y: number, z: number, strength: number, flaming = false): ExplosionResult {
+    this.onExplosionSound?.(x, y, z);
     const affected = new Set<string>();
     const samples = 16;
     for (let ix = 0; ix < samples; ix++) for (let iy = 0; iy < samples; iy++) for (let iz = 0; iz < samples; iz++) {

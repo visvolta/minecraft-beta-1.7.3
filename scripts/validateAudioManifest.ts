@@ -1,0 +1,26 @@
+import { AUDIO_MANIFEST, AUDIO_NORMALIZATIONS, CAVE_SOUNDS, DAMAGE_SOUNDS, DIG_SOUNDS, MOB_SOUNDS, MUSIC_CREATIVE, MUSIC_GAME, MUSIC_MENU, MUSIC_NETHER, RANDOM_SOUNDS, STEP_SOUNDS, WEATHER_SOUNDS, MINECART_SOUNDS, validateAudioManifest } from '../src/audio/AudioManifest.ts';
+function assert(v:boolean,m:string):void{if(!v)throw new Error(m);}
+validateAudioManifest();
+assert(MUSIC_GAME.length===12,'normal game music count 12');
+assert(MUSIC_CREATIVE.length===6,'Creative music count 6');
+assert(MUSIC_NETHER.length===4,'Nether music count 4');
+assert(MUSIC_MENU.length===4,'menu music count 4');
+assert(RANDOM_SOUNDS.length===19,'random sounds count 19');
+assert(MOB_SOUNDS.filter(e=>e.group==='mob.zombie').length===10,'zombie count 10');
+assert(MOB_SOUNDS.filter(e=>e.group==='mob.spider').length===9,'spider count 9');
+assert(MOB_SOUNDS.filter(e=>e.group==='mob.chicken').length===8,'chicken count 8');
+assert(MOB_SOUNDS.filter(e=>e.group==='mob.cow').length===11,'cow count 11');
+assert(MOB_SOUNDS.filter(e=>e.group==='mob.creeper').length===5,'creeper count 5');
+assert(MOB_SOUNDS.filter(e=>e.group==='mob.pig').length===9,'pig count 9');
+assert(MOB_SOUNDS.filter(e=>e.group==='mob.sheep').length===9,'sheep count 9');
+assert(CAVE_SOUNDS.length===16,'cave count 16');
+assert(WEATHER_SOUNDS.length===11,'weather count 11');
+assert(DAMAGE_SOUNDS.length===5,'damage count 5');
+assert(MINECART_SOUNDS.length===2,'minecart count 2');
+assert(DIG_SOUNDS.length===28,'dig count 28');
+assert(STEP_SOUNDS.length===40,'step count 40');
+assert(AUDIO_MANIFEST.length===208,'grand total count 208');
+assert(AUDIO_MANIFEST.every(e=>e.path.endsWith('.ogg')),'all paths end .ogg');
+assert(AUDIO_NORMALIZATIONS.some(n=>n.includes('creative4.og -> creative4.ogg')),'filename normalization documented');
+assert(!AUDIO_MANIFEST.some(e=>e.path.includes('placeholder')||e.path.includes('silence')),'no placeholder audio paths');
+console.log('Audio manifest validation passed.');

@@ -1,6 +1,7 @@
 import type { BlockRegistry } from './BlockRegistry';
 import { BlockIds } from './BlockId';
 import type { BlockDefinition, TintColor } from './BlockDefinition';
+import { DEFAULT_BLOCK_SOUND, stepFromDig, type DigSoundMaterial } from '../audio/BlockSoundMaterial';
 
 
 const BETA_EXPLOSION_RESISTANCE: Readonly<Record<string, number>> = {
@@ -10,6 +11,20 @@ const BETA_EXPLOSION_RESISTANCE: Readonly<Record<string, number>> = {
   obsidian: 1_200, glass: 0.3, log: 2, planks: 3, leaves: 0.2,
 };
 
+
+function defaultSoundFor(definition: BlockDefinition): typeof DEFAULT_BLOCK_SOUND {
+  const name = definition.name;
+  let dig: DigSoundMaterial = 'stone';
+  if (name.includes('glass')) dig = 'glass';
+  else if (name.includes('wood') || name.includes('plank') || name.includes('log') || name.includes('door') || name.includes('fence') || name.includes('chest') || name.includes('sign') || name.includes('ladder')) dig = 'wood';
+  else if (name.includes('sand')) dig = 'sand';
+  else if (name.includes('gravel')) dig = 'gravel';
+  else if (name.includes('snow')) dig = 'snow';
+  else if (name.includes('wool') || name.includes('cloth')) dig = 'cloth';
+  else if (name.includes('grass') || name.includes('dirt') || name.includes('leaves') || name.includes('sapling') || name.includes('flower') || name.includes('mushroom') || name.includes('reed') || name.includes('crops') || name.includes('cactus')) dig = 'grass';
+  return { dig, step: stepFromDig(dig), volume: 1, pitch: 1 };
+}
+
 function registerBlock(registry: BlockRegistry, definition: BlockDefinition): void {
   registry.register({
     ...definition,
@@ -17,6 +32,7 @@ function registerBlock(registry: BlockRegistry, definition: BlockDefinition): vo
     creativeVisible: definition.creativeVisible ?? (definition.id !== BlockIds.Air && definition.id < 249),
     creativeTab: definition.creativeTab ?? 'building',
     creativeOrder: definition.creativeOrder ?? definition.id,
+    sound: definition.sound ?? defaultSoundFor(definition),
   });
 }
 

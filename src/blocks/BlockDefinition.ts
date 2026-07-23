@@ -1,4 +1,5 @@
 import type { BlockId } from './BlockId';import type { ToolClass } from '../items/ItemDefinition';
+import type { BlockSoundDefinition } from '../audio/BlockSoundMaterial';
 
 /**
  * Texture keys resolved against the atlas by name (e.g. "stone", "grass_top").
@@ -85,6 +86,7 @@ export interface BlockDefinition {
   readonly creativeVisible?: boolean;
   readonly creativeTab?: string;
   readonly creativeOrder?: number;
+  readonly sound?: BlockSoundDefinition;
   /** True if the block is harvestable with an empty hand (e.g., dirt, sand, wood log/planks). */
   readonly harvestableByHand?: boolean;
 }

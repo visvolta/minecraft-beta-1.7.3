@@ -3,6 +3,7 @@ import type { InputAction } from '../input/Input';
 
 export interface GameSettings {
   readonly version: 1;
+  readonly audio: { readonly master: number; readonly music: number; readonly sound: number };
   readonly mouse: { readonly sensitivity: number; readonly invertY: boolean };
   readonly video: { readonly viewBobbing: boolean };
   readonly controls: { readonly bindings: Readonly<Record<InputAction, readonly string[]>> };
@@ -24,6 +25,7 @@ export const DEFAULT_KEY_BINDINGS: Readonly<Record<InputAction, readonly string[
 
 export const DEFAULT_GAME_SETTINGS: GameSettings = {
   version: 1,
+  audio: { master: 1, music: 1, sound: 1 },
   mouse: { sensitivity: 0.5, invertY: false },
   video: { viewBobbing: true },
   controls: { bindings: DEFAULT_KEY_BINDINGS },
@@ -32,6 +34,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
 
 export function validateGameSettings(value: unknown): GameSettings {
   const source = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
+  const audio = typeof source.audio === 'object' && source.audio !== null ? source.audio as Record<string, unknown> : {};
   const mouse = typeof source.mouse === 'object' && source.mouse !== null ? source.mouse as Record<string, unknown> : {};
   const video = typeof source.video === 'object' && source.video !== null ? source.video as Record<string, unknown> : {};
   const gameplay = typeof source.gameplay === 'object' && source.gameplay !== null ? source.gameplay as Record<string, unknown> : {};
@@ -45,6 +48,11 @@ export function validateGameSettings(value: unknown): GameSettings {
   const difficulty = gameplay.difficulty;
   return {
     version: 1,
+    audio: {
+      master: clamp(typeof audio.master === 'number' ? audio.master : DEFAULT_GAME_SETTINGS.audio.master, 0, 1),
+      music: clamp(typeof audio.music === 'number' ? audio.music : DEFAULT_GAME_SETTINGS.audio.music, 0, 1),
+      sound: clamp(typeof audio.sound === 'number' ? audio.sound : DEFAULT_GAME_SETTINGS.audio.sound, 0, 1),
+    },
     mouse: {
       sensitivity: clamp(typeof mouse.sensitivity === 'number' ? mouse.sensitivity : DEFAULT_GAME_SETTINGS.mouse.sensitivity, 0, 1),
       invertY: typeof mouse.invertY === 'boolean' ? mouse.invertY : DEFAULT_GAME_SETTINGS.mouse.invertY,

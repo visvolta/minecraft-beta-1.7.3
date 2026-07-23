@@ -12,6 +12,7 @@ import { Player } from '../player/Player';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 import { GameMode } from '../player/GameMode';
 import type { GameSettings } from '../settings/GameSettings';
+import type { AudioManager } from '../audio/AudioManager';
 import { PlayerController } from '../player/PlayerController';
 import { InteractionController } from '../player/InteractionController';
 import { PlayerPhysics } from '../physics/PlayerPhysics';
@@ -26,7 +27,6 @@ import { JavaRandom } from '../world/generation/random/JavaRandom';
 import { NaturalMobSpawner } from '../entities/spawning/NaturalMobSpawner';
 import { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';
 import { ExplosionService } from '../entities/explosion/ExplosionService';
-import { NullMobSoundSink } from '../entities/sound/MobSoundSink';
 import { PlayerSurvivalController } from '../player/PlayerSurvivalController';
 import { PlayerDeathController } from '../player/PlayerDeathController';
 import { RespawnController } from '../player/RespawnController';
@@ -189,7 +189,6 @@ export class Engine {
   private readonly deathScreen:DeathScreen;
   private readonly cameraHurtController=new CameraHurtController();
   private readonly sprintFovController=new SprintFovController();
-  private readonly mobSoundSink=new NullMobSoundSink();
   private readonly foodUseController:FoodUseController;
   private readonly interactionController: InteractionController;
   private readonly blockHighlight: BlockHighlight;
@@ -202,6 +201,7 @@ export class Engine {
   private readonly entityParticles: SimpleEntityParticleSink;
   private readonly minecartRenderSystem: MinecartRenderSystem;
   private simulationAccumulatorTicks = 0;
+  private playerStepDistance = 0;
   private simulationTick = 0;
   private readonly inventory: Inventory;
   private readonly hotbarHudRenderer:HotbarHudRenderer;
@@ -307,6 +307,7 @@ export class Engine {
     private readonly storage: WorldStorage,
     skinManager: PlayerSkinManager,
     private settings: GameSettings,
+    private readonly audioManager: AudioManager,
     private readonly onPauseRequested: (() => void) | undefined = undefined,
   ) {
     const metadata = saveCoordinator.getMetadata();
@@ -402,10 +403,10 @@ export class Engine {
       skylightSubtracted: () => this.worldTime.getSkylightSubtracted(),
       explode: (source, x, y, z, strength, flaming) => this.explosionService.explode(source, x, y, z, strength, flaming),
       entityTextures: this.entityTextures,
-      sounds:this.mobSoundSink,
+      sounds:this.audioManager,
     });
     this.minecartRenderSystem = new MinecartRenderSystem(this.entityManager, this.renderer.scene, this.entityTextures);
-    this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng);
+    this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng, (x, y, z) => this.audioManager.play({ type: 'random.explode', x, y, z }));
 
     this.chunkPersistenceQueue.setEntityHooks({
       serializeChunkEntities: (cx, cz) => this.entityManager.serializeChunkEntities(cx, cz),
@@ -515,6 +516,7 @@ export class Engine {
       () => this.renderer.isFancyGraphicsEnabled(),
     );
     this.rainSplashRenderer = new RainSplashRenderer(this.renderer.scene);
+    this.rainSplashRenderer.setAudioHook((x, y, z) => this.audioManager.play({ type: 'random.splash', x, y, z }));
     this.lightningManager = new LightningManager(
       this.chunkManager,
       blockRegistry,
@@ -551,7 +553,7 @@ export class Engine {
       this.itemEntityManager.emitItemBreak(this.player.position.x, this.player.position.y, this.player.position.z);
     });
     const animalInteractions=new AnimalInteractionService(this.inventory,this.itemEntityManager);
-    this.foodUseController=new FoodUseController(this.player,this.inventory,this.input,()=>this.selectedSlot,this.mobSoundSink);
+    this.foodUseController=new FoodUseController(this.player,this.inventory,this.input,()=>this.selectedSlot,this.audioManager);
     this.interactionController = new InteractionController(
       this.input,
       this.renderer.camera,
@@ -745,12 +747,14 @@ export class Engine {
     });
 
     this.interactionController.setBlockPlacedHandler((blockId, x, y, z) => {
+      const sound = blockRegistry.getById(blockId)?.sound;
+      if (sound) this.audioManager.play({ type: 'block.place', material: sound.dig, x: x + 0.5, y: y + 0.5, z: z + 0.5 });
       if (blockId === BlockIds.SignPost || blockId === BlockIds.WallSign) {
         this.signController.open(x, y, z);
       }
     });
 
-    this.interactionController.breakingController.setOnBlockBrokenHandler((blockId,x,y,z)=>{this.player.addExhaustion(.025);
+    this.interactionController.breakingController.setOnBlockBrokenHandler((blockId,x,y,z)=>{this.player.addExhaustion(.025);const sound=blockRegistry.getById(blockId)?.sound;if(sound)this.audioManager.play({type:'block.break',material:sound.dig,x:x+0.5,y:y+0.5,z:z+0.5});
       if (blockId === BlockIds.Chest) {
         if (this.chestController.isOpen) {
           const isActive = this.chestController.activeContainers.some(c => c.x === x && c.y === y && c.z === z);
@@ -872,12 +876,14 @@ export class Engine {
   public applySettings(settings: GameSettings): void {
     this.settings = settings;
     this.input.setBindings(settings.controls.bindings);
+    this.audioManager.applySettings(settings);
     this.cameraController.setSettings(settings);
     this.player.viewBobbingEnabled = settings.video.viewBobbing;
   }
 
   public setPaused(paused: boolean): void {
     this.simulationPaused = paused;
+    this.audioManager.setWorldPaused(paused);
     this.input.clearTransientState();
     this.interactionController.breakingController.reset();
     if (paused && typeof document !== 'undefined' && document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
@@ -982,6 +988,7 @@ export class Engine {
         } else { this.player.wishVelocity.x = 0; this.player.wishVelocity.z = 0; }
         const movement=this.playerPhysics.update(this.player,deltaSeconds,this.input.isActionActive('jump'),this.input.isActionActive('sprint'));
         this.playerSurvivalController.recordMovement(movement);
+        this.updatePlayerFootsteps(movement);
       } else { this.chunkStreamer.dispatchCriticalLoad(chunkX, chunkZ); }
     }
 
@@ -1014,6 +1021,8 @@ export class Engine {
 
     const atmos = buildAtmosphericState(this.skyRenderer.getCurrentColorState(), weatherState, this.lightningManager.getState().getFlashStrength(weatherState.partialTick));
     this.skyRenderer.applyAtmosphericState(atmos);
+    this.audioManager.updateListener(camera.position.x, camera.position.y, camera.position.z, this.cameraController.getYaw(), this.cameraController.getPitch());
+    this.audioManager.setRain(weatherState.getRainStrength(weatherState.partialTick));
     this.chunkRenderer.setSkylightSubtracted(atmos.effectiveSkylightSubtracted);
     this.chunkRenderer.setSunBrightnessFactor(atmos.sunBrightnessFactor);
     this.debugStatsCollector.setStormReadout({ weatherSkylightPenalty: atmos.weatherSkylightPenalty, effectiveSkylightSubtracted: atmos.effectiveSkylightSubtracted, windX: atmos.wind.x, windZ: atmos.wind.z });
@@ -1063,6 +1072,7 @@ export class Engine {
     this.chunkRenderer.update(this.performanceProfiler.getSnapshot().frameTimeMs, camera.position.x, camera.position.z);
     this.precipitationRenderer.update(camera.position.x, camera.position.y, camera.position.z, deltaSeconds, atmos, this.worldTime);
     this.rainSplashRenderer.update(camera, deltaSeconds, atmos, this.precipitationRenderer);
+    this.lightningManager.setAudioHook((x, y, z, distance) => this.audioManager.play({ type: 'weather.thunder', x, y, z, distance }));
     this.lightningManager.update(deltaSeconds, weatherState, camera.position.x, camera.position.y, camera.position.z);
     this.lightningRenderer.update(this.lightningManager.getState());
 
@@ -1112,6 +1122,22 @@ export class Engine {
       || this.chestController.isOpen
       || this.signController.isOpen
       || this.deathScreen.isOpen;
+  }
+
+  private updatePlayerFootsteps(movement: { readonly previousX?: number; readonly previousZ?: number; readonly currentX?: number; readonly currentZ?: number; readonly grounded: boolean }): void {
+    if (!movement.grounded || this.player.isFlying || this.player.ridingEntity !== null) { this.playerStepDistance = 0; return; }
+    const dx = (movement.currentX ?? this.player.position.x) - (movement.previousX ?? this.player.position.x);
+    const dz = (movement.currentZ ?? this.player.position.z) - (movement.previousZ ?? this.player.position.z);
+    const distance = Math.hypot(dx, dz);
+    if (distance <= 0.001) return;
+    this.playerStepDistance += distance;
+    if (this.playerStepDistance < 0.72) return;
+    this.playerStepDistance = 0;
+    const bx = Math.floor(this.player.position.x);
+    const by = Math.floor(this.player.position.y - 0.1);
+    const bz = Math.floor(this.player.position.z);
+    const sound = this.blockRegistry.getById(this.blockUpdateWorld.getBlock(bx, by, bz))?.sound;
+    if (sound) this.audioManager.play({ type: 'step', material: sound.step, x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, volume: 0.15 });
   }
 
   private snapshotMetadata(): WorldMetadata {

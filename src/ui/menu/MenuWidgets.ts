@@ -21,7 +21,7 @@ export class GuiButton {
     this.element.addEventListener('mouseleave', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_normal.png')`; });
     this.element.addEventListener('mousedown', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_clicked.png')`; });
     this.element.addEventListener('mouseup', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_highlighted.png')`; });
-    this.element.addEventListener('click', (event) => { event.preventDefault(); if (!this.element.disabled) onClick(); });
+    this.element.addEventListener('click', (event) => { event.preventDefault(); if (!this.element.disabled) { window.dispatchEvent(new CustomEvent('mc-ui-click')); onClick(); } });
   }
   public setPosition(x: number, y: number): void { this.element.style.left = `${Math.floor(x)}px`; this.element.style.top = `${Math.floor(y)}px`; }
   public setDisabled(disabled: boolean): void { this.element.disabled = disabled; this.element.style.backgroundImage = `url('${GUI}${disabled ? 'button_disabled' : 'button_normal'}.png')`; this.element.style.color = disabled ? '#a0a0a0' : 'white'; }

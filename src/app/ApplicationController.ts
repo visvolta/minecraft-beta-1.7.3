@@ -24,6 +24,8 @@ import { ControlsScreen } from '../ui/menu/ControlsScreen';
 import type { Screen } from '../ui/menu/MenuWidgets';
 import { loadGameSettings, saveGameSettings } from '../settings/SettingsStorage';
 import { DEFAULT_GAME_SETTINGS, type GameSettings } from '../settings/GameSettings';
+import { AudioManager } from '../audio/AudioManager';
+import { GameMode } from '../player/GameMode';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { Chunk } from '../world/Chunk';
 
@@ -34,6 +36,7 @@ export class ApplicationController {
   private screen: Screen | null = null;
   private engine: Engine | null = null;
   private settings: GameSettings = DEFAULT_GAME_SETTINGS;
+  private readonly audio = new AudioManager();
   private optionsParent: 'main' | 'pause' = 'main';
   private pauseEscapeArmed = true;
   private readonly keydown = (event: KeyboardEvent): void => {
@@ -63,7 +66,7 @@ export class ApplicationController {
     this.storagePromise = IndexedDbWorldStorage.open();
   }
 
-  public async start(): Promise<void> { const storage = await this.storagePromise; this.settings = await loadGameSettings(storage); await this.loadFont(); window.addEventListener('keydown', this.keydown); window.addEventListener('keyup', this.keyup); await this.showMainMenu(); }
+  public async start(): Promise<void> { const storage = await this.storagePromise; this.settings = await loadGameSettings(storage); this.audio.applySettings(this.settings); this.installAudioActivation(); await this.loadFont(); window.addEventListener('keydown', this.keydown); window.addEventListener('keyup', this.keyup); await this.showMainMenu(); }
   public getState(): ApplicationState { return this.state; }
   public hasEngine(): boolean { return this.engine !== null; }
 
@@ -76,6 +79,7 @@ export class ApplicationController {
 
   private async showMainMenu(): Promise<void> {
     await this.unloadWorld();
+    this.audio.setMusicContext('menu');
     this.setScreen(new MainMenuScreen({ singleplayer: () => void this.showWorldSelect(), options: () => this.showOptions('main'), quit: () => this.showError('Quit Game', 'You can close this browser tab when ready.') }), 'main_menu');
   }
 
@@ -102,7 +106,8 @@ export class ApplicationController {
       const opened = await createWorld(result, storage);
       await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update);
       loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, () => void this.showPauseMenu());
+      this.audio.beginWorldSession(opened.coordinator.getMetadata().gameMode === GameMode.Creative ? 'creative' : 'survival');
+      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu());
       this.setScreen(null, 'in_game');
       this.engine.start();
       await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
@@ -116,7 +121,8 @@ export class ApplicationController {
       const opened = await openWorld(worldId, storage);
       await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update);
       loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, () => void this.showPauseMenu());
+      this.audio.beginWorldSession(opened.coordinator.getMetadata().gameMode === GameMode.Creative ? 'creative' : 'survival');
+      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu());
       this.setScreen(null, 'in_game');
       this.engine.start();
       await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
@@ -156,8 +162,16 @@ export class ApplicationController {
 
   private async updateSettings(settings: GameSettings): Promise<void> {
     this.settings = settings;
+    this.audio.applySettings(settings);
     this.engine?.applySettings(settings);
     await saveGameSettings(await this.storagePromise, settings);
+  }
+
+  private installAudioActivation(): void {
+    if (typeof window === 'undefined') return;
+    const activate = (): void => { void this.audio.activate(); };
+    window.addEventListener('pointerdown', activate, { capture: true });
+    window.addEventListener('keydown', activate, { capture: true });
   }
 
   private async loadFont(): Promise<void> {
@@ -228,5 +242,6 @@ export class ApplicationController {
     if (this.engine === null) return;
     await this.engine.saveAndStop();
     this.engine = null;
+    this.audio.endWorldSession();
   }
 }
