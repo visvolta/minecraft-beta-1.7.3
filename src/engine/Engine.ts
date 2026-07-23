@@ -201,7 +201,10 @@ export class Engine {
   private readonly entityParticles: SimpleEntityParticleSink;
   private readonly minecartRenderSystem: MinecartRenderSystem;
   private simulationAccumulatorTicks = 0;
+  /** Beta distanceWalkedModified and nextStepDistance equivalents. */
   private playerStepDistance = 0;
+  private playerNextStepDistance = 1;
+  private rainCoverSampleSeconds = 0;
   private simulationTick = 0;
   private readonly inventory: Inventory;
   private readonly hotbarHudRenderer:HotbarHudRenderer;
@@ -516,7 +519,6 @@ export class Engine {
       () => this.renderer.isFancyGraphicsEnabled(),
     );
     this.rainSplashRenderer = new RainSplashRenderer(this.renderer.scene);
-    this.rainSplashRenderer.setAudioHook((x, y, z) => this.audioManager.play({ type: 'random.splash', x, y, z }));
     this.lightningManager = new LightningManager(
       this.chunkManager,
       blockRegistry,
@@ -754,6 +756,8 @@ export class Engine {
         this.signController.open(x, y, z);
       }
     });
+
+    this.interactionController.breakingController.setOnMiningHitHandler((blockId,x,y,z)=>{ const sound=blockRegistry.getById(blockId)?.sound; if(sound)this.audioManager.play({type:'block.mine',material:sound.dig,x:x+.5,y:y+.5,z:z+.5}); });
 
     this.interactionController.breakingController.setOnBlockBrokenHandler((blockId,x,y,z)=>{this.player.addExhaustion(.025);const sound=blockRegistry.getById(blockId)?.sound;if(sound)this.audioManager.play({type:'block.break',material:sound.dig,x:x+0.5,y:y+0.5,z:z+0.5});
       if (blockId === BlockIds.Chest) {
@@ -1053,6 +1057,7 @@ export class Engine {
         } else { this.player.wishVelocity.x = 0; this.player.wishVelocity.z = 0; }
         const movement=this.playerPhysics.update(this.player,deltaSeconds,this.input.isActionActive('jump'),this.input.isActionActive('sprint'));
         this.playerSurvivalController.recordMovement(movement);
+        if (movement.splashVolume !== undefined) this.audioManager.play({ type: 'random.splash', x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, volume: movement.splashVolume });
         this.updatePlayerFootsteps(movement);
       } else { this.chunkStreamer.dispatchCriticalLoad(chunkX, chunkZ); }
     }
@@ -1088,6 +1093,8 @@ export class Engine {
     this.skyRenderer.applyAtmosphericState(atmos);
     this.audioManager.updateListener(camera.position.x, camera.position.y, camera.position.z, this.cameraController.getYaw(), this.cameraController.getPitch());
     this.audioManager.setRain(weatherState.getRainStrength(weatherState.partialTick));
+    this.rainCoverSampleSeconds -= deltaSeconds;
+    if (this.rainCoverSampleSeconds <= 0) { this.rainCoverSampleSeconds = 0.25; this.audioManager.setRainCover(this.sampleRainCover(camera.position.x, camera.position.y, camera.position.z)); }
     this.chunkRenderer.setSkylightSubtracted(atmos.effectiveSkylightSubtracted);
     this.chunkRenderer.setSunBrightnessFactor(atmos.sunBrightnessFactor);
     this.debugStatsCollector.setStormReadout({ weatherSkylightPenalty: atmos.weatherSkylightPenalty, effectiveSkylightSubtracted: atmos.effectiveSkylightSubtracted, windX: atmos.wind.x, windZ: atmos.wind.z });
@@ -1189,20 +1196,37 @@ export class Engine {
       || this.deathScreen.isOpen;
   }
 
-  private updatePlayerFootsteps(movement: { readonly previousX?: number; readonly previousZ?: number; readonly currentX?: number; readonly currentZ?: number; readonly grounded: boolean }): void {
-    if (!movement.grounded || this.player.isFlying || this.player.ridingEntity !== null) { this.playerStepDistance = 0; return; }
+  /** Samples a 3x3 listener neighbourhood four times per second; no vertical world scans. */
+  private sampleRainCover(x: number, y: number, z: number): number {
+    let exposed = 0; let known = 0;
+    for (const ox of [-2, 0, 2]) for (const oz of [-2, 0, 2]) {
+      const wx = Math.floor(x + ox), wz = Math.floor(z + oz); const chunk = this.chunkManager.getChunk(Math.floor(wx / 16), Math.floor(wz / 16));
+      if (chunk === undefined) continue;
+      const lx = ((wx % 16) + 16) % 16, lz = ((wz % 16) + 16) % 16; const height = chunk.getHeight(lx, lz); known++;
+      if (y + 0.1 >= height) exposed++;
+    }
+    if (known === 0) return 0;
+    const openness = exposed / known;
+    return 1 - openness;
+  }
+
+  private updatePlayerFootsteps(movement: { readonly previousX?: number; readonly previousZ?: number; readonly currentX?: number; readonly currentZ?: number; readonly grounded: boolean; readonly inWater?: boolean; readonly climbing?: boolean }): void {
+    if (!movement.grounded || movement.inWater || movement.climbing || this.player.isFlying || this.player.ridingEntity !== null) return;
     const dx = (movement.currentX ?? this.player.position.x) - (movement.previousX ?? this.player.position.x);
     const dz = (movement.currentZ ?? this.player.position.z) - (movement.previousZ ?? this.player.position.z);
     const distance = Math.hypot(dx, dz);
     if (distance <= 0.001) return;
-    this.playerStepDistance += distance;
-    if (this.playerStepDistance < 0.72) return;
-    this.playerStepDistance = 0;
-    const bx = Math.floor(this.player.position.x);
-    const by = Math.floor(this.player.position.y - 0.1);
-    const bz = Math.floor(this.player.position.z);
-    const sound = this.blockRegistry.getById(this.blockUpdateWorld.getBlock(bx, by, bz))?.sound;
-    if (sound) this.audioManager.play({ type: 'step', material: sound.step, x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, volume: 0.15 });
+    // Beta Entity.moveEntity: distanceWalkedModified += horizontalDistance * 0.6.
+    this.playerStepDistance += distance * 0.6;
+    // A bounded carry-forward loop preserves long-frame distance without a cadence burst.
+    let emitted = 0;
+    while (this.playerStepDistance > this.playerNextStepDistance && emitted < 2) {
+      this.playerNextStepDistance++;
+      emitted++;
+      const bx = Math.floor(this.player.position.x), by = Math.floor(this.player.position.y - 0.1), bz = Math.floor(this.player.position.z);
+      const sound = this.blockRegistry.getById(this.blockUpdateWorld.getBlock(bx, by, bz))?.sound;
+      if (sound) this.audioManager.play({ type: 'step', material: sound.step, x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, volume: (sound.volume ?? 1) * 0.15, pitch: sound.pitch ?? 1 });
+    }
   }
 
   private snapshotMetadata(): WorldMetadata {

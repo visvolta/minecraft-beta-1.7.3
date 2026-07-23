@@ -22,6 +22,11 @@ export const GROUND_ACCELERATION = 70;
  */
 export const AIR_ACCELERATION = 5;
 
+/** Beta water-wall escape velocity (0.3 blocks/tick at 20 Hz). */
+export const WATER_EXIT_VELOCITY = 6;
+/** Minimum downward entry speed required to emit a player splash. */
+export const SPLASH_ENTRY_MIN_DOWNWARD_SPEED = 3;
+
 /**
  * Order axes are resolved in during collision. Resolving Y first gives more
  * stable landings (grounded state settles before horizontal movement is
@@ -37,7 +42,7 @@ const COLLISION_AXIS_ORDER: readonly ('x' | 'y' | 'z')[] = ['y', 'x', 'z'];
  * Queries solid geometry through ChunkManager + BlockRegistry only; does
  * not touch rendering, input, or camera state.
  */
-export interface PlayerMovementResult{readonly previousX?:number;readonly previousY:number;readonly previousZ?:number;readonly currentX?:number;readonly currentY:number;readonly currentZ?:number;readonly wasGrounded:boolean;readonly grounded:boolean;readonly climbing:boolean;readonly inWater?:boolean;readonly inLava?:boolean;}
+export interface PlayerMovementResult{readonly previousX?:number;readonly previousY:number;readonly previousZ?:number;readonly currentX?:number;readonly currentY:number;readonly currentZ?:number;readonly wasGrounded:boolean;readonly grounded:boolean;readonly climbing:boolean;readonly inWater?:boolean;readonly inLava?:boolean;readonly enteredWaterThisTick?:boolean;readonly splashVolume?:number;}
 export class PlayerPhysics {
   public constructor(
     
@@ -109,9 +114,14 @@ export class PlayerPhysics {
       }
     }
 
-    const inWater=isWaterInAABB(this.blockUpdateWorld,playerBox),inLava=isLavaInAABB(this.blockUpdateWorld,playerBox);player.inWater=inWater;player.inLava=inLava;if(inLava)player.isSprinting=false;
-    if(inWater||inLava){this.applyFluidAcceleration(player,deltaSeconds,inLava?0.2:0.38);const fx=Math.floor(player.position.x),fy=Math.floor(player.position.y),fz=Math.floor(player.position.z),fluidId=this.blockUpdateWorld.getBlock(fx,fy,fz),flow=computeFluidFlowVector({getBlock:(x,y,z)=>this.blockUpdateWorld.getBlock(x,y,z),getMetadata:(x,y,z)=>this.blockUpdateWorld.getBlockMetadata(x,y,z),isSolid:id=>this.blockRegistry.getById(id)?.solid??false},fx,fy,fz,fluidId);player.velocity.x+=flow.x*deltaSeconds*.8;player.velocity.z+=flow.z*deltaSeconds*.8;const before=player.velocity.y;if(isJumpPressed)player.velocity.y+=deltaSeconds*(inLava?2:4);else player.velocity.y-=deltaSeconds*(inLava?2.5:1.5);this.moveAndCollide(player,deltaSeconds,(before+player.velocity.y)/2);const drag=Math.pow(inLava?0.5:0.8,deltaSeconds*20);player.velocity.x*=drag;player.velocity.y*=drag;player.velocity.z*=drag;}else{this.applyHorizontalAcceleration(player,deltaSeconds);const velocityYBeforeGravity=player.velocity.y;if(!isClimbing)this.applyGravity(player,deltaSeconds);this.moveAndCollide(player,deltaSeconds,(velocityYBeforeGravity+player.velocity.y)/2);}
-    return{previousX,previousY,previousZ,currentX:player.position.x,currentY:player.position.y,currentZ:player.position.z,wasGrounded,grounded:player.grounded,climbing:isClimbing,inWater,inLava};
+    const wasInWater = player.inWater;
+    const inWaterBeforeMove=isWaterInAABB(this.blockUpdateWorld,playerBox),inLavaBeforeMove=isLavaInAABB(this.blockUpdateWorld,playerBox);player.inLava=inLavaBeforeMove;if(inLavaBeforeMove)player.isSprinting=false;
+    if(inWaterBeforeMove||inLavaBeforeMove){this.applyFluidAcceleration(player,deltaSeconds,inLavaBeforeMove?0.2:0.38);const fx=Math.floor(player.position.x),fy=Math.floor(player.position.y),fz=Math.floor(player.position.z),fluidId=this.blockUpdateWorld.getBlock(fx,fy,fz),flow=computeFluidFlowVector({getBlock:(x,y,z)=>this.blockUpdateWorld.getBlock(x,y,z),getMetadata:(x,y,z)=>this.blockUpdateWorld.getBlockMetadata(x,y,z),isSolid:id=>this.blockRegistry.getById(id)?.solid??false},fx,fy,fz,fluidId);player.velocity.x+=flow.x*deltaSeconds*.8;player.velocity.z+=flow.z*deltaSeconds*.8;const before=player.velocity.y;if(isJumpPressed)player.velocity.y+=deltaSeconds*(inLavaBeforeMove?2:4);else player.velocity.y-=deltaSeconds*(inLavaBeforeMove?2.5:1.5);this.moveAndCollide(player,deltaSeconds,(before+player.velocity.y)/2);const drag=Math.pow(inLavaBeforeMove?0.5:0.8,deltaSeconds*20);player.velocity.x*=drag;player.velocity.y*=drag;player.velocity.z*=drag;if(inWaterBeforeMove&&isJumpPressed&&player.collidedHorizontally&&isWaterInAABB(this.blockUpdateWorld,player.getAABB()))player.velocity.y=Math.max(player.velocity.y,WATER_EXIT_VELOCITY);}else{this.applyHorizontalAcceleration(player,deltaSeconds);const velocityYBeforeGravity=player.velocity.y;if(!isClimbing)this.applyGravity(player,deltaSeconds);this.moveAndCollide(player,deltaSeconds,(velocityYBeforeGravity+player.velocity.y)/2);}
+    const inWaterAfterMove=isWaterInAABB(this.blockUpdateWorld,player.getAABB()),inLavaAfterMove=isLavaInAABB(this.blockUpdateWorld,player.getAABB());
+    player.wasInWater=wasInWater;player.inWater=inWaterAfterMove;player.inLava=inLavaAfterMove;player.enteredWaterThisTick=!wasInWater&&inWaterAfterMove;
+    const downwardEntrySpeed=deltaSeconds>0?(previousY-player.position.y)/deltaSeconds:0;
+    const splashVolume=player.enteredWaterThisTick&&downwardEntrySpeed>=SPLASH_ENTRY_MIN_DOWNWARD_SPEED?Math.min(1,Math.sqrt(player.velocity.x*player.velocity.x*.2+downwardEntrySpeed*downwardEntrySpeed+player.velocity.z*player.velocity.z*.2)*.2):undefined;
+    return splashVolume === undefined ? {previousX,previousY,previousZ,currentX:player.position.x,currentY:player.position.y,currentZ:player.position.z,wasGrounded,grounded:player.grounded,climbing:isClimbing,inWater:inWaterAfterMove,inLava:inLavaAfterMove,enteredWaterThisTick:player.enteredWaterThisTick} : {previousX,previousY,previousZ,currentX:player.position.x,currentY:player.position.y,currentZ:player.position.z,wasGrounded,grounded:player.grounded,climbing:isClimbing,inWater:inWaterAfterMove,inLava:inLavaAfterMove,enteredWaterThisTick:player.enteredWaterThisTick,splashVolume};
   }
 
 

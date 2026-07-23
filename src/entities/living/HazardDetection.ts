@@ -2,7 +2,7 @@ import type { BlockRegistry } from '../../blocks/BlockRegistry';
 import type { BlockDefinition } from '../../blocks/BlockDefinition';
 import type { BlockUpdateWorld } from '../../world/BlockUpdateWorld';
 import type { ChunkManager } from '../../world/ChunkManager';
-import type { AABB } from '../../physics/AABB';
+import { AABB } from '../../physics/AABB';
 import { BlockIds } from '../../blocks/BlockId';
 import { CHUNK_SIZE_Y } from '../../world/chunkConstants';
 import { worldToChunkLocal } from '../../world/worldToChunkCoords';
@@ -57,9 +57,17 @@ function anyBlockInBox(
   return false;
 }
 
-/** Beta `handleWaterMovement`: body AABB (expanded down, contracted) touches water. */
+/**
+ * Water contact is determined from the lower body, not the eye point.  This
+ * keeps swim physics active until the player's feet have actually cleared the
+ * surface while avoiding a full-height query that would make surface swimming
+ * feel submerged after leaving the water.
+ */
 export function isWaterInAABB(world: BlockUpdateWorld, aabb: AABB): boolean {
-  const box = aabb.expand(0, -0.4, 0).contract(0.001, 0.001, 0.001);
+  const box = new AABB(
+    aabb.minX + 0.001, aabb.minY - 0.001, aabb.minZ + 0.001,
+    aabb.maxX - 0.001, Math.min(aabb.maxY, aabb.minY + 1), aabb.maxZ - 0.001,
+  );
   return anyBlockInBox(world, box, isWaterBlock);
 }
 
