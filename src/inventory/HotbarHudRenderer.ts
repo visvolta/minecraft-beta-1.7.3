@@ -4,6 +4,7 @@ import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { Inventory } from './Inventory';
 import type { ItemStack } from './ItemStack';
 import { HotbarLayout } from './HotbarLayout';
+import type { GuiScaleSetting } from '../ui/GuiScale';
 import { HotbarUi } from './HotbarUi';
 import { ItemIconResolver } from './ItemIconResolver';
 import { BlockIconRenderer } from './BlockIconRenderer';
@@ -11,7 +12,7 @@ import { SlotContentRenderer } from './SlotContentRenderer';
 
 /** One active hotbar coordinator: DOM items plus one shared cached 3D block-icon surface. */
 export class HotbarHudRenderer {
-  private layout = new HotbarLayout();
+  private layout: HotbarLayout;
   private ui = new HotbarUi();
   private icons = new ItemIconResolver();
   private blocksIcons: BlockIconRenderer;
@@ -22,8 +23,10 @@ export class HotbarHudRenderer {
     atlas: TextureAtlas,
     _itemAtlas: ItemTextureAtlas,
     private blocksRegistry: BlockRegistry,
-    private inventory: Inventory
+    private inventory: Inventory,
+    guiScaleSetting: GuiScaleSetting = 0
   ) {
+    this.layout = new HotbarLayout(guiScaleSetting);
     this.blocksIcons = new BlockIconRenderer(blocksRegistry, atlas);
     this.layout.resize();
     addEventListener('resize', this.resize);
@@ -31,6 +34,10 @@ export class HotbarHudRenderer {
 
   public getLayout(): HotbarLayout {
     return this.layout;
+  }
+
+  public setGuiScale(setting: GuiScaleSetting): void {
+    this.layout.setGuiScale(setting);
   }
 
   public getSlotContentRenderer(): SlotContentRenderer {

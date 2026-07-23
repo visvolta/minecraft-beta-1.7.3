@@ -53,8 +53,8 @@ canvas {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 27px; // 9px * 3 (GUI scale 3)
-  height: 27px;
+  width: calc(9px * var(--mc-gui-scale, 3));
+  height: calc(9px * var(--mc-gui-scale, 3));
   background-image: url('/textures/gui/crosshair.png');
   background-size: 100% 100%;
   image-rendering: pixelated;

@@ -1,20 +1,40 @@
+import { applyGuiScaleCssVariables, computeGuiScale, logicalHeight, logicalWidth } from '../GuiScale';
+
 const GUI = '/textures/gui/';
 export const BUTTON_PRIMARY = { width: 300, height: 36 } as const;
 export const BUTTON_SECONDARY = { width: 220, height: 32 } as const;
 export const BUTTON_COMPACT = { width: 150, height: 28 } as const;
 
+export function guiWidth(): number { return logicalWidth(); }
+export function guiHeight(): number { return logicalHeight(); }
+export function guiScale(): number { return computeGuiScale(); }
+
 export abstract class Screen {
   public readonly root = document.createElement('div');
+  private mounted = false;
+  private readonly resizeHandler = (): void => this.resize();
   protected constructor() {
-    this.root.style.cssText = `position:fixed;inset:0;z-index:2000;image-rendering:pixelated;font-family:Minecraft, monospace;color:white;user-select:none`;
+    this.root.style.cssText = 'position:fixed;left:0;top:0;z-index:2000;image-rendering:pixelated;font-family:Minecraft, monospace;color:white;user-select:none;transform-origin:top left;overflow:hidden';
+    this.resize();
   }
-  public mount(parent = document.body): void { parent.append(this.root); }
-  public dispose(): void { this.root.remove(); }
+  public mount(parent = document.body): void { this.mounted = true; parent.append(this.root); window.addEventListener('resize', this.resizeHandler); this.resize(); }
+  public dispose(): void { this.mounted = false; window.removeEventListener('resize', this.resizeHandler); this.root.remove(); }
+  protected onResize(): void {}
+  private resize(): void {
+    applyGuiScaleCssVariables();
+    const scale = guiScale();
+    this.root.style.width = `${guiWidth()}px`;
+    this.root.style.height = `${guiHeight()}px`;
+    this.root.style.transform = `scale(${scale})`;
+    if (this.mounted) this.onResize();
+  }
 }
 
 export class GuiButton {
   public readonly element = document.createElement('button');
+  private readonly width: number;
   public constructor(label: string, onClick: () => void, width: number = BUTTON_PRIMARY.width, height: number = BUTTON_PRIMARY.height) {
+    this.width = width;
     this.element.textContent = label;
     this.element.style.cssText = `position:absolute;width:${width}px;height:${height}px;border:0;padding:0;background:url('${GUI}button_normal.png') 0 0 / 100% 100%;color:white;font:18px Minecraft, monospace;text-shadow:2px 2px #333;image-rendering:pixelated;cursor:pointer`;
     this.element.addEventListener('mouseenter', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_highlighted.png')`; });
@@ -24,6 +44,7 @@ export class GuiButton {
     this.element.addEventListener('click', (event) => { event.preventDefault(); if (!this.element.disabled) { window.dispatchEvent(new CustomEvent('mc-ui-click')); onClick(); } });
   }
   public setPosition(x: number, y: number): void { this.element.style.left = `${Math.floor(x)}px`; this.element.style.top = `${Math.floor(y)}px`; }
+  public centerAt(x: number, y: number): void { this.setPosition(x - this.width / 2, y); }
   public setDisabled(disabled: boolean): void { this.element.disabled = disabled; this.element.style.backgroundImage = `url('${GUI}${disabled ? 'button_disabled' : 'button_normal'}.png')`; this.element.style.color = disabled ? '#a0a0a0' : 'white'; }
 }
 

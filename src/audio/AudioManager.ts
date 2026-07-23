@@ -11,6 +11,20 @@ type LoadState =
   | { readonly state: 'loaded'; readonly buffer: AudioBuffer }
   | { readonly state: 'failed'; readonly lastTriedMs: number; readonly error: string };
 
+type AudioListenerCompat = AudioListener & {
+  readonly positionX?: AudioParam;
+  readonly positionY?: AudioParam;
+  readonly positionZ?: AudioParam;
+  readonly forwardX?: AudioParam;
+  readonly forwardY?: AudioParam;
+  readonly forwardZ?: AudioParam;
+  readonly upX?: AudioParam;
+  readonly upY?: AudioParam;
+  readonly upZ?: AudioParam;
+  setPosition?: (x: number, y: number, z: number) => void;
+  setOrientation?: (forwardX: number, forwardY: number, forwardZ: number, upX: number, upY: number, upZ: number) => void;
+};
+
 export type MusicContext = 'menu' | 'survival' | 'creative' | 'nether' | 'none';
 
 const RETRY_AFTER_MS = 5000;
@@ -34,7 +48,8 @@ export class AudioManager implements MobSoundSink {
   private lastMusicKey: string | undefined;
   private worldSession = 0;
   private worldPaused = false;
-  private readonly activeLoops = new Map<string, { source: AudioBufferSourceNode; gain: GainNode; session: number }>();
+  private listenerWarningIssued = false;
+  private readonly activeLoops = new Map<string, { source: AudioBufferSourceNode; gain: GainNode; session: number; volume: number }>();
 
   public constructor() {
     if (typeof window !== 'undefined') {
@@ -83,17 +98,41 @@ export class AudioManager implements MobSoundSink {
   }
 
   public updateListener(x: number, y: number, z: number, yaw: number, pitch: number): void {
-    const listener = this.context?.listener;
+    const listener = this.context?.listener as AudioListenerCompat | undefined;
     if (listener === undefined) return;
-    listener.positionX.value = x; listener.positionY.value = y; listener.positionZ.value = z;
-    const fx = -Math.sin(yaw) * Math.cos(pitch), fy = Math.sin(pitch), fz = -Math.cos(yaw) * Math.cos(pitch);
-    listener.forwardX.value = fx; listener.forwardY.value = fy; listener.forwardZ.value = fz;
-    listener.upX.value = 0; listener.upY.value = 1; listener.upZ.value = 0;
+
+    const cosPitch = Math.cos(pitch);
+    const forwardX = -Math.sin(yaw) * cosPitch;
+    const forwardY = Math.sin(pitch);
+    const forwardZ = -Math.cos(yaw) * cosPitch;
+    const upX = 0;
+    const upY = 1;
+    const upZ = 0;
+
+    try {
+      const hasPositionParams = this.setAudioParam(listener.positionX, x)
+        && this.setAudioParam(listener.positionY, y)
+        && this.setAudioParam(listener.positionZ, z);
+      if (!hasPositionParams && typeof listener.setPosition === 'function') listener.setPosition(x, y, z);
+
+      const hasOrientationParams = this.setAudioParam(listener.forwardX, forwardX)
+        && this.setAudioParam(listener.forwardY, forwardY)
+        && this.setAudioParam(listener.forwardZ, forwardZ)
+        && this.setAudioParam(listener.upX, upX)
+        && this.setAudioParam(listener.upY, upY)
+        && this.setAudioParam(listener.upZ, upZ);
+      if (!hasOrientationParams && typeof listener.setOrientation === 'function') listener.setOrientation(forwardX, forwardY, forwardZ, upX, upY, upZ);
+    } catch (error) {
+      if (!this.listenerWarningIssued) {
+        this.listenerWarningIssued = true;
+        console.warn('[Audio] Failed to update Web Audio listener; positional audio will continue with the previous listener transform.', error);
+      }
+    }
   }
 
   public beginWorldSession(context: MusicContext): void { this.worldSession++; this.stopWorldSounds(); this.setMusicContext(context); }
   public endWorldSession(): void { this.worldSession++; this.stopWorldSounds(); this.setWorldPaused(false); this.setMusicContext('menu'); }
-  public setWorldPaused(paused: boolean): void { this.worldPaused = paused; for (const loop of this.activeLoops.values()) loop.gain.gain.value = paused ? 0 : 1; }
+  public setWorldPaused(paused: boolean): void { this.worldPaused = paused; for (const loop of this.activeLoops.values()) loop.gain.gain.value = paused ? 0 : loop.volume; }
 
   public setMusicContext(context: MusicContext): void {
     if (this.musicContext === context) return;
@@ -129,6 +168,8 @@ export class AudioManager implements MobSoundSink {
     if (id === 'random.pop') return ['random.pop'];
     if (id === 'random.eat') return ['random.eat1','random.eat2','random.eat3'];
     if (id === 'random.hurt') return ['damage.hit1','damage.hit2','damage.hit3'];
+    if (id === 'fire.fire') return ['fire.fire'];
+    if (id === 'fire.ignite') return ['fire.ignite'];
     if (id === 'mob.zombie') return kind === 'death' ? ['mob.zombie.death'] : kind === 'hurt' ? ['mob.zombie.hurt1','mob.zombie.hurt2'] : ['mob.zombie.say1','mob.zombie.say2','mob.zombie.say3'];
     if (id === 'mob.zombiedeath') return ['mob.zombie.death'];
     if (id === 'mob.zombiehurt') return ['mob.zombie.hurt1','mob.zombie.hurt2'];
@@ -151,6 +192,14 @@ export class AudioManager implements MobSoundSink {
   private playBlockMaterial(material: DigSoundMaterial, x: number, y: number, z: number, volume: number, pitch: number, _reason: 'break' | 'place'): void {
     if (material === 'glass') this.playPositional(this.randomKey(['random.glass1','random.glass2','random.glass3']), x, y, z, volume, pitch, 16);
     else this.playPositional(this.randomKey(DIG_SOUND_MATERIALS[material].map((entry) => entry.key)), x, y, z, volume, pitch, 16);
+  }
+
+  private setAudioParam(param: AudioParam | undefined, value: number): boolean {
+    if (param === undefined) return false;
+    const ctx = this.context;
+    if (ctx !== undefined && typeof param.setValueAtTime === 'function') param.setValueAtTime(value, ctx.currentTime);
+    else param.value = value;
+    return true;
   }
 
   private playStepMaterial(material: StepSoundMaterial, x: number, y: number, z: number, volume: number): void {
@@ -196,8 +245,9 @@ export class AudioManager implements MobSoundSink {
   }
 
   private startLoop(ownerKey: string, soundKey: string, volume: number): void {
-    if (this.activeLoops.has(ownerKey)) { this.activeLoops.get(ownerKey)!.gain.gain.value = this.worldPaused ? 0 : volume; return; }
-    void this.activate().then(async () => { const ctx=this.context,dest=this.soundGain;if(!ctx||!dest)return; const session=this.worldSession; const buffer=await this.loadBuffer(soundKey); if(!buffer||session!==this.worldSession)return; const source=ctx.createBufferSource(); source.buffer=buffer; source.loop=true; const gain=ctx.createGain(); gain.gain.value=this.worldPaused?0:volume; source.connect(gain); gain.connect(dest); source.start(); this.activeLoops.set(ownerKey,{source,gain,session}); });
+    const existing = this.activeLoops.get(ownerKey);
+    if (existing !== undefined) { existing.volume = volume; existing.gain.gain.value = this.worldPaused ? 0 : volume; return; }
+    void this.activate().then(async () => { const ctx=this.context,dest=this.soundGain;if(!ctx||!dest)return; const session=this.worldSession; const buffer=await this.loadBuffer(soundKey); if(!buffer||session!==this.worldSession)return; const source=ctx.createBufferSource(); source.buffer=buffer; source.loop=true; const gain=ctx.createGain(); gain.gain.value=this.worldPaused?0:volume; source.connect(gain); gain.connect(dest); source.start(); this.activeLoops.set(ownerKey,{source,gain,session,volume}); });
   }
   private stopLoop(ownerKey: string): void { const loop=this.activeLoops.get(ownerKey); if(!loop)return; loop.source.stop(); loop.source.disconnect(); loop.gain.disconnect(); this.activeLoops.delete(ownerKey); }
   private stopCurrentMusic(): void { if (this.musicTimer !== undefined) window.clearTimeout(this.musicTimer); this.musicTimer = undefined; this.currentMusic?.stop(); this.currentMusic = undefined; }
@@ -206,5 +256,5 @@ export class AudioManager implements MobSoundSink {
   private musicKeys(): string[] { if(this.musicContext==='menu')return ['music.menu.menu1','music.menu.menu2','music.menu.menu3','music.menu.menu4']; if(this.musicContext==='creative')return ['music.game.creative.creative1','music.game.creative.creative2','music.game.creative.creative3','music.game.creative.creative4','music.game.creative.creative5','music.game.creative.creative6']; if(this.musicContext==='nether')return ['music.game.nether.nether1','music.game.nether.nether2','music.game.nether.nether3','music.game.nether.nether4']; if(this.musicContext==='survival')return ['music.game.calm1','music.game.calm2','music.game.calm3','music.game.hal1','music.game.hal2','music.game.hal3','music.game.hal4','music.game.nuance1','music.game.nuance2','music.game.piano1','music.game.piano2','music.game.piano3']; return []; }
   private randomKey(keys: readonly string[]): string { return keys[Math.floor(Math.random()*keys.length)]!; }
   private updateGainValues(): void { if(!this.masterGain||!this.musicGain||!this.soundGain)return; this.masterGain.gain.value=toGain(this.settings.master); this.musicGain.gain.value=toGain(this.settings.music); this.soundGain.gain.value=toGain(this.settings.sound); }
-  private handleVisibility(): void { if (typeof document !== 'undefined' && document.hidden) { for (const loop of this.activeLoops.values()) loop.gain.gain.value = 0; } else this.setWorldPaused(this.worldPaused); }
+  private handleVisibility(): void { if (typeof document !== 'undefined' && document.hidden) { for (const loop of this.activeLoops.values()) loop.gain.gain.value = 0; } else { for (const loop of this.activeLoops.values()) loop.gain.gain.value = this.worldPaused ? 0 : loop.volume; } }
 }

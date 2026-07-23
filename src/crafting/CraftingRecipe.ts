@@ -29,7 +29,7 @@ export function getContainerReturn(stack: ItemStack): ItemStack | undefined {
     idStr === 'bucket_water' ||
     idStr === 'bucket_lava' ||
     idStr === '326' ||
-    idStr === '325' ||
+    idStr === '327' ||
     idStr === '335'
   ) {
     return new ItemStack('bucket_empty', 'item', 1, 0);

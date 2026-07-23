@@ -77,9 +77,9 @@ for (const materialId of Object.keys(ARMOUR_MATERIALS) as ArmourMaterialId[]) {
 }
 
 const CURRENT_ITEM_IDS = [
-  'arrow', 'bone', 'book_normal', 'bowl', 'bucket_empty', 'bucket_milk', 'carrot', 'coal', 'diamond',
-  'door_iron', 'door_wood', 'dye_powder_blue', 'dye_powder_green', 'egg', 'feather', 'fish_cod_raw',
-  'fish_cod_cooked', 'fish_salmon_raw', 'fish_salmon_cooked', 'potato', 'potato_baked', 'flint',
+  'arrow', 'bone', 'book_normal', 'bowl', 'bucket_empty', 'bucket_water', 'bucket_lava', 'bucket_milk', 'carrot', 'coal', 'diamond',
+  'door_iron', 'door_wood', 'dye_powder_blue', 'dye_powder_green', 'egg', 'feather',
+  'fish_salmon_raw', 'fish_salmon_cooked', 'potato', 'potato_baked', 'flint',
   'flint_and_steel', 'gold_ingot', 'gunpowder', 'iron_ingot', 'leather', 'redstone_dust', 'seeds_wheat',
   'shears', 'sign', 'stick', 'string', 'sugar', 'wheat',
   'redstone_torch', 'lever', 'stone_button', 'stone_pressure_plate', 'wood_pressure_plate', 'trapdoor',
@@ -97,11 +97,15 @@ const SPECIAL_PLACE_BLOCKS: Readonly<Record<string, number>> = {
 };
 
 const GENERIC_ITEMS: readonly ItemDefinition[] = CURRENT_ITEM_IDS.map((id) => {
-  if (id === 'shears') return { id, stackSize: 1, durability: 238, useAction: 'none', creativeVisible: true, creativeTab: 'tools', creativeOrder: 359 };
-  if (id === 'flint_and_steel') return { id, stackSize: 1, durability: 64, useAction: 'none', creativeVisible: true, creativeTab: 'tools', creativeOrder: 259 };
-  if (id === 'sign') return { id, stackSize: 16, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 323 };
+  if (id === 'shears') return { id, numericId: 359, stackSize: 1, durability: 238, useAction: 'none', creativeVisible: true, creativeTab: 'tools', creativeOrder: 359 };
+  if (id === 'flint_and_steel') return { id, numericId: 259, stackSize: 1, durability: 64, useAction: 'none', creativeVisible: true, creativeTab: 'tools', creativeOrder: 259 };
+  if (id === 'sign') return { id, numericId: 323, stackSize: 16, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 323 };
   if (id === 'minecart') return { id, numericId: 328, displayName: 'Minecart', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'transportation', creativeOrder: 328 };
-  if (id.startsWith('bucket_')) return { id, stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc' };
+  if (id.startsWith('bucket_')) {
+    const bucketNumericIds: Readonly<Record<string, number>> = { bucket_empty: 325, bucket_water: 326, bucket_lava: 327, bucket_milk: 335 };
+    const numericId = bucketNumericIds[id];
+    if (numericId !== undefined) return { id, numericId, stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: numericId };
+  }
   
   const placeBlockId = (SPECIAL_PLACE_BLOCKS as any)[id];
   return { id, stackSize: 64, useAction: 'none', placeBlockId, creativeVisible: true, creativeTab: 'misc' };
@@ -113,8 +117,8 @@ function humanizeItemId(id: string): string {
 
 const NUMERIC_ALIASES: Readonly<Record<number, string>> = {
   262: 'arrow', 263: 'coal', 264: 'diamond', 265: 'iron_ingot', 266: 'gold_ingot', 280: 'stick',
-  281: 'bowl', 288: 'feather', 289: 'gunpowder', 295: 'seeds_wheat', 296: 'wheat', 323: 'sign',
-  324: 'door_wood', 328: 'minecart', 330: 'door_iron', 331: 'redstone_dust', 334: 'leather', 344: 'egg', 352: 'bone',
+  281: 'bowl', 288: 'feather', 289: 'gunpowder', 295: 'seeds_wheat', 296: 'wheat', 318: 'flint', 323: 'sign',
+  324: 'door_wood', 325: 'bucket_empty', 326: 'bucket_water', 327: 'bucket_lava', 328: 'minecart', 330: 'door_iron', 331: 'redstone_dust', 334: 'leather', 335: 'bucket_milk', 344: 'egg', 352: 'bone',
   76: 'redstone_torch', 69: 'lever', 77: 'stone_button', 70: 'stone_pressure_plate', 72: 'wood_pressure_plate',
   96: 'trapdoor',
 };
@@ -123,14 +127,25 @@ export class ItemDefinitionRegistry {
   private readonly byId = new Map<string, ItemDefinition>();
 
   public constructor(definitions: readonly ItemDefinition[] = [...GENERIC_ITEMS, ...FOODS, ...TOOLS, ...ARMOURS]) {
+    const numericOwners = new Map<number, string>();
     for (const definition of definitions) {
       const normalized: ItemDefinition = { ...definition, displayName: definition.displayName ?? humanizeItemId(definition.id), iconKey: definition.iconKey ?? definition.id };
+      if (this.byId.has(normalized.id)) throw new Error(`Duplicate item id registered: ${normalized.id}`);
       this.byId.set(normalized.id, normalized);
-      if (normalized.numericId !== undefined) this.byId.set(String(normalized.numericId), normalized);
+      if (normalized.numericId !== undefined) {
+        const existingOwner = numericOwners.get(normalized.numericId);
+        if (existingOwner !== undefined && existingOwner !== normalized.id) throw new Error(`Duplicate numeric item id ${normalized.numericId}: ${existingOwner} and ${normalized.id}`);
+        numericOwners.set(normalized.numericId, normalized.id);
+        this.byId.set(String(normalized.numericId), normalized);
+      }
     }
     for (const [numeric, id] of Object.entries(NUMERIC_ALIASES)) {
       const definition = this.byId.get(id);
-      if (definition) this.byId.set(numeric, definition);
+      if (definition) {
+        const existing = this.byId.get(numeric);
+        if (existing !== undefined && existing.id !== definition.id) throw new Error(`Conflicting numeric item alias ${numeric}: ${existing.id} and ${definition.id}`);
+        this.byId.set(numeric, definition);
+      }
     }
   }
 

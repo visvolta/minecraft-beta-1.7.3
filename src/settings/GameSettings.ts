@@ -1,11 +1,12 @@
 import { Difficulty } from '../world/Difficulty';
 import type { InputAction } from '../input/Input';
+import { normalizeGuiScale, type GuiScaleSetting } from '../ui/GuiScale';
 
 export interface GameSettings {
   readonly version: 1;
   readonly audio: { readonly master: number; readonly music: number; readonly sound: number };
   readonly mouse: { readonly sensitivity: number; readonly invertY: boolean };
-  readonly video: { readonly viewBobbing: boolean };
+  readonly video: { readonly viewBobbing: boolean; readonly guiScale: GuiScaleSetting };
   readonly controls: { readonly bindings: Readonly<Record<InputAction, readonly string[]>> };
   readonly gameplay: { readonly difficulty: Difficulty };
 }
@@ -27,7 +28,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   version: 1,
   audio: { master: 1, music: 1, sound: 1 },
   mouse: { sensitivity: 0.5, invertY: false },
-  video: { viewBobbing: true },
+  video: { viewBobbing: true, guiScale: 0 },
   controls: { bindings: DEFAULT_KEY_BINDINGS },
   gameplay: { difficulty: Difficulty.Normal },
 };
@@ -57,7 +58,10 @@ export function validateGameSettings(value: unknown): GameSettings {
       sensitivity: clamp(typeof mouse.sensitivity === 'number' ? mouse.sensitivity : DEFAULT_GAME_SETTINGS.mouse.sensitivity, 0, 1),
       invertY: typeof mouse.invertY === 'boolean' ? mouse.invertY : DEFAULT_GAME_SETTINGS.mouse.invertY,
     },
-    video: { viewBobbing: typeof video.viewBobbing === 'boolean' ? video.viewBobbing : DEFAULT_GAME_SETTINGS.video.viewBobbing },
+    video: {
+      viewBobbing: typeof video.viewBobbing === 'boolean' ? video.viewBobbing : DEFAULT_GAME_SETTINGS.video.viewBobbing,
+      guiScale: normalizeGuiScale(video.guiScale),
+    },
     controls: { bindings },
     gameplay: { difficulty: difficulty === Difficulty.Peaceful || difficulty === Difficulty.Easy || difficulty === Difficulty.Normal || difficulty === Difficulty.Hard ? difficulty : Difficulty.Normal },
   };

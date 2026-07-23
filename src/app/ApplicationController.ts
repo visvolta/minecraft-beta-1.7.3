@@ -28,8 +28,19 @@ import { AudioManager } from '../audio/AudioManager';
 import { GameMode } from '../player/GameMode';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { Chunk } from '../world/Chunk';
+import { applyGuiScaleCssVariables, setGlobalGuiScaleSetting } from '../ui/GuiScale';
 
 export type ApplicationState = 'boot' | 'main_menu' | 'world_select' | 'world_create' | 'world_loading' | 'in_game' | 'pause_menu' | 'options' | 'video_settings' | 'controls' | 'confirm_delete' | 'error';
+
+class SpawnPreparationCancelled extends Error {
+  public constructor() { super('Spawn preparation was cancelled.'); }
+}
+
+interface SpawnPreparationState {
+  readonly token: number;
+  aborted: boolean;
+  timeoutId: number | null;
+}
 
 export class ApplicationController {
   private state: ApplicationState = 'boot';
@@ -39,8 +50,11 @@ export class ApplicationController {
   private readonly audio = new AudioManager();
   private optionsParent: 'main' | 'pause' = 'main';
   private pauseEscapeArmed = true;
+  private activeLoadToken = 0;
+  private loadInProgress = false;
+  private spawnPreparation: SpawnPreparationState | null = null;
   private readonly keydown = (event: KeyboardEvent): void => {
-    if (event.code !== this.settings.controls.bindings.pause[0]) return;
+    if (!this.settings.controls.bindings.pause.includes(event.code)) return;
     if (this.state === 'pause_menu') {
       event.preventDefault();
       if (this.pauseEscapeArmed) this.resumeGame();
@@ -52,7 +66,7 @@ export class ApplicationController {
       this.showOptions(this.optionsParent);
     }
   };
-  private readonly keyup = (event: KeyboardEvent): void => { if (event.code === this.settings.controls.bindings.pause[0]) this.pauseEscapeArmed = true; };
+  private readonly keyup = (event: KeyboardEvent): void => { if (this.settings.controls.bindings.pause.includes(event.code)) this.pauseEscapeArmed = true; };
   private readonly storagePromise: Promise<WorldStorage>;
 
   public constructor(
@@ -66,7 +80,7 @@ export class ApplicationController {
     this.storagePromise = IndexedDbWorldStorage.open();
   }
 
-  public async start(): Promise<void> { const storage = await this.storagePromise; this.settings = await loadGameSettings(storage); this.audio.applySettings(this.settings); this.installAudioActivation(); await this.loadFont(); window.addEventListener('keydown', this.keydown); window.addEventListener('keyup', this.keyup); await this.showMainMenu(); }
+  public async start(): Promise<void> { const storage = await this.storagePromise; this.settings = await loadGameSettings(storage); setGlobalGuiScaleSetting(this.settings.video.guiScale); this.audio.applySettings(this.settings); this.installAudioActivation(); await this.loadFont(); window.addEventListener('resize', () => applyGuiScaleCssVariables()); window.addEventListener('keydown', this.keydown); window.addEventListener('keyup', this.keyup); await this.showMainMenu(); }
   public getState(): ApplicationState { return this.state; }
   public hasEngine(): boolean { return this.engine !== null; }
 
@@ -78,6 +92,7 @@ export class ApplicationController {
   }
 
   private async showMainMenu(): Promise<void> {
+    this.cancelActiveLoadOperation();
     await this.unloadWorld();
     this.audio.setMusicContext('menu');
     this.setScreen(new MainMenuScreen({ singleplayer: () => void this.showWorldSelect(), options: () => this.showOptions('main'), quit: () => this.showError('Quit Game', 'You can close this browser tab when ready.') }), 'main_menu');
@@ -100,33 +115,51 @@ export class ApplicationController {
   }
 
   private async createAndLoadWorld(result: WorldCreateResult): Promise<void> {
+    const token = this.beginLoadOperation('create world');
+    if (token === null) return;
     const storage = await this.storagePromise;
-    await this.withLoading(async (loading) => {
-      loading.update({ stage: 'metadata', completed: 0, total: undefined, primaryMessage: 'Creating world', secondaryMessage: result.name });
-      const opened = await createWorld(result, storage);
-      await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update);
-      loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.audio.beginWorldSession(opened.coordinator.getMetadata().gameMode === GameMode.Creative ? 'creative' : 'survival');
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu());
-      this.setScreen(null, 'in_game');
-      this.engine.start();
-      await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
-    });
+    try {
+      await this.withLoading(async (loading) => {
+        this.assertLoadActive(token);
+        loading.update({ stage: 'metadata', completed: 0, total: undefined, primaryMessage: 'Creating world', secondaryMessage: result.name });
+        const opened = await createWorld(result, storage);
+        this.assertLoadActive(token);
+        await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update, token);
+        this.assertLoadActive(token);
+        loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
+        this.audio.beginWorldSession(opened.coordinator.getMetadata().gameMode === GameMode.Creative ? 'creative' : 'survival');
+        this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu());
+        this.setScreen(null, 'in_game');
+        this.engine.start();
+        await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
+      });
+    } finally {
+      this.finishLoadOperation(token);
+    }
   }
 
   private async loadExistingWorld(worldId: string): Promise<void> {
+    const token = this.beginLoadOperation(`load world ${worldId}`);
+    if (token === null) return;
     const storage = await this.storagePromise;
-    await this.withLoading(async (loading) => {
-      loading.update({ stage: 'metadata', completed: 0, total: undefined, primaryMessage: 'Loading world', secondaryMessage: worldId });
-      const opened = await openWorld(worldId, storage);
-      await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update);
-      loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.audio.beginWorldSession(opened.coordinator.getMetadata().gameMode === GameMode.Creative ? 'creative' : 'survival');
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu());
-      this.setScreen(null, 'in_game');
-      this.engine.start();
-      await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
-    });
+    try {
+      await this.withLoading(async (loading) => {
+        this.assertLoadActive(token);
+        loading.update({ stage: 'metadata', completed: 0, total: undefined, primaryMessage: 'Loading world', secondaryMessage: worldId });
+        const opened = await openWorld(worldId, storage);
+        this.assertLoadActive(token);
+        await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update, token);
+        this.assertLoadActive(token);
+        loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
+        this.audio.beginWorldSession(opened.coordinator.getMetadata().gameMode === GameMode.Creative ? 'creative' : 'survival');
+        this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu());
+        this.setScreen(null, 'in_game');
+        this.engine.start();
+        await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
+      });
+    } finally {
+      this.finishLoadOperation(token);
+    }
   }
 
 
@@ -162,6 +195,8 @@ export class ApplicationController {
 
   private async updateSettings(settings: GameSettings): Promise<void> {
     this.settings = settings;
+    setGlobalGuiScaleSetting(settings.video.guiScale);
+    window.dispatchEvent(new Event('resize'));
     this.audio.applySettings(settings);
     this.engine?.applySettings(settings);
     await saveGameSettings(await this.storagePromise, settings);
@@ -218,20 +253,87 @@ export class ApplicationController {
     const screen = new LoadingScreen();
     this.setScreen(screen, 'world_loading');
     try { await work({ update: (progress) => screen.update(progress) }); }
-    catch (error) { console.error(error); this.showError('Loading failed', error instanceof Error ? error.message : String(error)); }
+    catch (error) {
+      if (error instanceof SpawnPreparationCancelled) return;
+      console.error(error);
+      this.showError('Loading failed', error instanceof Error ? error.message : String(error));
+    }
   }
 
-  private async prepareSpawn(seed: string, update: (progress: LoadingProgress) => void): Promise<void> {
+  private beginLoadOperation(label: string): number | null {
+    if (this.loadInProgress) {
+      console.warn(`[ApplicationController] Ignoring duplicate world load request while another load is in progress: ${label}`);
+      return null;
+    }
+    this.loadInProgress = true;
+    this.cancelSpawnPreparation();
+    return ++this.activeLoadToken;
+  }
+
+  private finishLoadOperation(token: number): void {
+    if (token === this.activeLoadToken) this.loadInProgress = false;
+  }
+
+  private cancelActiveLoadOperation(): void {
+    this.loadInProgress = false;
+    this.cancelSpawnPreparation();
+  }
+
+  private assertLoadActive(token: number): void {
+    if (token !== this.activeLoadToken) throw new SpawnPreparationCancelled();
+  }
+
+  private cancelSpawnPreparation(): void {
+    this.activeLoadToken++;
+    if (this.spawnPreparation !== null) {
+      this.spawnPreparation.aborted = true;
+      if (this.spawnPreparation.timeoutId !== null) window.clearTimeout(this.spawnPreparation.timeoutId);
+      this.spawnPreparation.timeoutId = null;
+      this.spawnPreparation = null;
+    }
+  }
+
+  private async prepareSpawn(seed: string, update: (progress: LoadingProgress) => void, token: number): Promise<void> {
+    this.cancelSpawnPreparation();
+    this.activeLoadToken = token;
+    const state: SpawnPreparationState = { token, aborted: false, timeoutId: null };
+    this.spawnPreparation = state;
     const generator = new BetaWorldGenerator(BigInt(seed));
     const radius = 4;
     const coords: Array<readonly [number, number]> = [];
+    const maxDurationMs = 120_000;
+    const startMs = performance.now();
     for (let z = -radius; z <= radius; z++) for (let x = -radius; x <= radius; x++) coords.push([x, z]);
-    for (let i = 0; i < coords.length; i++) {
-      const [x, z] = coords[i]!;
-      update({ stage: 'terrain', completed: i, total: coords.length, primaryMessage: 'Preparing spawn area', secondaryMessage: `Chunk ${i + 1}/${coords.length}` });
-      generator.populate(new Chunk(x, z));
-      if (i % 4 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    try {
+      for (let i = 0; i < coords.length; i++) {
+        if (state.aborted || token !== this.activeLoadToken) throw new SpawnPreparationCancelled();
+        if (performance.now() - startMs > maxDurationMs) throw new Error(`Preparing spawn area timed out after ${maxDurationMs / 1000}s.`);
+        const [x, z] = coords[i]!;
+        update({ stage: 'terrain', completed: i, total: coords.length, primaryMessage: 'Preparing spawn area', secondaryMessage: `Chunk ${i + 1}/${coords.length}` });
+        generator.populate(new Chunk(x, z));
+        if (i % 4 === 0) await this.spawnPreparationDelay(state, 0);
+      }
+      update({ stage: 'terrain', completed: coords.length, total: coords.length, primaryMessage: 'Preparing spawn area', secondaryMessage: 'Complete' });
+    } finally {
+      if (this.spawnPreparation === state) {
+        if (state.timeoutId !== null) window.clearTimeout(state.timeoutId);
+        this.spawnPreparation = null;
+      }
     }
+  }
+
+  private spawnPreparationDelay(state: SpawnPreparationState, ms: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (state.aborted || state.token !== this.activeLoadToken) {
+        reject(new SpawnPreparationCancelled());
+        return;
+      }
+      state.timeoutId = window.setTimeout(() => {
+        state.timeoutId = null;
+        if (state.aborted || state.token !== this.activeLoadToken) reject(new SpawnPreparationCancelled());
+        else resolve();
+      }, ms);
+    });
   }
 
   private showError(title: string, message: string): void {
@@ -239,6 +341,7 @@ export class ApplicationController {
   }
 
   private async unloadWorld(): Promise<void> {
+    this.cancelSpawnPreparation();
     if (this.engine === null) return;
     await this.engine.saveAndStop();
     this.engine = null;

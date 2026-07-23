@@ -7,11 +7,14 @@ import type { ChestController } from '../chest/ChestController';
 import type { HotbarLayout } from '../inventory/HotbarLayout';
 
 import type { SignController } from '../sign/SignController';
+import type { InputAction } from './Input';
 
 /**
  * Single authoritative menu-input routing path (`Use one authoritative menu-input routing path`).
  * Prevents duplicate key listeners and ensures only one modal menu is open at a time (`ensure only one modal menu can be open at a time; avoid duplicate key listeners`).
  */
+type InputBindings = Readonly<Record<InputAction, readonly string[]>>;
+
 export class MenuInputRouter {
   private readonly keydownHandler = (e: KeyboardEvent) => this.handleKeyDown(e);
 
@@ -27,6 +30,7 @@ export class MenuInputRouter {
     private readonly layout: HotbarLayout,
     creativeInventoryController?: CreativeInventoryController,
     player?: Player,
+    private readonly getBindings?: () => InputBindings,
   ) {
     this.creativeInventoryController = creativeInventoryController;
     this.player = player;
@@ -36,7 +40,7 @@ export class MenuInputRouter {
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
-    if (e.code === 'KeyE') {
+    if (this.isAction(e, 'inventory')) {
       if (this.signController.isOpen) return; // Prevent E from closing inventory while typing on a sign
 
       e.preventDefault();
@@ -76,7 +80,7 @@ export class MenuInputRouter {
       return;
     }
 
-    if (e.code === 'Escape') {
+    if (this.isAction(e, 'pause')) {
       if (this.signController.isOpen) {
         // Handled directly inside SignUi (it restores/cancels and closes).
         // But we return here so it doesn't propagate to pausing the game.
@@ -153,6 +157,14 @@ export class MenuInputRouter {
         }
       }
     }
+  }
+
+  private isAction(event: KeyboardEvent, action: InputAction): boolean {
+    const bindings = this.getBindings?.();
+    if (bindings !== undefined) return bindings[action].includes(event.code);
+    if (action === 'inventory') return event.code === 'KeyE';
+    if (action === 'pause') return event.code === 'Escape';
+    return false;
   }
 
   public dispose(): void {

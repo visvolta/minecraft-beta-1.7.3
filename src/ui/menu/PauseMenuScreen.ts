@@ -1,14 +1,18 @@
-import { GuiButton, Screen } from './MenuWidgets';
+import { guiHeight, guiWidth, GuiButton, Screen } from './MenuWidgets';
 
 export class PauseMenuScreen extends Screen {
+  private readonly resume: GuiButton;
+  private readonly options: GuiButton;
+  private readonly quit: GuiButton;
   public constructor(actions: { readonly resume: () => void; readonly options: () => void; readonly saveQuit: () => void }) {
     super();
     this.root.style.background = 'rgba(0,0,0,0.55)';
-    const title=document.createElement('div'); title.textContent='Game menu'; title.style.cssText='position:absolute;left:0;right:0;top:70px;text-align:center;font:24px Minecraft, monospace;color:white';
-    const x=window.innerWidth/2-150;
-    const resume=new GuiButton('Back to Game',actions.resume); resume.setPosition(x,130);
-    const options=new GuiButton('Options...',actions.options); options.setPosition(x,178);
-    const quit=new GuiButton('Save and Quit to Title',actions.saveQuit); quit.setPosition(x,226);
-    this.root.append(title,resume.element,options.element,quit.element);
+    const title=document.createElement('div'); title.textContent='Game menu'; title.style.cssText='position:absolute;left:0;right:0;top:40px;text-align:center;font:18px Minecraft, monospace;color:white';
+    this.resume=new GuiButton('Back to Game',actions.resume,200,20);
+    this.options=new GuiButton('Options...',actions.options,200,20);
+    this.quit=new GuiButton('Save and Quit to Title',actions.saveQuit,200,20);
+    this.root.append(title,this.resume.element,this.options.element,this.quit.element); this.layout();
   }
+  protected override onResize(): void { this.layout(); }
+  private layout(): void { const x=guiWidth()/2-100,y=Math.max(80,guiHeight()/4+24); this.resume.setPosition(x,y); this.options.setPosition(x,y+24); this.quit.setPosition(x,y+48); }
 }

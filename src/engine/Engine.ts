@@ -579,7 +579,7 @@ export class Engine {
     this.heldItemRenderer = new FirstPersonHeldItemRenderer(this.firstPersonArmRenderer, this.inventory, blockRegistry, this.atlas, this.itemAtlas);
     this.firstPersonHeldBlockMesh.visible = false;
     this.thirdPersonHeldBlockMesh.visible = false;
-    this.hotbarHudRenderer = new HotbarHudRenderer(this.atlas, this.itemAtlas, blockRegistry, this.inventory);
+    this.hotbarHudRenderer = new HotbarHudRenderer(this.atlas, this.itemAtlas, blockRegistry, this.inventory, this.settings.video.guiScale);
     this.hudRenderer=new HudRenderer(this.hotbarHudRenderer,this.player,playerEquipment);
     this.inventoryUi = new InventoryUi();
     this.inventoryTooltip = new InventoryTooltip();
@@ -683,7 +683,8 @@ export class Engine {
       this.signController,
       this.hotbarHudRenderer.getLayout(),
       this.creativeInventoryController,
-      this.player
+      this.player,
+      () => this.settings.controls.bindings,
     );
 
     this.interactionController.setBlockInteractionHandler((targetId, _x, _y, _z) => {
@@ -862,7 +863,15 @@ export class Engine {
   public unregister(system: IUpdatable): void { const index = this.updatables.indexOf(system); if (index !== -1) this.updatables.splice(index, 1); }
 
   public start(): void {
-    if (this.running) return;
+    if (this.running) {
+      console.warn('[Engine] Duplicate start() ignored; engine is already running.');
+      return;
+    }
+    if (this.animationFrameId !== null) {
+      console.warn('[Engine] Stale animation frame detected before start(); cancelling before starting a new loop.');
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
     document.body.appendChild(this.renderer.domElement);
     this.debugOverlay.mount();
     this.input.start();
@@ -878,6 +887,7 @@ export class Engine {
     this.input.setBindings(settings.controls.bindings);
     this.audioManager.applySettings(settings);
     this.cameraController.setSettings(settings);
+    this.hotbarHudRenderer.setGuiScale(settings.video.guiScale);
     this.player.viewBobbingEnabled = settings.video.viewBobbing;
   }
 
@@ -959,6 +969,10 @@ export class Engine {
   }
 
   private tick = (timeMs: number): void => {
+    if (!this.running) {
+      this.animationFrameId = null;
+      return;
+    }
     this.animationFrameId = requestAnimationFrame(this.tick);
     this.performanceProfiler.beginFrame();
     this.performanceProfiler.beginUpdate();
@@ -1094,7 +1108,7 @@ export class Engine {
     const currentStackKey = currentStack === null ? 'empty' : `${currentStack.identity.id}_${currentStack.count}`;
     if (this.selectedSlot !== currentSlot || this.lastSelectedStackKey !== currentStackKey) { this.selectedSlot = currentSlot; this.lastSelectedStackKey = currentStackKey; this.updateHeldItemMesh(); }
 
-    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && this.input.isKeyJustPressed('KeyQ')) {
+    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && this.input.isActionJustPressed('drop')) {
       const selectedSlotIndex = this.interactionController.getSelectedSlotIndex();
       const stack = this.inventory.getStack(selectedSlotIndex);
       if (stack !== null) {

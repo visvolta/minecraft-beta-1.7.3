@@ -27,7 +27,7 @@ export class CameraModeController {
   ) {}
 
   public update(): void {
-    if (this.input.isKeyJustPressed('KeyP')) {
+    if (this.input.isActionJustPressed('perspective')) {
       this.mode = this.mode === CameraMode.FIRST_PERSON ? CameraMode.THIRD_PERSON_REAR : CameraMode.FIRST_PERSON;
     }
   }

@@ -25,8 +25,9 @@ export const MUSIC_CREATIVE = numbered('music.game.creative.creative', '/audio/m
 export const MUSIC_NETHER = numbered('music.game.nether.nether', '/audio/music/game/nether/nether', 1, 4, 'music.nether');
 export const MUSIC_MENU = numbered('music.menu.menu', '/audio/music/menu/menu', 1, 4, 'music.menu');
 
+export const FIRE_SOUNDS = ['fire','ignite'].map((name) => sound(`fire.${name}`, `/audio/sounds/fire/${name}.ogg`, 'fire'));
 export const RANDOM_SOUNDS = [
-  'fire','ignite','splash','pop','glass1','glass2','glass3','chestclosed','chestopen','click','door_close','door_open','drink','eat1','eat2','eat3','explode1','explode2','explode3',
+  'splash','pop','glass1','glass2','glass3','chestclosed','chestopen','click','door_close','door_open','drink','eat1','eat2','eat3','explode1','explode2','explode3',
 ].map((name) => sound(`random.${name}`, `/audio/sounds/random/${name}.ogg`, 'random'));
 
 export const MOB_SOUNDS = [
@@ -53,7 +54,7 @@ export const STEP_SOUND_MATERIALS: Readonly<Record<StepSoundMaterial, readonly A
 
 export const DIG_SOUNDS = Object.values(DIG_SOUND_MATERIALS).flat();
 export const STEP_SOUNDS = Object.values(STEP_SOUND_MATERIALS).flat();
-export const AUDIO_MANIFEST = [...MUSIC_GAME,...MUSIC_CREATIVE,...MUSIC_NETHER,...MUSIC_MENU,...RANDOM_SOUNDS,...MOB_SOUNDS,...CAVE_SOUNDS,...WEATHER_SOUNDS,...DAMAGE_SOUNDS,...MINECART_SOUNDS,...DIG_SOUNDS,...STEP_SOUNDS] as const;
+export const AUDIO_MANIFEST = [...MUSIC_GAME,...MUSIC_CREATIVE,...MUSIC_NETHER,...MUSIC_MENU,...FIRE_SOUNDS,...RANDOM_SOUNDS,...MOB_SOUNDS,...CAVE_SOUNDS,...WEATHER_SOUNDS,...DAMAGE_SOUNDS,...MINECART_SOUNDS,...DIG_SOUNDS,...STEP_SOUNDS] as const;
 
 export function entriesForKeys(keys: readonly string[]): AudioEntry[] { return keys.map((key) => { const entry = AUDIO_MANIFEST.find((candidate) => candidate.key === key); if (!entry) throw new Error(`Unknown audio key ${key}`); return entry; }); }
 export function manifestByKey(): Map<string, AudioEntry> { return new Map(AUDIO_MANIFEST.map((entry) => [entry.key, entry])); }
