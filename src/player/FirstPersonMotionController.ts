@@ -40,7 +40,7 @@ export class FirstPersonMotionController {
     const limbSwingAmount = player.grounded && !player.isFlying ? rawLimbSwingAmount : 0;
 
     // Apply View Bobbing to Camera
-    if (limbSwingAmount > 0.001) {
+    if (player.viewBobbingEnabled !== false && limbSwingAmount > 0.001) {
       const transX = Math.sin(limbSwingPhase * CAMERA_VIEW_BOB_FREQUENCY) * limbSwingAmount * CAMERA_VIEW_BOB_HORIZONTAL_AMPLITUDE;
       const transY = -Math.abs(Math.cos(limbSwingPhase * CAMERA_VIEW_BOB_FREQUENCY) * limbSwingAmount * CAMERA_VIEW_BOB_VERTICAL_AMPLITUDE);
       camera.translateX(transX);
@@ -62,7 +62,7 @@ export class FirstPersonMotionController {
     let bobRoll = 0;
 
     // Add first-person walk bob to the arm (offset from camera)
-    if (limbSwingAmount > 0.001) {
+    if (player.viewBobbingEnabled !== false && limbSwingAmount > 0.001) {
       bobX = Math.sin(limbSwingPhase * FIRST_PERSON_ARM_BOB_FREQUENCY) * limbSwingAmount * FIRST_PERSON_ARM_BOB_HORIZONTAL_AMPLITUDE;
       bobY = -Math.abs(Math.cos(limbSwingPhase * FIRST_PERSON_ARM_BOB_FREQUENCY) * limbSwingAmount * FIRST_PERSON_ARM_BOB_VERTICAL_AMPLITUDE);
       bobRoll = Math.sin(limbSwingPhase * FIRST_PERSON_ARM_BOB_FREQUENCY) * limbSwingAmount * FIRST_PERSON_ARM_BOB_ROLL_AMPLITUDE;

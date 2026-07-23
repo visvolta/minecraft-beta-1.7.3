@@ -1,4 +1,9 @@
 // Full-viewport canvas and retro HUD overlay styling.
+@font-face {
+  font-family: 'Minecraft';
+  src: url('/Minecraft.ttf') format('truetype');
+  font-display: swap;
+}
 
 *,
 *::before,
@@ -14,6 +19,7 @@ body {
   height: 100%;
   overflow: hidden;
   background: #000;
+  font-family: 'Minecraft', monospace;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -125,7 +131,7 @@ canvas {
   bottom: calc(1.5px * var(--gui-scale, 1));
   right: calc(1.5px * var(--gui-scale, 1));
   color: #fff;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: 'Minecraft', monospace;
   font-weight: bold;
   font-size: calc(4.2px * var(--gui-scale, 1));
   line-height: 1;

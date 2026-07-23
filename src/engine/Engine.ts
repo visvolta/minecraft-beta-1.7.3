@@ -11,6 +11,7 @@ import { Input } from '../input/Input';
 import { Player } from '../player/Player';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 import { GameMode } from '../player/GameMode';
+import type { GameSettings } from '../settings/GameSettings';
 import { PlayerController } from '../player/PlayerController';
 import { InteractionController } from '../player/InteractionController';
 import { PlayerPhysics } from '../physics/PlayerPhysics';
@@ -268,6 +269,7 @@ export class Engine {
   private rawLightDebugMode = false;
   private ambientOcclusionDebugMode = false;
 
+  private simulationPaused = false;
   private running = false;
   private animationFrameId: number | null = null;
   private readonly regionCoordinator: RegionCoordinator;
@@ -303,7 +305,8 @@ export class Engine {
     private readonly armourTextures: ArmourTextureAssets,
     private readonly saveCoordinator: WorldSaveCoordinator,
     private readonly storage: WorldStorage,
-    skinManager: PlayerSkinManager
+    skinManager: PlayerSkinManager,
+    private settings: GameSettings,
   ) {
     const metadata = saveCoordinator.getMetadata();
     const worldSeed = BigInt(metadata.seed);
@@ -323,14 +326,15 @@ export class Engine {
 
     this.renderer = new Renderer();
 
-    this.input = new Input(this.renderer.domElement);
+    this.input = new Input(this.renderer.domElement, this.settings.controls.bindings);
     this.cameraController = new CameraController(
       this.renderer.camera,
       this.input,
+      this.settings,
     );
     this.cameraController.setRotation(metadata.player.yaw, metadata.player.pitch);
 
-    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setGameMode(metadata.gameMode ?? GameMode.Creative);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
+    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.viewBobbingEnabled=this.settings.video.viewBobbing;this.player.setGameMode(metadata.gameMode ?? GameMode.Creative);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
     this.playerController = new PlayerController(
       this.input,
       this.cameraController,
@@ -863,6 +867,25 @@ export class Engine {
     this.animationFrameId = requestAnimationFrame(this.tick);
   }
 
+  public applySettings(settings: GameSettings): void {
+    this.settings = settings;
+    this.input.setBindings(settings.controls.bindings);
+    this.cameraController.setSettings(settings);
+    this.player.viewBobbingEnabled = settings.video.viewBobbing;
+  }
+
+  public setPaused(paused: boolean): void {
+    this.simulationPaused = paused;
+    this.input.clearTransientState();
+    this.interactionController.breakingController.reset();
+    if (!paused) {
+      this.lastFrameTimeMs = null;
+      this.simulationAccumulatorTicks = 0;
+    }
+  }
+
+  public get isPaused(): boolean { return this.simulationPaused; }
+
   public async saveAndStop(): Promise<void> {
     await this.saveMetadata(true);
     this.stop();
@@ -884,6 +907,17 @@ export class Engine {
     this.lastFrameTimeMs = timeMs;
 
     this.input.beginFrame();
+    if (this.simulationPaused) {
+      this.lastFrameTimeMs = timeMs;
+      this.simulationAccumulatorTicks = 0;
+      this.renderer.renderer.clear();
+      this.renderer.render();
+      this.performanceProfiler.endUpdate();
+      this.performanceProfiler.beginRender();
+      this.performanceProfiler.endRender();
+      this.performanceProfiler.endFrame();
+      return;
+    }
     if (this.input.isDebugKeyJustPressed('F2')) this.blockTestGrid.generate(this.player.position.x, this.player.position.z);
     if (this.input.isDebugKeyJustPressed('F3')) this.debugOverlay.toggle();
     if (this.input.isKeyJustPressed('KeyU')) {

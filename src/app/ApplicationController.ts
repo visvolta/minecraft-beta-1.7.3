@@ -1,4 +1,3 @@
-
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { TextureAtlas } from '../assets/TextureAtlas';
 import type { ItemTextureAtlas } from '../assets/ItemTextureAtlas';
@@ -18,16 +17,24 @@ import { LoadingScreen } from '../ui/menu/LoadingScreen';
 import { OptionsScreen } from '../ui/menu/OptionsScreen';
 import { ConfirmDeleteScreen } from '../ui/menu/ConfirmDeleteScreen';
 import { RenameWorldScreen } from '../ui/menu/RenameWorldScreen';
+import { ErrorScreen } from '../ui/menu/ErrorScreen';
+import { PauseMenuScreen } from '../ui/menu/PauseMenuScreen';
+import { VideoSettingsScreen } from '../ui/menu/VideoSettingsScreen';
+import { ControlsScreen } from '../ui/menu/ControlsScreen';
 import type { Screen } from '../ui/menu/MenuWidgets';
+import { loadGameSettings, saveGameSettings } from '../settings/SettingsStorage';
+import { DEFAULT_GAME_SETTINGS, type GameSettings } from '../settings/GameSettings';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { Chunk } from '../world/Chunk';
 
-export type ApplicationState = 'boot' | 'main_menu' | 'world_select' | 'world_create' | 'world_loading' | 'in_game' | 'options' | 'confirm_delete' | 'error';
+export type ApplicationState = 'boot' | 'main_menu' | 'world_select' | 'world_create' | 'world_loading' | 'in_game' | 'pause_menu' | 'options' | 'video_settings' | 'controls' | 'confirm_delete' | 'error';
 
 export class ApplicationController {
   private state: ApplicationState = 'boot';
   private screen: Screen | null = null;
   private engine: Engine | null = null;
+  private settings: GameSettings = DEFAULT_GAME_SETTINGS;
+  private readonly keydown = (event: KeyboardEvent): void => { if (event.code === this.settings.controls.bindings.pause[0] && this.state === 'in_game') { event.preventDefault(); void this.showPauseMenu(); } else if (event.code === this.settings.controls.bindings.pause[0] && this.state === 'pause_menu') { event.preventDefault(); this.resumeGame(); } };
   private readonly storagePromise: Promise<WorldStorage>;
 
   public constructor(
@@ -41,7 +48,7 @@ export class ApplicationController {
     this.storagePromise = IndexedDbWorldStorage.open();
   }
 
-  public async start(): Promise<void> { await this.showMainMenu(); }
+  public async start(): Promise<void> { const storage = await this.storagePromise; this.settings = await loadGameSettings(storage); await this.loadFont(); window.addEventListener('keydown', this.keydown); await this.showMainMenu(); }
   public getState(): ApplicationState { return this.state; }
   public hasEngine(): boolean { return this.engine !== null; }
 
@@ -54,10 +61,14 @@ export class ApplicationController {
 
   private async showMainMenu(): Promise<void> {
     await this.unloadWorld();
-    this.setScreen(new MainMenuScreen({ singleplayer: () => void this.showWorldSelect(), options: () => this.showOptions(), quit: () => this.showError('Quit Game', 'You can close this browser tab when ready.') }), 'main_menu');
+    this.setScreen(new MainMenuScreen({ singleplayer: () => void this.showWorldSelect(), options: () => this.showOptions('main'), quit: () => this.showError('Quit Game', 'You can close this browser tab when ready.') }), 'main_menu');
   }
 
-  private showOptions(): void { this.setScreen(new OptionsScreen(() => void this.showMainMenu()), 'options'); }
+  private showOptions(parent: 'main' | 'pause' = 'main'): void { this.setScreen(new OptionsScreen(this.settings, { done: () => parent === 'pause' ? this.showPauseMenu() : void this.showMainMenu(), video: () => this.showVideoSettings(parent), controls: () => this.showControls(parent), setSettings: (settings) => void this.updateSettings(settings) }), 'options'); }
+
+  private showVideoSettings(parent: 'main' | 'pause'): void { this.setScreen(new VideoSettingsScreen(this.settings, (settings) => void this.updateSettings(settings), () => this.showOptions(parent)), 'video_settings'); }
+
+  private showControls(parent: 'main' | 'pause'): void { this.setScreen(new ControlsScreen(this.settings, (settings) => void this.updateSettings(settings), () => this.showOptions(parent)), 'controls'); }
 
   private async showWorldSelect(): Promise<void> {
     const storage = await this.storagePromise;
@@ -76,7 +87,7 @@ export class ApplicationController {
       const opened = await createWorld(result, storage);
       await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update);
       loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager);
+      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings);
       this.setScreen(null, 'in_game');
       this.engine.start();
       await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
@@ -90,11 +101,55 @@ export class ApplicationController {
       const opened = await openWorld(worldId, storage);
       await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update);
       loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager);
+      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings);
       this.setScreen(null, 'in_game');
       this.engine.start();
       await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
     });
+  }
+
+
+  private async showPauseMenu(): Promise<void> {
+    if (this.engine === null) return;
+    this.engine.setPaused(true);
+    this.setScreen(new PauseMenuScreen({ resume: () => this.resumeGame(), options: () => this.showOptions('pause'), saveQuit: () => void this.saveQuitToTitle() }), 'pause_menu');
+  }
+
+  private resumeGame(): void {
+    if (this.engine === null) return;
+    this.setScreen(null, 'in_game');
+    this.engine.setPaused(false);
+  }
+
+  private async saveQuitToTitle(): Promise<void> {
+    if (this.engine === null) return;
+    try {
+      this.screen?.dispose();
+      const loading = new LoadingScreen();
+      this.setScreen(loading, 'world_loading');
+      loading.update({ stage: 'finalizing', completed: 0, total: undefined, primaryMessage: 'Saving world', secondaryMessage: 'Please wait' });
+      await this.unloadWorld();
+      await this.showMainMenu();
+    } catch (error) {
+      console.error(error);
+      if (this.engine !== null) this.engine.setPaused(true);
+      this.showError('Save failed', error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async updateSettings(settings: GameSettings): Promise<void> {
+    this.settings = settings;
+    this.engine?.applySettings(settings);
+    await saveGameSettings(await this.storagePromise, settings);
+  }
+
+  private async loadFont(): Promise<void> {
+    if (typeof document === 'undefined' || !('fonts' in document)) return;
+    try {
+      await Promise.race([document.fonts.load('16px Minecraft'), new Promise((_, reject) => setTimeout(() => reject(new Error('Minecraft font load timed out')), 1500))]);
+    } catch (error) {
+      console.warn('[ApplicationController] Failed to load public/Minecraft.ttf; using fallback font.', error);
+    }
   }
 
   private async showDelete(worldId: string): Promise<void> {
@@ -149,10 +204,7 @@ export class ApplicationController {
   }
 
   private showError(title: string, message: string): void {
-    const screen = new OptionsScreen(() => void this.showMainMenu());
-    screen.root.querySelector('div')!.textContent = title;
-    const msg = document.createElement('div'); msg.textContent = message; msg.style.cssText='position:absolute;left:10%;right:10%;top:140px;text-align:center;color:#ff8080;font:14px monospace'; screen.root.append(msg);
-    this.setScreen(screen, 'error');
+    this.setScreen(new ErrorScreen(title, message, () => void this.showMainMenu()), 'error');
   }
 
   private async unloadWorld(): Promise<void> {

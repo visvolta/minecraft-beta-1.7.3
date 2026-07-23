@@ -53,7 +53,7 @@ export class Player extends Entity {
   public healthFlashTicks=0;
   public hunger=20;public saturation=5;public exhaustion=0;public foodTimer=0;public starvationTimer=0;
   public isEating=false;public foodUseTicks=0;public foodUseSlot=-1;public foodUseItem:string|number|undefined;
-  public isSprinting=false;public inWater=false;public inLava=false;public headUnderwater=false;public collidedHorizontally=false;
+  public isSprinting=false;public inWater=false;public inLava=false;public headUnderwater=false;public collidedHorizontally=false;public viewBobbingEnabled=true;
   private equipment: PlayerEquipment | undefined;
   private armourDamageRemainder = 0;
 

@@ -8,7 +8,11 @@ export type InputAction =
   | 'left'
   | 'right'
   | 'jump'
-  | 'sprint';
+  | 'sprint'
+  | 'inventory'
+  | 'drop'
+  | 'pause'
+  | 'perspective';
 
 /** Default keyboard bindings. Replace this map later for configurable keybinds. */
 const DEFAULT_BINDINGS: Record<InputAction, readonly string[]> = {
@@ -18,6 +22,10 @@ const DEFAULT_BINDINGS: Record<InputAction, readonly string[]> = {
   right: ['KeyD'],
   jump: ['Space'],
   sprint:['ShiftLeft','ShiftRight'],
+  inventory: ['KeyE'],
+  drop: ['KeyQ'],
+  pause: ['Escape'],
+  perspective: ['KeyP'],
 };
 
 /** Mouse buttons the game can query, by their MouseEvent.button index. */
@@ -90,7 +98,7 @@ const MODIFIER_KEY_CODES: Record<ModifierKey, readonly string[]> = {
  */
 export class Input {
   private readonly keysDown = new Set<string>();
-  private readonly bindings: Record<InputAction, readonly string[]>;
+  private bindings: Record<InputAction, readonly string[]>;
   private readonly target: HTMLElement;
 
   /** Accumulated from events between frames. */
@@ -293,6 +301,20 @@ export class Input {
     }
 
     return false;
+  }
+
+  public setBindings(bindings: Readonly<Record<InputAction, readonly string[]>>): void {
+    this.bindings = { ...bindings };
+  }
+
+  public clearTransientState(): void {
+    this.keysDown.clear();
+    this.mouseButtonsDown.clear();
+    this.pendingMousePresses.clear();
+    this.frameMousePresses.clear();
+    this.pendingKeyPresses.clear();
+    this.frameKeyPresses.clear();
+    this.clearMouseDeltas();
   }
 
   public isPointerLocked(): boolean {
