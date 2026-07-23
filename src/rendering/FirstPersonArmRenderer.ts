@@ -132,6 +132,7 @@ export class FirstPersonArmRenderer {
   public dispose(): void {
     this.armMesh.geometry.dispose();
     this.sleeveMesh.geometry.dispose();
+    this.material.map?.dispose();
     this.material.dispose();
   }
 }

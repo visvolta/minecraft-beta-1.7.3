@@ -165,6 +165,13 @@ export class CreativeInventoryUi {
     this.root.style.display = 'none';
   }
 
+  public dispose(): void {
+    this.root.remove?.();
+    this.sourceSlots.length = 0;
+    this.hotbarSlots.length = 0;
+    this.tabButtons.clear();
+  }
+
   public getSourceSlots(): readonly HTMLDivElement[] { return this.sourceSlots; }
   public getHotbarSlots(): readonly HTMLDivElement[] { return this.hotbarSlots; }
   public getTabButtons(): ReadonlyMap<CreativeInventoryTab, HTMLButtonElement> { return this.tabButtons; }

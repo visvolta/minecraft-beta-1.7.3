@@ -106,6 +106,13 @@ export class SignUi {
     this.root.style.display = 'none';
   }
 
+  public dispose(): void {
+    this.root.remove?.();
+    this.inputs.length = 0;
+    delete this.onConfirm;
+    delete this.onCancel;
+  }
+
   private confirm(): void {
     const lines = this.inputs.map(i => i.value);
     this.onConfirm?.(lines);

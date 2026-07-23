@@ -145,6 +145,13 @@ export class Renderer {
     window.removeEventListener('resize', this.onResizeBound);
   }
 
+  public dispose(): void {
+    this.stop();
+    this.renderer.renderLists.dispose();
+    this.renderer.dispose();
+    this.renderer.forceContextLoss();
+  }
+
   public render(): void {
     this.renderer.render(this.scene, this.camera);
   }

@@ -146,6 +146,14 @@ export class FluidAnimationSystem {
     texture.generateMipmaps = false;
     texture.flipY = false;
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.needsUpdate = true;
+    if (hasTextureImageData(texture)) texture.needsUpdate = true;
   }
+}
+
+function hasTextureImageData(texture: THREE.Texture): boolean {
+  const image = texture.image as { width?: unknown; height?: unknown; data?: unknown } | undefined;
+  return image != null && (
+    (typeof image.width === 'number' && image.width > 0 && typeof image.height === 'number' && image.height > 0)
+    || image.data !== undefined
+  );
 }

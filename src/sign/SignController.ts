@@ -41,4 +41,9 @@ export class SignController {
     this.activeContainer = null;
     this.ui.hide();
   }
+
+  public dispose(): void {
+    this.close();
+    this.ui.dispose();
+  }
 }

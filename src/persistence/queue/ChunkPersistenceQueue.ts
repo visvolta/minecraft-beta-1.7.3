@@ -48,6 +48,7 @@ export class ChunkPersistenceQueue {
   private stats = { saved: 0, failed: 0, loaded: 0 };
   private entityHooks: ChunkEntityHooks | null = null;
   private simulationTickProvider: () => number = () => 0;
+  private disposed = false;
 
   public constructor(regionCoordinator: RegionCoordinator) {
     this.regionCoordinator = regionCoordinator;
@@ -75,6 +76,7 @@ export class ChunkPersistenceQueue {
   }
 
   public enqueueRead(chunkX: number, chunkZ: number): Promise<Chunk | undefined | 'corrupt'> {
+    if (this.disposed) return Promise.resolve(undefined);
     return new Promise((resolve, reject) => {
       this.reads.push({ chunkX, chunkZ, resolve, reject });
       this.pumpReads();
@@ -82,6 +84,7 @@ export class ChunkPersistenceQueue {
   }
 
   public requestUnload(chunk: Chunk): Promise<void> {
+    if (this.disposed) return Promise.resolve();
     const key = chunkKey(chunk.chunkX, chunk.chunkZ);
     if (!chunk.isPersistenceDirty()) {
       return Promise.resolve();
@@ -109,7 +112,22 @@ export class ChunkPersistenceQueue {
     }
   }
 
+  public dispose(): void {
+    this.disposed = true;
+    if (this.pendingPeriodicFlush !== null) {
+      clearTimeout(this.pendingPeriodicFlush);
+      this.pendingPeriodicFlush = null;
+    }
+    while (this.reads.length > 0) this.reads.shift()!.resolve(undefined);
+    for (const unload of this.unloads.values()) unload.resolve();
+    this.unloads.clear();
+  }
+
   private pumpReads(): void {
+    if (this.disposed) {
+      while (this.reads.length > 0) this.reads.shift()!.resolve(undefined);
+      return;
+    }
     while (this.reads.length > 0 && this.activeReads < this.maxActiveReads) {
       const read = this.reads.shift()!;
       this.activeReads++;
@@ -121,6 +139,10 @@ export class ChunkPersistenceQueue {
   }
 
   private async processRead(read: QueuedRead): Promise<void> {
+    if (this.disposed) {
+      read.resolve(undefined);
+      return;
+    }
     try {
       const rx = Math.floor(read.chunkX / 32);
       const rz = Math.floor(read.chunkZ / 32);
@@ -190,6 +212,10 @@ export class ChunkPersistenceQueue {
   }
 
   private async processUnload(unload: QueuedUnload): Promise<void> {
+    if (this.disposed) {
+      unload.resolve();
+      return;
+    }
     try {
       const snapshotRevision = await this.saveChunk(unload.chunk);
       if (!unload.canceled) {
@@ -207,7 +233,7 @@ export class ChunkPersistenceQueue {
     } catch (err) {
       this.stats.failed++;
       unload.retries++;
-      if (!unload.canceled) {
+      if (!unload.canceled && !this.disposed) {
         // Backoff and retry
         setTimeout(() => this.processUnload(unload), Math.min(30000, 1000 * Math.pow(2, unload.retries)));
       }
@@ -221,6 +247,7 @@ export class ChunkPersistenceQueue {
   }
 
   public async saveAllDirty(chunks: Iterable<Chunk>): Promise<void> {
+    if (this.disposed) return;
     const promises: Promise<{ chunk: Chunk, revision: number }>[] = [];
     for (const chunk of chunks) {
       if (chunk.isPersistenceDirty() && !this.unloads.has(chunkKey(chunk.chunkX, chunk.chunkZ))) {

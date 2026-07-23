@@ -48,6 +48,13 @@ export class InteractionController {
   private readonly lookDirection = new THREE.Vector3();
 
   private selectedSlotIndex = 0; // 0 to 8 representing the selected hotbar slot
+  private readonly wheelHandler = (event: WheelEvent): void => {
+    // Only process scroll if pointer is locked (playing)
+    if (this.input.isPointerLocked()) {
+      const change = Math.sign(event.deltaY);
+      this.selectedSlotIndex = (this.selectedSlotIndex + change + 9) % 9;
+    }
+  };
   private currentHit: RaycastHit | undefined;
   /** Nearest valid living entity under the crosshair this frame (for melee + debug). */
   private targetedEntity: LivingEntity | undefined;
@@ -89,13 +96,12 @@ export class InteractionController {
     this.breakingController=new BreakingController(player,chunkManager,blockRegistry,blockUpdateWorld,itemEntityManager,inventory,()=>this.selectedSlotIndex);
 
     // Listen for mouse wheel to change hotbar slot index with immediate snap
-    window.addEventListener('wheel', (event) => {
-      // Only process scroll if pointer is locked (playing)
-      if (this.input.isPointerLocked()) {
-        const change = Math.sign(event.deltaY);
-        this.selectedSlotIndex = (this.selectedSlotIndex + change + 9) % 9;
-      }
-    });
+    window.addEventListener('wheel', this.wheelHandler);
+  }
+
+  public dispose(): void {
+    window.removeEventListener('wheel', this.wheelHandler);
+    this.breakingController.reset();
   }
 
   /** Currently targeted block, if any (for BlockHighlight to render). */

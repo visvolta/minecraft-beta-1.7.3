@@ -15,6 +15,11 @@ export class CreativeInventoryController {
   public cursorStack: ItemStack | null = null;
   private activeTab: CreativeInventoryTab = 'creative';
   private draggingScrollbar = false;
+  private readonly windowMouseMoveHandler = (event: MouseEvent): void => {
+    if (!this.isOpen || !this.draggingScrollbar) return;
+    this.setPage(this.ui.pageFromTrackClientY(event.clientY, this.getVisibleEntries()));
+  };
+  private readonly windowMouseUpHandler = (): void => { this.draggingScrollbar = false; };
 
   public constructor(
     private readonly ui: CreativeInventoryUi,
@@ -47,7 +52,14 @@ export class CreativeInventoryController {
   }
 
   public toggle(scale: number): void { if (this.isOpen) this.close(); else this.open(scale); }
-  public dispose(): void { this.close(); }
+  public dispose(): void {
+    this.close();
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('mousemove', this.windowMouseMoveHandler);
+      window.removeEventListener('mouseup', this.windowMouseUpHandler);
+    }
+    this.ui.dispose();
+  }
   public getEntries(): readonly CreativeInventoryEntry[] { return this.allEntries; }
   public getVisibleEntries(): CreativeInventoryEntry[] { return this.filterEntries(this.activeTab); }
 
@@ -101,11 +113,8 @@ export class CreativeInventoryController {
       if (event.target === this.ui.getScrollThumb()) this.draggingScrollbar = true;
       this.setPage(this.ui.pageFromTrackClientY(event.clientY, this.getVisibleEntries()));
     });
-    window.addEventListener('mousemove', (event) => {
-      if (!this.isOpen || !this.draggingScrollbar) return;
-      this.setPage(this.ui.pageFromTrackClientY(event.clientY, this.getVisibleEntries()));
-    });
-    window.addEventListener('mouseup', () => { this.draggingScrollbar = false; });
+    window.addEventListener('mousemove', this.windowMouseMoveHandler);
+    window.addEventListener('mouseup', this.windowMouseUpHandler);
   }
 
   private handleSourceMouseDown(event: MouseEvent, slotIndex: number): void {

@@ -232,6 +232,11 @@ export class ChestUi {
     }
   }
 
+  public dispose(): void {
+    this.root.remove?.();
+    this.slots.length = 0;
+  }
+
   private renderSlot(index: number, stack: ItemStack | null, contentRenderer: SlotContentRenderer): void {
     const el = this.slots[index];
     if (!el) return;

@@ -156,7 +156,7 @@ export class FurnaceController extends BaseContainerController {
   }
 
   public dispose(): void {
-    this.close();
+    super.dispose();
     this.ui.dispose();
   }
 }

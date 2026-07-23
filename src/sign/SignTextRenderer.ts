@@ -134,6 +134,11 @@ export class SignTextRenderer {
     this.geometries.set(c.getPosKey(), geometry);
   }
 
+  public dispose(): void {
+    this.scene.remove(this.group);
+    for (const key of Array.from(this.meshes.keys())) this.removeMesh(key);
+  }
+
   private removeMesh(key: string): void {
     const mesh = this.meshes.get(key);
     if (mesh) {

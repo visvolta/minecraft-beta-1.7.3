@@ -137,6 +137,15 @@ export class ChestRenderer {
     setExplicitUv(3, bottomUv, 0, 1, 2, 3, 0, 1);
   }
 
+  public dispose(): void {
+    this.scene.remove(this.group);
+    if (this.baseMesh) this.baseMesh.dispose();
+    if (this.lidMesh) this.lidMesh.dispose();
+    this.baseGeometry?.dispose();
+    this.lidGeometry?.dispose();
+    this.chestMap.clear();
+  }
+
   private rebuildInstancedMeshes(): void {
     if (this.baseMesh) {
       this.group.remove(this.baseMesh);

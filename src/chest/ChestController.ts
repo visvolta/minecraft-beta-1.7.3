@@ -259,4 +259,9 @@ export class ChestController extends BaseContainerController {
       this.ui.renderInventories(this.activeInventory, this.inventory, this.slotRenderer, this.isDoubleChest);
     }
   }
+
+  public dispose(): void {
+    super.dispose();
+    this.ui.dispose();
+  }
 }

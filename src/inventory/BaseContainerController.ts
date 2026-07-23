@@ -30,6 +30,27 @@ export abstract class BaseContainerController {
   protected isRightDragging = false;
   protected scale = 3;
   protected getDisplayName: (stack: ItemStack) => string = (s) => String(s.identity.id);
+  private readonly windowMouseUpHandler = (e: MouseEvent): void => {
+    if (!this.isOpen) return;
+    if (e.button === 2) {
+      this.isRightDragging = false;
+      this.dragSlots.clear();
+    }
+  };
+  private readonly windowMouseMoveHandler = (e: MouseEvent): void => {
+    if (!this.isOpen) return;
+    if (this.cursorStack !== null) {
+      this.cursorRenderer.update(e.clientX, e.clientY, this.cursorStack, this.slotRenderer, this.scale);
+      this.tooltip.update(0, 0, null, this.scale);
+    } else if (this.hoveredSlotIndex >= 0) {
+      const stack = this.getHoveredStack(this.hoveredSlotIndex);
+      if (stack !== null) {
+        this.tooltip.update(e.clientX, e.clientY, this.getDisplayName(stack), this.scale);
+      } else {
+        this.tooltip.update(0, 0, null, this.scale);
+      }
+    }
+  };
 
   public constructor(
     protected readonly inventory: Inventory,
@@ -48,29 +69,15 @@ export abstract class BaseContainerController {
 
   protected setupCommonListeners(): void {
     if (typeof window === 'undefined') return;
+    window.addEventListener('mouseup', this.windowMouseUpHandler);
+    window.addEventListener('mousemove', this.windowMouseMoveHandler);
+  }
 
-    window.addEventListener('mouseup', (e: MouseEvent) => {
-      if (!this.isOpen) return;
-      if (e.button === 2) {
-        this.isRightDragging = false;
-        this.dragSlots.clear();
-      }
-    });
-
-    window.addEventListener('mousemove', (e: MouseEvent) => {
-      if (!this.isOpen) return;
-      if (this.cursorStack !== null) {
-        this.cursorRenderer.update(e.clientX, e.clientY, this.cursorStack, this.slotRenderer, this.scale);
-        this.tooltip.update(0, 0, null, this.scale);
-      } else if (this.hoveredSlotIndex >= 0) {
-        const stack = this.getHoveredStack(this.hoveredSlotIndex);
-        if (stack !== null) {
-          this.tooltip.update(e.clientX, e.clientY, this.getDisplayName(stack), this.scale);
-        } else {
-          this.tooltip.update(0, 0, null, this.scale);
-        }
-      }
-    });
+  public dispose(): void {
+    this.close();
+    if (typeof window === 'undefined') return;
+    window.removeEventListener('mouseup', this.windowMouseUpHandler);
+    window.removeEventListener('mousemove', this.windowMouseMoveHandler);
   }
 
   protected abstract getHoveredStack(slotIndex: number): ItemStack | null;

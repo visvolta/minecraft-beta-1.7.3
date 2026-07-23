@@ -44,6 +44,7 @@ export class ChunkStreamer {
   private lastPriorityHeadingX = Number.NaN;
   private lastPriorityHeadingZ = Number.NaN;
   private started = false;
+  private disposed = false;
 
   public constructor(
     chunkManager: ChunkManager,
@@ -62,6 +63,7 @@ export class ChunkStreamer {
   }
 
   public dispatchCriticalLoad(chunkX: number, chunkZ: number): void {
+    if (this.disposed) return;
     if (!this.chunkManager.hasChunk(chunkX, chunkZ) && !this.loadingChunks.has(this.key(chunkX, chunkZ))) {
       this.desiredChunks.add(this.key(chunkX, chunkZ));
       this.dispatchLoad(chunkX, chunkZ, -1000000, true);
@@ -80,6 +82,7 @@ export class ChunkStreamer {
     downstreamMeshQueue: number,
     downstreamUploadQueue: number,
   ): void {
+    if (this.disposed) return;
     const chunkX = Math.floor(cameraWorldX / CHUNK_SIZE_X);
     const chunkZ = Math.floor(cameraWorldZ / CHUNK_SIZE_Z);
 
@@ -127,6 +130,9 @@ export class ChunkStreamer {
   }
 
   public dispose(): void {
+    this.disposed = true;
+    this.desiredChunks.clear();
+    this.loadingChunks.clear();
     this.generationQueue.dispose();
   }
 
@@ -190,6 +196,7 @@ export class ChunkStreamer {
           this.markNeighboursDirty(x, z);
         } else {
           this.persistenceQueue.requestUnload(chunk).then(() => {
+            if (this.disposed) return;
             if (!this.desiredChunks.has(this.key(x, z))) {
               this.chunkRenderer.removeChunkMesh(x, z);
               this.chunkManager.removeChunk(x, z);
@@ -202,10 +209,12 @@ export class ChunkStreamer {
   }
 
   private dispatchLoad(x: number, z: number, priority: number, critical: boolean): void {
+    if (this.disposed) return;
     const k = this.key(x, z);
     this.loadingChunks.add(k);
 
     this.persistenceQueue.enqueueRead(x, z).then(chunk => {
+      if (this.disposed) return;
       if (!this.desiredChunks.has(k)) {
         this.loadingChunks.delete(k);
         return;

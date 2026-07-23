@@ -302,7 +302,7 @@ export class Engine {
     atlas: TextureAtlas,
     itemAtlas: ItemTextureAtlas,
     private readonly entityTextures: EntityTextureAssets,
-    private readonly armourTextures: ArmourTextureAssets,
+    armourTextures: ArmourTextureAssets,
     private readonly saveCoordinator: WorldSaveCoordinator,
     private readonly storage: WorldStorage,
     skinManager: PlayerSkinManager,
@@ -902,9 +902,60 @@ export class Engine {
 
   public stop(): void {
     if (!this.running) return;
+    this.running = false;
     if (this.animationFrameId !== null) { cancelAnimationFrame(this.animationFrameId); this.animationFrameId = null; }
     this.lastFrameTimeMs = null;
-    this.renderer.stop(); this.input.stop(); this.debugOverlay.dispose(); this.blockHighlight.dispose(); this.destroyOverlayRenderer.dispose(); this.hudRenderer.dispose(); this.deathScreen.dispose(); this.inventoryInputController.dispose(); this.creativeInventoryController.dispose(); this.inventoryController.dispose(); this.craftingTableInputController.dispose(); this.furnaceInputController.dispose(); this.menuInputRouter.dispose(); this.craftingTableController.dispose(); this.furnaceController.dispose(); this.furnaceManager.clear(); this.contextMenuSuppressor.dispose(); this.heldItemRenderer.dispose(); this.playerArmourRenderer.dispose(); this.playerModel.dispose(); this.minecartRenderSystem.dispose(); this.entityManager.dispose(); this.entityParticles.dispose(); this.chunkStreamer.dispose(); this.fallingBlockManager.dispose(); this.lightningRenderer.dispose(); this.rainSplashRenderer.dispose(); this.precipitationRenderer.dispose(); this.cloudRenderer.dispose(); this.skyRenderer.dispose(); this.chunkRenderer.dispose(); this.fluidAnimationSystem.dispose(); this.fireAnimationSystem.dispose(); this.armourMaterialCache.dispose(); this.armourGeometryCache.dispose(); this.armourTextures.dispose(); this.atlas.dispose(); this.entityTextures.dispose(); this.chunkManager.clear(); this.renderer.domElement.remove(); this.running = false;
+    this.renderer.stop();
+    this.input.stop();
+    this.interactionController.dispose();
+    this.debugOverlay.dispose();
+    this.blockHighlight.dispose();
+    this.destroyOverlayRenderer.dispose();
+    this.hudRenderer.dispose();
+    this.inventoryTooltip.dispose();
+    this.cursorHeldRenderer.dispose();
+    this.deathScreen.dispose();
+    this.inventoryInputController.dispose();
+    this.creativeInventoryController.dispose();
+    this.inventoryController.dispose();
+    this.craftingTableInputController.dispose();
+    this.furnaceInputController.dispose();
+    this.menuInputRouter.dispose();
+    this.craftingTableController.dispose();
+    this.furnaceController.dispose();
+    this.chestController.dispose();
+    this.signController.dispose();
+    this.furnaceManager.clear();
+    this.contextMenuSuppressor.dispose();
+    this.heldItemRenderer.dispose();
+    this.firstPersonArmRenderer.dispose();
+    this.playerArmourRenderer.dispose();
+    this.playerModel.dispose();
+    this.minecartRenderSystem.dispose();
+    this.entityManager.dispose();
+    this.entityParticles.dispose();
+    this.chunkStreamer.dispose();
+    this.chunkPersistenceQueue.dispose();
+    this.fallingBlockManager.dispose();
+    this.lightningRenderer.dispose();
+    this.rainSplashRenderer.dispose();
+    this.precipitationRenderer.dispose();
+    this.cloudRenderer.dispose();
+    this.skyRenderer.dispose();
+    this.chestRenderer.dispose();
+    this.signTextRenderer.dispose();
+    this.chunkRenderer.dispose();
+    this.fluidAnimationSystem.dispose();
+    this.fireAnimationSystem.dispose();
+    this.armourMaterialCache.dispose();
+    this.armourGeometryCache.dispose();
+    this.firstPersonHeldBlockMesh.geometry.dispose();
+    this.thirdPersonHeldBlockMesh.geometry.dispose();
+    this.heldBlockMaterial.dispose();
+    this.itemHeldMaterial.dispose();
+    this.chunkManager.clear();
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
   }
 
   private tick = (timeMs: number): void => {
