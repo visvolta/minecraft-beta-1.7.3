@@ -307,6 +307,7 @@ export class Engine {
     private readonly storage: WorldStorage,
     skinManager: PlayerSkinManager,
     private settings: GameSettings,
+    private readonly onPauseRequested: (() => void) | undefined = undefined,
   ) {
     const metadata = saveCoordinator.getMetadata();
     const worldSeed = BigInt(metadata.seed);
@@ -327,6 +328,7 @@ export class Engine {
     this.renderer = new Renderer();
 
     this.input = new Input(this.renderer.domElement, this.settings.controls.bindings);
+    this.input.setPointerLockLostHandler(() => this.handlePointerLockLost());
     this.cameraController = new CameraController(
       this.renderer.camera,
       this.input,
@@ -878,6 +880,7 @@ export class Engine {
     this.simulationPaused = paused;
     this.input.clearTransientState();
     this.interactionController.breakingController.reset();
+    if (paused && typeof document !== 'undefined' && document.pointerLockElement === this.renderer.domElement) document.exitPointerLock();
     if (!paused) {
       this.lastFrameTimeMs = null;
       this.simulationAccumulatorTicks = 0;
@@ -907,6 +910,10 @@ export class Engine {
     this.lastFrameTimeMs = timeMs;
 
     this.input.beginFrame();
+    if (!this.simulationPaused && this.input.isActionJustPressed('pause')) {
+      this.onPauseRequested?.();
+      this.input.clearTransientState();
+    }
     if (this.simulationPaused) {
       this.lastFrameTimeMs = timeMs;
       this.simulationAccumulatorTicks = 0;
@@ -1090,6 +1097,22 @@ export class Engine {
     this.hudRenderer.render();
     this.performanceProfiler.endRender(); this.performanceProfiler.endFrame();
   };
+
+
+  private handlePointerLockLost(): void {
+    if (this.simulationPaused || !this.running || this.isAnyMenuOpen()) return;
+    this.onPauseRequested?.();
+  }
+
+  private isAnyMenuOpen(): boolean {
+    return this.inventoryController.isOpen
+      || this.creativeInventoryController.isOpen
+      || this.craftingTableController.isOpen
+      || this.furnaceController.isOpen
+      || this.chestController.isOpen
+      || this.signController.isOpen
+      || this.deathScreen.isOpen;
+  }
 
   private snapshotMetadata(): WorldMetadata {
     const weather = this.weatherController.getState(); const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);

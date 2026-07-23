@@ -110,6 +110,7 @@ export class Input {
   private frameMouseDeltaY = 0;
 
   private pointerLocked = false;
+  private pointerLockLostHandler: (() => void) | undefined;
 
   /** Mouse buttons currently held down, by MouseEvent.button index. */
   private readonly mouseButtonsDown = new Set<number>();
@@ -202,6 +203,7 @@ export class Input {
   };
 
   private readonly onPointerLockChange = (): void => {
+    const wasPointerLocked = this.pointerLocked;
     this.pointerLocked = document.pointerLockElement === this.target;
 
     if (!this.pointerLocked) {
@@ -209,6 +211,7 @@ export class Input {
       this.mouseButtonsDown.clear();
       this.pendingMousePresses.clear();
       this.frameMousePresses.clear();
+      if (wasPointerLocked) this.pointerLockLostHandler?.();
     }
   };
 
@@ -305,6 +308,10 @@ export class Input {
 
   public setBindings(bindings: Readonly<Record<InputAction, readonly string[]>>): void {
     this.bindings = { ...bindings };
+  }
+
+  public setPointerLockLostHandler(handler: (() => void) | undefined): void {
+    this.pointerLockLostHandler = handler;
   }
 
   public clearTransientState(): void {

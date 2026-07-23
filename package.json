@@ -41,7 +41,13 @@
     "validate:armour-rendering": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateArmourRendering.js",
     "validate:redstone-engine": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateRedstoneEngine.js",
     "validate:redstone-wire": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateRedstoneWire.js",
-    "validate:minecart": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateMinecartPhysics.js"
+    "validate:minecart": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateMinecartPhysics.js",
+    "validate:game-modes": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateGameModes.js",
+    "validate:creative-inventory": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateCreativeInventory.js",
+    "validate:player-animation": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePlayerAnimation.js",
+    "validate:stage13-menus": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateStage13Menus.js",
+    "validate:stage13b-options": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateStage13BOptions.js",
+    "validate:pause-menu": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePauseMenu.js"
   },
   "dependencies": {
     "three": "^0.185.1"

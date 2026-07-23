@@ -34,7 +34,22 @@ export class ApplicationController {
   private screen: Screen | null = null;
   private engine: Engine | null = null;
   private settings: GameSettings = DEFAULT_GAME_SETTINGS;
-  private readonly keydown = (event: KeyboardEvent): void => { if (event.code === this.settings.controls.bindings.pause[0] && this.state === 'in_game') { event.preventDefault(); void this.showPauseMenu(); } else if (event.code === this.settings.controls.bindings.pause[0] && this.state === 'pause_menu') { event.preventDefault(); this.resumeGame(); } };
+  private optionsParent: 'main' | 'pause' = 'main';
+  private pauseEscapeArmed = true;
+  private readonly keydown = (event: KeyboardEvent): void => {
+    if (event.code !== this.settings.controls.bindings.pause[0]) return;
+    if (this.state === 'pause_menu') {
+      event.preventDefault();
+      if (this.pauseEscapeArmed) this.resumeGame();
+    } else if (this.state === 'options') {
+      event.preventDefault();
+      this.optionsParent === 'pause' ? void this.showPauseMenu() : void this.showMainMenu();
+    } else if (this.state === 'video_settings' || this.state === 'controls') {
+      event.preventDefault();
+      this.showOptions(this.optionsParent);
+    }
+  };
+  private readonly keyup = (event: KeyboardEvent): void => { if (event.code === this.settings.controls.bindings.pause[0]) this.pauseEscapeArmed = true; };
   private readonly storagePromise: Promise<WorldStorage>;
 
   public constructor(
@@ -48,7 +63,7 @@ export class ApplicationController {
     this.storagePromise = IndexedDbWorldStorage.open();
   }
 
-  public async start(): Promise<void> { const storage = await this.storagePromise; this.settings = await loadGameSettings(storage); await this.loadFont(); window.addEventListener('keydown', this.keydown); await this.showMainMenu(); }
+  public async start(): Promise<void> { const storage = await this.storagePromise; this.settings = await loadGameSettings(storage); await this.loadFont(); window.addEventListener('keydown', this.keydown); window.addEventListener('keyup', this.keyup); await this.showMainMenu(); }
   public getState(): ApplicationState { return this.state; }
   public hasEngine(): boolean { return this.engine !== null; }
 
@@ -64,7 +79,7 @@ export class ApplicationController {
     this.setScreen(new MainMenuScreen({ singleplayer: () => void this.showWorldSelect(), options: () => this.showOptions('main'), quit: () => this.showError('Quit Game', 'You can close this browser tab when ready.') }), 'main_menu');
   }
 
-  private showOptions(parent: 'main' | 'pause' = 'main'): void { this.setScreen(new OptionsScreen(this.settings, { done: () => parent === 'pause' ? this.showPauseMenu() : void this.showMainMenu(), video: () => this.showVideoSettings(parent), controls: () => this.showControls(parent), setSettings: (settings) => void this.updateSettings(settings) }), 'options'); }
+  private showOptions(parent: 'main' | 'pause' = 'main'): void { this.optionsParent = parent; this.setScreen(new OptionsScreen(this.settings, { done: () => parent === 'pause' ? this.showPauseMenu() : void this.showMainMenu(), video: () => this.showVideoSettings(parent), controls: () => this.showControls(parent), setSettings: (settings) => void this.updateSettings(settings) }), 'options'); }
 
   private showVideoSettings(parent: 'main' | 'pause'): void { this.setScreen(new VideoSettingsScreen(this.settings, (settings) => void this.updateSettings(settings), () => this.showOptions(parent)), 'video_settings'); }
 
@@ -87,7 +102,7 @@ export class ApplicationController {
       const opened = await createWorld(result, storage);
       await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update);
       loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings);
+      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, () => void this.showPauseMenu());
       this.setScreen(null, 'in_game');
       this.engine.start();
       await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
@@ -101,7 +116,7 @@ export class ApplicationController {
       const opened = await openWorld(worldId, storage);
       await this.prepareSpawn(opened.coordinator.getMetadata().seed, loading.update);
       loading.update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings);
+      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, opened.coordinator, opened.storage, this.skinManager, this.settings, () => void this.showPauseMenu());
       this.setScreen(null, 'in_game');
       this.engine.start();
       await upsertWorldIndexEntry(storage, metadataToIndexEntry(opened.coordinator.getMetadata()));
@@ -111,12 +126,14 @@ export class ApplicationController {
 
   private async showPauseMenu(): Promise<void> {
     if (this.engine === null) return;
+    this.pauseEscapeArmed = false;
     this.engine.setPaused(true);
     this.setScreen(new PauseMenuScreen({ resume: () => this.resumeGame(), options: () => this.showOptions('pause'), saveQuit: () => void this.saveQuitToTitle() }), 'pause_menu');
   }
 
   private resumeGame(): void {
     if (this.engine === null) return;
+    this.pauseEscapeArmed = false;
     this.setScreen(null, 'in_game');
     this.engine.setPaused(false);
   }
