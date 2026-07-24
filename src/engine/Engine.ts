@@ -161,6 +161,7 @@ import {
   THIRD_PERSON_HELD_BLOCK_SCALE,
   FIRST_PERSON_CAMERA_OFFSET_Y
 } from '../player/PlayerConstants';
+import { getActiveSaveTrace, getSaveTraceHistory, measureSaveAsync, measureSaveSync, recordSaveEvent } from '../persistence/debug/SavePipelineTrace';
 
 interface EntityLightingUniforms {
   uSkylightSubtracted: { value: number };
@@ -821,6 +822,8 @@ export class Engine {
       saveWorldMetadata: () => this.saveMetadata(true),
       saveWorld: () => this.saveMetadata(true),
       getSaveMetrics: () => this.saveCoordinator.getMetrics(),
+      getActiveSaveTraceId: () => getActiveSaveTrace()?.id ?? null,
+      getSaveTraceHistory: () => getSaveTraceHistory(),
       inspectWorldMetadata: () => this.saveCoordinator.getMetadata(),
       isWorldDirty: () => this.saveCoordinator.isDirty(),
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
@@ -918,66 +921,106 @@ export class Engine {
   public get isPaused(): boolean { return this.simulationPaused; }
 
   public async saveAndStop(): Promise<void> {
-    await this.saveMetadata(true);
-    this.stop();
+    recordSaveEvent('save.engine.begin_save_and_stop', {
+      paused: this.simulationPaused,
+      dirtyChunkCount: this.countDirtyChunks(),
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    });
+    await measureSaveAsync('save.engine.force_save', {
+      paused: this.simulationPaused,
+      dirtyChunkCount: this.countDirtyChunks(),
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    }, async () => {
+      await this.saveMetadata(true);
+    });
+    measureSaveSync('save.engine.world_shutdown', {
+      paused: this.simulationPaused,
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    }, () => {
+      this.stop();
+    });
   }
 
   public stop(): void {
     if (!this.running) return;
-    this.running = false;
-    if (this.animationFrameId !== null) { cancelAnimationFrame(this.animationFrameId); this.animationFrameId = null; }
-    this.lastFrameTimeMs = null;
-    this.renderer.stop();
-    this.input.stop();
-    this.interactionController.dispose();
-    this.debugOverlay.dispose();
-    this.blockHighlight.dispose();
-    this.destroyOverlayRenderer.dispose();
-    this.hudRenderer.dispose();
-    this.inventoryTooltip.dispose();
-    this.cursorHeldRenderer.dispose();
-    this.deathScreen.dispose();
-    this.inventoryInputController.dispose();
-    this.creativeInventoryController.dispose();
-    this.inventoryController.dispose();
-    this.craftingTableInputController.dispose();
-    this.furnaceInputController.dispose();
-    this.menuInputRouter.dispose();
-    this.craftingTableController.dispose();
-    this.furnaceController.dispose();
-    this.chestController.dispose();
-    this.signController.dispose();
-    this.furnaceManager.clear();
-    this.contextMenuSuppressor.dispose();
-    this.heldItemRenderer.dispose();
-    this.firstPersonArmRenderer.dispose();
-    this.playerArmourRenderer.dispose();
-    this.playerModel.dispose();
-    this.minecartRenderSystem.dispose();
-    this.entityManager.dispose();
-    this.entityParticles.dispose();
-    this.chunkStreamer.dispose();
-    this.chunkPersistenceQueue.dispose();
-    this.fallingBlockManager.dispose();
-    this.lightningRenderer.dispose();
-    this.rainSplashRenderer.dispose();
-    this.precipitationRenderer.dispose();
-    this.cloudRenderer.dispose();
-    this.skyRenderer.dispose();
-    this.chestRenderer.dispose();
-    this.signTextRenderer.dispose();
-    this.chunkRenderer.dispose();
-    this.fluidAnimationSystem.dispose();
-    this.fireAnimationSystem.dispose();
-    this.armourMaterialCache.dispose();
-    this.armourGeometryCache.dispose();
-    this.firstPersonHeldBlockMesh.geometry.dispose();
-    this.thirdPersonHeldBlockMesh.geometry.dispose();
-    this.heldBlockMaterial.dispose();
-    this.itemHeldMaterial.dispose();
-    this.chunkManager.clear();
-    this.renderer.dispose();
-    this.renderer.domElement.remove();
+    measureSaveSync('save.engine.stop.loop', {
+      animationFrameId: this.animationFrameId,
+      running: this.running,
+    }, () => {
+      this.running = false;
+      if (this.animationFrameId !== null) {
+        cancelAnimationFrame(this.animationFrameId);
+        this.animationFrameId = null;
+      }
+      this.lastFrameTimeMs = null;
+      this.renderer.stop();
+      this.input.stop();
+    });
+
+    measureSaveSync('save.engine.dispose_game_systems', {
+      paused: this.simulationPaused,
+    }, () => {
+      this.interactionController.dispose();
+      this.debugOverlay.dispose();
+      this.blockHighlight.dispose();
+      this.destroyOverlayRenderer.dispose();
+      this.hudRenderer.dispose();
+      this.inventoryTooltip.dispose();
+      this.cursorHeldRenderer.dispose();
+      this.deathScreen.dispose();
+      this.inventoryInputController.dispose();
+      this.creativeInventoryController.dispose();
+      this.inventoryController.dispose();
+      this.craftingTableInputController.dispose();
+      this.furnaceInputController.dispose();
+      this.menuInputRouter.dispose();
+      this.craftingTableController.dispose();
+      this.furnaceController.dispose();
+      this.chestController.dispose();
+      this.signController.dispose();
+      this.furnaceManager.clear();
+      this.contextMenuSuppressor.dispose();
+      this.heldItemRenderer.dispose();
+      this.firstPersonArmRenderer.dispose();
+      this.playerArmourRenderer.dispose();
+      this.playerModel.dispose();
+      this.minecartRenderSystem.dispose();
+      this.entityManager.dispose();
+      this.entityParticles.dispose();
+    });
+
+    measureSaveSync('save.engine.dispose_world_systems', {
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+      dirtyChunkCount: this.countDirtyChunks(),
+    }, () => {
+      this.chunkStreamer.dispose();
+      this.chunkPersistenceQueue.dispose();
+      this.fallingBlockManager.dispose();
+      this.lightningRenderer.dispose();
+      this.rainSplashRenderer.dispose();
+      this.precipitationRenderer.dispose();
+      this.cloudRenderer.dispose();
+      this.skyRenderer.dispose();
+      this.chestRenderer.dispose();
+      this.signTextRenderer.dispose();
+      this.chunkRenderer.dispose();
+      this.fluidAnimationSystem.dispose();
+      this.fireAnimationSystem.dispose();
+      this.armourMaterialCache.dispose();
+      this.armourGeometryCache.dispose();
+      this.firstPersonHeldBlockMesh.geometry.dispose();
+      this.thirdPersonHeldBlockMesh.geometry.dispose();
+      this.heldBlockMaterial.dispose();
+      this.itemHeldMaterial.dispose();
+      this.chunkManager.clear();
+    });
+
+    measureSaveSync('save.engine.dispose_renderer', {
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    }, () => {
+      this.renderer.dispose();
+      this.renderer.domElement.remove();
+    });
   }
 
   private tick = (timeMs: number): void => {
@@ -1244,12 +1287,54 @@ export class Engine {
     }
   }
 
+  private countDirtyChunks(): number {
+    let dirtyChunks = 0;
+    for (const chunk of this.chunkManager) if (chunk.isPersistenceDirty()) dirtyChunks++;
+    return dirtyChunks;
+  }
+
   private snapshotMetadata(): WorldMetadata {
     const weather = this.weatherController.getState(); const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);
     return { ...this.saveCoordinator.getMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize() };
   }
 
-  private async saveMetadata(force: boolean): Promise<void> { if (this.metadataSaveInFlight !== null) return this.metadataSaveInFlight; this.saveCoordinator.update(this.snapshotMetadata()); this.metadataSaveInFlight = (async () => { if (this.chunkSavePumpInFlight !== null) await this.chunkSavePumpInFlight; await this.saveCoordinator.save(force); })().finally(() => { this.metadataSaveInFlight = null; }); return this.metadataSaveInFlight; }
+  private async saveMetadata(force: boolean): Promise<void> {
+    if (this.metadataSaveInFlight !== null) return this.metadataSaveInFlight;
+    const snapshot = measureSaveSync('save.engine.snapshot_metadata', {
+      force,
+      paused: this.simulationPaused,
+      dirtyChunkCount: this.countDirtyChunks(),
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    }, () => this.snapshotMetadata());
+    this.saveCoordinator.update(snapshot);
+    recordSaveEvent('save.engine.metadata_updated', {
+      force,
+      dirtyChunkCount: this.countDirtyChunks(),
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    });
+    this.metadataSaveInFlight = (async () => {
+      if (this.chunkSavePumpInFlight !== null) {
+        await measureSaveAsync('save.engine.wait_chunk_save_pump', {
+          force,
+          paused: this.simulationPaused,
+          chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+        }, async () => {
+          await this.chunkSavePumpInFlight;
+        });
+      }
+      await measureSaveAsync('save.engine.coordinator_save', {
+        force,
+        paused: this.simulationPaused,
+        dirtyChunkCount: this.countDirtyChunks(),
+        chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+      }, async () => {
+        await this.saveCoordinator.save(force);
+      });
+    })().finally(() => {
+      this.metadataSaveInFlight = null;
+    });
+    return this.metadataSaveInFlight;
+  }
 
   private async pumpChunkSaves(): Promise<number> {
     if (this.chunkSavePumpInFlight !== null) return this.chunkSavePumpInFlight;

@@ -1,5 +1,6 @@
 import type { WorldStorage } from '../storage/WorldStorage.ts';
 import { RegionFileCodec } from './RegionFileCodec.ts';
+import { measureSaveAsync, measureSaveSync } from '../debug/SavePipelineTrace.ts';
 
 export class RegionStorage {
   public constructor(
@@ -27,6 +28,20 @@ export class RegionStorage {
 
   public async save(): Promise<void> {
     const key = `region/r.${this.regionX}.${this.regionZ}.mcr`;
-    await this.storage.put(this.worldId, key, this.codec.getRawBuffer());
+    const bytes = measureSaveSync('save.region.prepare_bytes', {
+      worldId: this.worldId,
+      key,
+      regionX: this.regionX,
+      regionZ: this.regionZ,
+    }, () => this.codec.getRawBuffer());
+    await measureSaveAsync('save.region.storage_put', {
+      worldId: this.worldId,
+      key,
+      regionX: this.regionX,
+      regionZ: this.regionZ,
+      bytes: bytes.byteLength,
+    }, async () => {
+      await this.storage.put(this.worldId, key, bytes);
+    });
   }
 }

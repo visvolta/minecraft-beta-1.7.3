@@ -4,6 +4,7 @@ import { RegionCoordinator } from './RegionCoordinator.ts';
 import { encodeNbt, decodeNbt } from '../nbt/NbtCodec.ts';
 import { RegionCorruptionError } from '../region/RegionCorruptionError.ts';
 import type { NbtCompound, NbtTag } from '../nbt/Nbt.ts';
+import { measureSaveAsync, measureSaveSync, recordSaveEvent, recordSaveFailure } from '../debug/SavePipelineTrace.ts';
 
 /**
  * Bridge between chunk persistence and the EntityManager. Lets chunks save and
@@ -39,11 +40,8 @@ export class ChunkPersistenceQueue {
   private readonly unloads = new Map<string, QueuedUnload>();
   private activeReads = 0;
   private readonly maxActiveReads = 4;
-
   private activeSaves = 0;
-
   private readonly regionCoordinator: RegionCoordinator;
-
   private pendingPeriodicFlush: ReturnType<typeof setTimeout> | null = null;
   private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
   private lastFailure: string | undefined;
@@ -74,6 +72,9 @@ export class ChunkPersistenceQueue {
       chunksLoaded: this.stats.loaded,
       chunksSaved: this.stats.saved,
       saveFailures: this.stats.failed,
+      retryTimers: this.retryTimers.size,
+      pendingPeriodicFlush: this.pendingPeriodicFlush !== null,
+      regionCoordinator: this.regionCoordinator.getStats(),
       lastFailure: this.lastFailure,
     };
   }
@@ -90,19 +91,33 @@ export class ChunkPersistenceQueue {
     if (this.disposed) return Promise.resolve();
     const key = chunkKey(chunk.chunkX, chunk.chunkZ);
     if (!chunk.isPersistenceDirty()) {
+      recordSaveEvent('save.queue.unload_skipped_clean_chunk', {
+        key,
+        queueStats: this.getStats(),
+      });
       return Promise.resolve();
     }
 
     let queued = this.unloads.get(key);
     if (queued) {
       queued.canceled = false;
-      return Promise.resolve(); // already tracking it
+      recordSaveEvent('save.queue.unload_reused', {
+        key,
+        retries: queued.retries,
+        queueStats: this.getStats(),
+      });
+      return Promise.resolve();
     }
 
     return new Promise((resolve, reject) => {
       queued = { chunk, resolve, reject, canceled: false, retries: 0 };
       this.unloads.set(key, queued);
-      this.processUnload(queued!);
+      recordSaveEvent('save.queue.unload_enqueued', {
+        key,
+        queueStats: this.getStats(),
+        persistenceRevision: chunk.getPersistenceRevision(),
+      });
+      void this.processUnload(queued!);
     });
   }
 
@@ -112,6 +127,11 @@ export class ChunkPersistenceQueue {
     if (queued) {
       queued.canceled = true;
       this.unloads.delete(key);
+      recordSaveEvent('save.queue.unload_canceled', {
+        key,
+        retries: queued.retries,
+        queueStats: this.getStats(),
+      });
     }
   }
 
@@ -152,10 +172,8 @@ export class ChunkPersistenceQueue {
       const rx = Math.floor(read.chunkX / 32);
       const rz = Math.floor(read.chunkZ / 32);
       const region = await this.regionCoordinator.getRegion(rx, rz);
-
       const lx = read.chunkX & 31;
       const lz = read.chunkZ & 31;
-
       const bytes = await region.getChunkData(lx, lz);
       if (!bytes) {
         read.resolve(undefined);
@@ -166,13 +184,9 @@ export class ChunkPersistenceQueue {
       const chunk = ChunkSerializer.decodeChunk(decoded.root, this.simulationTickProvider());
       chunk.markAsLoadedFromDisk();
       this.stats.loaded++;
-      // Restore owned entities from disk unless in-memory parked entities are
-      // authoritative for this chunk (a same-session re-stream).
       if (this.entityHooks !== null && !this.entityHooks.hasParkedEntities(read.chunkX, read.chunkZ)) {
         const entityTags = ChunkSerializer.decodeEntities(decoded.root);
-        if (entityTags.length > 0) {
-          this.entityHooks.loadChunkEntities(entityTags);
-        }
+        if (entityTags.length > 0) this.entityHooks.loadChunkEntities(entityTags);
       }
       read.resolve(chunk);
     } catch (err) {
@@ -188,7 +202,13 @@ export class ChunkPersistenceQueue {
     if (this.pendingPeriodicFlush === null) {
       this.pendingPeriodicFlush = setTimeout(() => {
         this.pendingPeriodicFlush = null;
-        this.regionCoordinator.commitAll().catch((error) => { this.stats.failed++; this.lastFailure = error instanceof Error ? error.message : String(error); });
+        this.regionCoordinator.commitAll().catch((error) => {
+          this.stats.failed++;
+          this.lastFailure = error instanceof Error ? error.message : String(error);
+          recordSaveFailure('save.queue.periodic_flush_failed', error, {
+            queueStats: this.getStats(),
+          });
+        });
       }, 5000);
     }
   }
@@ -197,17 +217,47 @@ export class ChunkPersistenceQueue {
     this.activeSaves++;
     try {
       const snapshotRevision = chunk.getPersistenceRevision();
-      const entityTags = this.entityHooks?.serializeChunkEntities(chunk.chunkX, chunk.chunkZ) ?? [];
-      const nbt = ChunkSerializer.encodeChunk(chunk, BigInt(this.simulationTickProvider()), entityTags);
-      const bytes = encodeNbt(nbt, '');
+      const entityTags = measureSaveSync('save.queue.serialize_entities', {
+        chunkX: chunk.chunkX,
+        chunkZ: chunk.chunkZ,
+        snapshotRevision,
+      }, () => this.entityHooks?.serializeChunkEntities(chunk.chunkX, chunk.chunkZ) ?? []);
+      const nbt = measureSaveSync('save.queue.serialize_chunk', {
+        chunkX: chunk.chunkX,
+        chunkZ: chunk.chunkZ,
+        snapshotRevision,
+        entityCount: entityTags.length,
+      }, () => ChunkSerializer.encodeChunk(chunk, BigInt(this.simulationTickProvider()), entityTags));
+      const bytes = measureSaveSync('save.queue.encode_nbt', {
+        chunkX: chunk.chunkX,
+        chunkZ: chunk.chunkZ,
+        snapshotRevision,
+      }, () => encodeNbt(nbt, ''));
 
       const rx = Math.floor(chunk.chunkX / 32);
       const rz = Math.floor(chunk.chunkZ / 32);
       const lx = chunk.chunkX & 31;
       const lz = chunk.chunkZ & 31;
 
-      const region = await this.regionCoordinator.getRegion(rx, rz);
-      await region.setChunkData(lx, lz, bytes, Math.floor(Date.now() / 1000));
+      const region = await measureSaveAsync('save.queue.get_region', {
+        chunkX: chunk.chunkX,
+        chunkZ: chunk.chunkZ,
+        regionX: rx,
+        regionZ: rz,
+      }, async () => this.regionCoordinator.getRegion(rx, rz));
+      await measureSaveAsync('save.queue.write_region_chunk', {
+        chunkX: chunk.chunkX,
+        chunkZ: chunk.chunkZ,
+        regionX: rx,
+        regionZ: rz,
+        localX: lx,
+        localZ: lz,
+        bytes: bytes.byteLength,
+        snapshotRevision,
+        queueStatsBeforeWrite: this.getStats(),
+      }, async () => {
+        await region.setChunkData(lx, lz, bytes, Math.floor(Date.now() / 1000));
+      });
       this.stats.saved++;
       this.schedulePeriodicFlush();
       return snapshotRevision;
@@ -217,21 +267,42 @@ export class ChunkPersistenceQueue {
   }
 
   private async processUnload(unload: QueuedUnload): Promise<void> {
+    const key = chunkKey(unload.chunk.chunkX, unload.chunk.chunkZ);
     if (this.disposed) {
       unload.resolve();
       return;
     }
+    recordSaveEvent('save.queue.unload_begin', {
+      key,
+      retries: unload.retries,
+      queueStats: this.getStats(),
+    });
     try {
       const snapshotRevision = await this.saveChunk(unload.chunk);
-      if (this.disposed) { unload.resolve(); return; }
+      if (this.disposed) {
+        unload.resolve();
+        return;
+      }
       if (!unload.canceled) {
         const rx = Math.floor(unload.chunk.chunkX / 32);
         const rz = Math.floor(unload.chunk.chunkZ / 32);
-        await this.regionCoordinator.commitRegion(rx, rz);
+        await measureSaveAsync('save.queue.unload_commit_region', {
+          key,
+          regionX: rx,
+          regionZ: rz,
+          retries: unload.retries,
+          queueStatsBeforeCommit: this.getStats(),
+        }, async () => {
+          await this.regionCoordinator.commitRegion(rx, rz);
+        });
         unload.chunk.markPersistenceClean(snapshotRevision);
-        // Scheduled ticks and other mutations may advance while the async
-        // snapshot is being committed. Save again before permitting removal.
         if (unload.chunk.isPersistenceDirty()) {
+          recordSaveEvent('save.queue.unload_chunk_redirtied', {
+            key,
+            retries: unload.retries,
+            snapshotRevision,
+            currentRevision: unload.chunk.getPersistenceRevision(),
+          });
           await this.processUnload(unload);
           return;
         }
@@ -240,16 +311,32 @@ export class ChunkPersistenceQueue {
       this.stats.failed++;
       this.lastFailure = err instanceof Error ? err.message : String(err);
       unload.retries++;
+      const retryDelayMs = Math.min(30000, 1000 * Math.pow(2, unload.retries));
+      recordSaveFailure('save.queue.unload_retry_scheduled', err, {
+        key,
+        retries: unload.retries,
+        retryDelayMs,
+        canceled: unload.canceled,
+        disposed: this.disposed,
+        queueStats: this.getStats(),
+      });
       if (!unload.canceled && !this.disposed) {
-        // Backoff and retry. Timer ownership is explicit so a disposed world cannot retry later.
-        const timer = setTimeout(() => { this.retryTimers.delete(timer); void this.processUnload(unload); }, Math.min(30000, 1000 * Math.pow(2, unload.retries)));
+        const timer = setTimeout(() => {
+          this.retryTimers.delete(timer);
+          void this.processUnload(unload);
+        }, retryDelayMs);
         this.retryTimers.add(timer);
       }
       return;
     }
 
     if (!unload.canceled) {
-      this.unloads.delete(chunkKey(unload.chunk.chunkX, unload.chunk.chunkZ));
+      this.unloads.delete(key);
+      recordSaveEvent('save.queue.unload_complete', {
+        key,
+        retries: unload.retries,
+        queueStats: this.getStats(),
+      });
       unload.resolve();
     }
   }
@@ -271,47 +358,74 @@ export class ChunkPersistenceQueue {
       saved++;
     }
     const touchedRegions = new Set<string>();
-    for (const snapshot of snapshots) {
-      touchedRegions.add(`${snapshot.regionX},${snapshot.regionZ}`);
-    }
+    for (const snapshot of snapshots) touchedRegions.add(`${snapshot.regionX},${snapshot.regionZ}`);
     for (const key of touchedRegions) {
       const [regionX, regionZ] = key.split(',').map(Number) as [number, number];
       await this.regionCoordinator.commitRegion(regionX, regionZ);
     }
     for (const { chunk, revision } of snapshots) {
-      if (chunk.getPersistenceRevision() === revision) {
-        chunk.markPersistenceClean(revision);
-      }
+      if (chunk.getPersistenceRevision() === revision) chunk.markPersistenceClean(revision);
     }
     return saved;
   }
 
   public async saveAllDirty(chunks: Iterable<Chunk>): Promise<void> {
     if (this.disposed) return;
-    const promises: Promise<{ chunk: Chunk, revision: number }>[] = [];
-    for (const chunk of chunks) {
-      if (chunk.isPersistenceDirty() && !this.unloads.has(chunkKey(chunk.chunkX, chunk.chunkZ))) {
-        promises.push(this.saveChunk(chunk).then(revision => ({ chunk, revision })));
+    const candidates = measureSaveSync('save.queue.collect_dirty_chunks', {
+      queueStats: this.getStats(),
+    }, () => {
+      const collected: Chunk[] = [];
+      for (const chunk of chunks) {
+        if (chunk.isPersistenceDirty() && !this.unloads.has(chunkKey(chunk.chunkX, chunk.chunkZ))) collected.push(chunk);
       }
-    }
-    const snapshots = await Promise.all(promises);
-    await this.regionCoordinator.commitAll();
+      return collected;
+    });
 
-    // Now that commit All is done, mark them clean only if no newer changes landed.
-    for (const { chunk, revision } of snapshots) {
-      if (chunk.getPersistenceRevision() === revision) {
-        chunk.markPersistenceClean(revision);
+    const snapshots = await measureSaveAsync('save.queue.flush_dirty_chunks', {
+      dirtyChunkCount: candidates.length,
+      pendingUnloadCount: this.unloads.size,
+      queueStats: this.getStats(),
+    }, async () => Promise.all(candidates.map((chunk) => this.saveChunk(chunk).then((revision) => ({ chunk, revision })) )));
+
+    await measureSaveAsync('save.queue.commit_all_regions', {
+      savedChunkCount: snapshots.length,
+      pendingUnloadCount: this.unloads.size,
+      queueStats: this.getStats(),
+    }, async () => {
+      await this.regionCoordinator.commitAll();
+    });
+
+    measureSaveSync('save.queue.mark_chunks_clean', {
+      savedChunkCount: snapshots.length,
+    }, () => {
+      for (const { chunk, revision } of snapshots) {
+        if (chunk.getPersistenceRevision() === revision) chunk.markPersistenceClean(revision);
       }
-    }
+    });
 
-    // Also await any unloads that are currently saving
-    const unloadPromises: Promise<void>[] = [];
-    for (const unload of this.unloads.values()) {
-      unloadPromises.push(new Promise<void>((resolve) => {
-        const originalResolve = unload.resolve;
-        unload.resolve = () => { originalResolve(); resolve(); };
-      }));
-    }
-    await Promise.all(unloadPromises);
+    const unloadPromises = measureSaveSync('save.queue.capture_pending_unloads', {
+      pendingUnloadCount: this.unloads.size,
+      queueStats: this.getStats(),
+    }, () => {
+      const pending: Promise<void>[] = [];
+      for (const unload of this.unloads.values()) {
+        pending.push(new Promise<void>((resolve) => {
+          const originalResolve = unload.resolve;
+          unload.resolve = () => {
+            originalResolve();
+            resolve();
+          };
+        }));
+      }
+      return pending;
+    });
+
+    await measureSaveAsync('save.queue.wait_unload_saves', {
+      pendingUnloadCount: unloadPromises.length,
+      queueStats: this.getStats(),
+      unresolvedPromises: unloadPromises.length,
+    }, async () => {
+      await Promise.all(unloadPromises);
+    });
   }
 }

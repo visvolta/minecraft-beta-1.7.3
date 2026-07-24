@@ -1,5 +1,6 @@
 import type { WorldStorage } from '../storage/WorldStorage.ts';
 import { RegionStorage } from '../region/RegionStorage.ts';
+import { measureSaveAsync } from '../debug/SavePipelineTrace.ts';
 
 export class RegionCoordinator {
   private readonly regions = new Map<string, RegionStorage>();
@@ -9,6 +10,13 @@ export class RegionCoordinator {
     private readonly storage: WorldStorage,
     private readonly worldId: string,
   ) {}
+
+  public getStats(): { readonly openRegions: number; readonly pendingSaves: number; } {
+    return {
+      openRegions: this.regions.size,
+      pendingSaves: this.pendingSaves.size,
+    };
+  }
 
   public async getRegion(regionX: number, regionZ: number): Promise<RegionStorage> {
     const key = `${regionX},${regionZ}`;
@@ -28,23 +36,34 @@ export class RegionCoordinator {
     let pending = this.pendingSaves.get(key);
     if (pending) return pending;
 
-    pending = (async () => {
+    pending = measureSaveAsync('save.region.commit_region', {
+      key,
+      regionX,
+      regionZ,
+      openRegions: this.regions.size,
+      pendingSaves: this.pendingSaves.size,
+    }, async () => {
       try {
         await region.save();
       } finally {
         this.pendingSaves.delete(key);
       }
-    })();
+    });
     this.pendingSaves.set(key, pending);
     return pending;
   }
 
   public async commitAll(): Promise<void> {
-    const promises: Promise<void>[] = [];
-    for (const key of this.regions.keys()) {
-      const [rx, rz] = key.split(',').map(Number) as [number, number];
-      promises.push(this.commitRegion(rx, rz));
-    }
-    await Promise.all(promises);
+    await measureSaveAsync('save.region.commit_all', {
+      openRegions: this.regions.size,
+      pendingSaves: this.pendingSaves.size,
+    }, async () => {
+      const promises: Promise<void>[] = [];
+      for (const key of this.regions.keys()) {
+        const [rx, rz] = key.split(',').map(Number) as [number, number];
+        promises.push(this.commitRegion(rx, rz));
+      }
+      await Promise.all(promises);
+    });
   }
 }

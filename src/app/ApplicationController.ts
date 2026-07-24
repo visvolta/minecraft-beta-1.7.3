@@ -29,6 +29,7 @@ import { GameMode } from '../player/GameMode';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { Chunk } from '../world/Chunk';
 import { applyGuiScaleCssVariables, setGlobalGuiScaleSetting } from '../ui/GuiScale';
+import { beginSaveTrace, endSaveTrace, recordSaveEvent } from '../persistence/debug/SavePipelineTrace';
 
 export type ApplicationState = 'boot' | 'main_menu' | 'world_select' | 'world_create' | 'world_loading' | 'in_game' | 'pause_menu' | 'options' | 'video_settings' | 'controls' | 'confirm_delete' | 'error';
 
@@ -183,14 +184,44 @@ export class ApplicationController {
 
   private async saveQuitToTitle(): Promise<void> {
     if (this.engine === null) return;
+    const trace = beginSaveTrace('save-and-exit', {
+      applicationState: this.state,
+      enginePaused: this.engine.isPaused,
+      hasEngine: true,
+    });
+    recordSaveEvent('save.application.enter', {
+      applicationState: this.state,
+      enginePaused: this.engine.isPaused,
+    });
     try {
       this.screen?.dispose();
       const loading = new LoadingScreen();
       this.setScreen(loading, 'world_loading');
       loading.update({ stage: 'finalizing', completed: 0, total: undefined, primaryMessage: 'Saving world', secondaryMessage: 'Please wait' });
-      await this.unloadWorld();
-      await this.showMainMenu();
+      recordSaveEvent('save.application.loading_screen_ready', {
+        applicationState: this.state,
+      });
+      await trace.measureAsync('save.application.unload_world', {
+        applicationState: this.state,
+      }, async () => {
+        await this.unloadWorld();
+      });
+      await trace.measureAsync('save.application.menu_transition', {
+        applicationState: this.state,
+      }, async () => {
+        await this.showMainMenu();
+      });
+      const snapshot = endSaveTrace(trace, {
+        succeeded: true,
+        applicationState: this.state,
+      });
+      console.info('[SavePipelineTrace]', snapshot);
     } catch (error) {
+      const snapshot = endSaveTrace(trace, {
+        succeeded: false,
+        applicationState: this.state,
+      });
+      console.error('[SavePipelineTrace]', snapshot);
       console.error(error);
       if (this.engine !== null) this.engine.setPaused(true);
       this.showError('Save failed', error instanceof Error ? error.message : String(error));

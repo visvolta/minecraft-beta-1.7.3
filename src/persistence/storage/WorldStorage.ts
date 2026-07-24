@@ -1,4 +1,6 @@
 /** Browser-independent asynchronous storage boundary. Values are immutable snapshots. */
+import { getActiveSaveTrace, measureSaveAsync } from '../debug/SavePipelineTrace.ts';
+
 export interface WorldStorage {
   get(worldId: string, key: string): Promise<Uint8Array | undefined>;
   put(worldId: string, key: string, value: Uint8Array): Promise<void>;
@@ -9,12 +11,30 @@ export interface WorldStorage {
 
 export class MemoryWorldStorage implements WorldStorage {
   private readonly records = new Map<string, Uint8Array>();
+
   public async get(worldId: string, key: string): Promise<Uint8Array | undefined> {
     const value = this.records.get(`${worldId}/${key}`);
     return value?.slice();
   }
-  public async put(worldId: string, key: string, value: Uint8Array): Promise<void> { this.records.set(`${worldId}/${key}`, value.slice()); }
-  public async delete(worldId: string, key: string): Promise<void> { this.records.delete(`${worldId}/${key}`); }
-  public async deleteWorld(worldId: string): Promise<void> { for (const key of [...this.records.keys()]) if (key.startsWith(`${worldId}/`)) this.records.delete(key); }
+
+  public async put(worldId: string, key: string, value: Uint8Array): Promise<void> {
+    await measureSaveAsync('save.storage.memory_put', {
+      worldId,
+      key,
+      bytes: value.byteLength,
+      activeTraceId: getActiveSaveTrace()?.id,
+    }, async () => {
+      this.records.set(`${worldId}/${key}`, value.slice());
+    });
+  }
+
+  public async delete(worldId: string, key: string): Promise<void> {
+    this.records.delete(`${worldId}/${key}`);
+  }
+
+  public async deleteWorld(worldId: string): Promise<void> {
+    for (const key of [...this.records.keys()]) if (key.startsWith(`${worldId}/`)) this.records.delete(key);
+  }
+
   public async close(): Promise<void> {}
 }
