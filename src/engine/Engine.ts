@@ -126,10 +126,8 @@ import { PerformanceProfiler } from '../debug/PerformanceProfiler';
 import { WorkerValidationHarness } from '../debug/WorkerValidationHarness';
 import { BlockTestGrid } from '../debug/BlockTestGrid';
 import type { IUpdatable } from './IUpdatable';
-import type { WorldSaveCoordinator } from '../persistence/coordinator/WorldSaveCoordinator';
-import { RegionCoordinator } from '../persistence/queue/RegionCoordinator';
-import { ChunkPersistenceQueue } from '../persistence/queue/ChunkPersistenceQueue';
-import type { WorldStorage } from '../persistence/storage/WorldStorage';
+import { WorldPersistenceService, WRITE_PRIORITY_BACKGROUND, WRITE_PRIORITY_FORCED } from '../persistence2/WorldPersistenceService';
+import type { RecordCorruptionError } from '../persistence2/codec/PersistenceError';
 import { GENERATOR_VERSION, SAVE_VERSION, type WorldMetadata } from '../persistence/metadata/WorldMetadata';
 import { PlayerModel } from '../player/PlayerModel';
 import { PlayerAnimator } from '../player/PlayerAnimator';
@@ -280,14 +278,9 @@ export class Engine {
   private simulationPaused = false;
   private running = false;
   private animationFrameId: number | null = null;
-  private readonly regionCoordinator: RegionCoordinator;
-  private readonly chunkPersistenceQueue: ChunkPersistenceQueue;
   private lastFrameTimeMs: number | null = null;
   private lastMetadataAutosaveMs = 0;
   private lastChunkSavePumpMs = 0;
-  private metadataSaveInFlight:Promise<void>|null=null;
-  private metadataSaveInFlightForce = false;
-  private chunkSavePumpInFlight:Promise<number>|null=null;
   private deathSavePending=false;
   private readonly playerModel: PlayerModel;
   private readonly playerAnimator: PlayerAnimator;
@@ -314,14 +307,16 @@ export class Engine {
     itemAtlas: ItemTextureAtlas,
     private readonly entityTextures: EntityTextureAssets,
     armourTextures: ArmourTextureAssets,
-    private readonly saveCoordinator: WorldSaveCoordinator,
-    private readonly storage: WorldStorage,
+    private readonly persistence: WorldPersistenceService,
     skinManager: PlayerSkinManager,
     private settings: GameSettings,
     private readonly audioManager: AudioManager,
     private readonly onPauseRequested: (() => void) | undefined = undefined,
+    private readonly onPersistenceError: ((error: RecordCorruptionError) => void) | undefined = undefined,
   ) {
-    const metadata = saveCoordinator.getMetadata();
+    const loadedMetadata = this.persistence.getMetadata();
+    if (loadedMetadata === null) throw new Error('Engine requires the world metadata to be loaded before construction');
+    const metadata = loadedMetadata;
     const worldSeed = BigInt(metadata.seed);
     this.atlas = atlas;
     this.itemAtlas = itemAtlas;
@@ -331,9 +326,6 @@ export class Engine {
     this.armourMaterialCache = new ArmourMaterialCache(armourTextures);
     this.chunkManager = new ChunkManager();
     this.worldGenerator = new BetaWorldGenerator(worldSeed);
-    this.regionCoordinator = new RegionCoordinator(this.storage, metadata.worldId);
-    this.chunkPersistenceQueue = new ChunkPersistenceQueue(this.regionCoordinator);
-    this.saveCoordinator.attachPersistence(this.chunkManager, this.chunkPersistenceQueue);
     this.worldTime = new WorldTime();
     this.worldTime.setTotalTicks(metadata.timeTicks);
 
@@ -420,7 +412,7 @@ export class Engine {
     this.minecartRenderSystem = new MinecartRenderSystem(this.entityManager, this.renderer.scene, this.entityTextures);
     this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng, (x, y, z) => this.audioManager.play({ type: 'random.explode', x, y, z }));
 
-    this.chunkPersistenceQueue.setEntityHooks({
+    this.persistence.setEntityHooks({
       serializeChunkEntities: (cx, cz) => this.entityManager.serializeChunkEntities(cx, cz),
       loadChunkEntities: (tags) => this.entityManager.loadChunkEntities(tags),
       hasParkedEntities: (cx, cz) => this.entityManager.hasParkedEntities(cx, cz),
@@ -486,7 +478,7 @@ export class Engine {
     this.blockUpdateWorld.setEventQueue(this.worldEventQueue);
     this.blockUpdateWorld.setGameTickProvider(() => this.worldTickScheduler.getGameTick());
     this.blockUpdateWorld.setNextIntProvider((bound: number) => randomTickScheduler.nextInt(bound));
-    this.chunkPersistenceQueue.setSimulationTickProvider(() => this.worldTickScheduler.getGameTick());
+    this.persistence.setSimulationTickProvider(() => this.worldTickScheduler.getGameTick());
 
     this.worldTickScheduler.addGameTickCallback(() => {
       const weatherState = this.weatherController.getState();
@@ -803,11 +795,11 @@ export class Engine {
 
     this.chunkRenderer = new ChunkRenderer(this.renderer.scene, this.chunkManager, blockRegistry, this.atlas, this.fluidAnimationSystem, this.fireAnimationSystem, worldSeed);
     const trustPersistedLighting = metadata.saveVersion === SAVE_VERSION && metadata.generatorVersion === GENERATOR_VERSION;
-    this.chunkStreamer = new ChunkStreamer(this.chunkManager, this.worldGenerator, this.chunkRenderer, this.lightEngine, worldSeed, this.chunkPersistenceQueue, trustPersistedLighting, (chunk) => {
+    this.chunkStreamer = new ChunkStreamer(this.chunkManager, this.worldGenerator, this.chunkRenderer, this.lightEngine, worldSeed, this.persistence, trustPersistedLighting, (chunk) => {
         this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
         this.worldTickScheduler.indexLoadedChunkTicks(chunk);
         this.worldTickScheduler.reconcileChunkBoundaries(chunk);
-    });
+    }, (error) => this.onPersistenceError?.(error));
     this.deathScreen=new DeathScreen(()=>this.respawnController.request());
     this.playerDeathController=new PlayerDeathController(this.player,this.inventory,this.itemEntityManager,worldRng,this.deathScreen,()=>{this.deathSavePending=true;});
     this.respawnController=new RespawnController(this.player,this.chunkManager,this.chunkStreamer,this.blockUpdateWorld,blockRegistry,metadata.spawn,this.deathScreen,this.playerDeathController,()=>{this.cameraHurtController.reset(this.renderer.camera);this.sprintFovController.reset(this.renderer.camera);this.foodUseController.cancel();void this.saveMetadata(true);});
@@ -822,11 +814,11 @@ export class Engine {
     (window as unknown as { __mcDebug?: Record<string, unknown> }).__mcDebug = {
       saveWorldMetadata: () => this.saveMetadata(true),
       saveWorld: () => this.saveMetadata(true),
-      getSaveMetrics: () => this.saveCoordinator.getMetrics(),
+      getSaveMetrics: () => { const stats = this.persistence.getStats(); return { dirty: this.countDirtyChunks() > 0, saves: stats.write.accepted, failures: 0, lastError: undefined as string | undefined, pendingUnloads: stats.pendingUnloads }; },
       getActiveSaveTraceId: () => getActiveSaveTrace()?.id ?? null,
       getSaveTraceHistory: () => getSaveTraceHistory(),
-      inspectWorldMetadata: () => this.saveCoordinator.getMetadata(),
-      isWorldDirty: () => this.saveCoordinator.isDirty(),
+      inspectWorldMetadata: () => this.persistence.getMetadata(),
+      isWorldDirty: () => this.countDirtyChunks() > 0,
       validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
       validateMeshWorkers: () => validationHarness.validateMeshWorker(),
       getTargetedEntity: () => this.interactionController.getTargetedEntity(),
@@ -921,77 +913,62 @@ export class Engine {
 
   public get isPaused(): boolean { return this.simulationPaused; }
 
-  public prepareForcedSave(): void {
-    this.saveCoordinator.update(this.snapshotMetadata());
-    recordSaveEvent('save.engine.forced_save_snapshot_ready', {
-      paused: this.simulationPaused,
-      dirtyChunkCount: this.countDirtyChunks(),
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    });
+  /**
+   * Freeze/quiesce gameplay before the final save (amendment 1): pause simulation
+   * and stop chunk streaming, autosave and unload scheduling. Pausing stops the
+   * tick loop (which drives streaming/autosave); the forced save's closing state
+   * then rejects new background writes/unloads, and in-flight writes are covered
+   * by the barrier.
+   */
+  private quiesceForSave(): void {
+    this.setPaused(true);
   }
 
-  public async flushForcedSaveChunks(): Promise<void> {
-    console.info('[SavePipelineTrace] save.engine.flush_chunks_enter', { operationId: getActiveSaveTrace()?.id ?? null, dirtyChunkCount: this.countDirtyChunks(), queueStats: this.chunkPersistenceQueue.getStats() });
-    await measureSaveAsync('save.engine.flush_forced_save_chunks', {
-      dirtyChunkCount: this.countDirtyChunks(),
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    }, async () => this.saveCoordinator.flushDirtyChunks());
+  /**
+   * Save-and-Quit bridge (Stage 2): freeze gameplay, capture metadata, save dirty
+   * chunks (forced), save final metadata, await the barrier, close the world
+   * service (NEVER the shared backend), then dispose the engine. The application
+   * returns to the world list afterwards. Stage 3 replaces this with the full
+   * application-level forced-save orchestration + watchdog.
+   */
+  public async saveAndQuit(): Promise<void> {
+    recordSaveEvent('save.engine.save_and_quit_begin', { paused: this.simulationPaused, dirtyChunkCount: this.countDirtyChunks() });
+    // 1. Freeze/quiesce BEFORE capturing metadata or saving.
+    this.quiesceForSave();
+    // 2. Capture metadata from the frozen state.
+    const metadata = this.snapshotMetadata();
+    // 3. Save dirty chunks at forced priority; the barrier covers every write
+    //    accepted before it (forced + any earlier background/unload writes).
+    await measureSaveAsync('save.engine.forced_save_chunks', { dirtyChunkCount: this.countDirtyChunks() }, async () => {
+      await this.persistence.forcedSave(this.chunkManager);
+    });
+    // 4. Save the final metadata (forced priority is allowed while closing).
+    await measureSaveAsync('save.engine.write_final_metadata', undefined, async () => {
+      await this.persistence.saveMetadata(metadata, WRITE_PRIORITY_FORCED);
+    });
+    // 5. Await the barrier so the metadata write is durably settled.
+    await this.persistence.flushBarrier();
+    recordSaveEvent('save.engine.save_and_quit_persisted', { dirtyChunkCount: this.countDirtyChunks() });
+    // 6. Close the world service (the application-owned backend stays open).
+    await this.persistence.close();
+    // 7. Dispose the engine.
+    this.stop();
+    recordSaveEvent('save.engine.save_and_quit_complete', { running: this.running });
   }
 
-  public async commitForcedSaveRegions(): Promise<void> {
-    await measureSaveAsync('save.engine.commit_forced_save_regions', {
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    }, async () => this.saveCoordinator.commitRegions());
-  }
-
-  public async writeForcedSaveMetadata(): Promise<void> {
-    await measureSaveAsync('save.engine.write_forced_save_metadata', {
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    }, async () => this.saveCoordinator.writeMetadata());
-  }
-
-  public async performForcedSave(): Promise<void> {
-    recordSaveEvent('save.engine.begin_forced_save', {
-      paused: this.simulationPaused,
-      dirtyChunkCount: this.countDirtyChunks(),
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    });
-    await measureSaveAsync('save.engine.force_save', {
-      paused: this.simulationPaused,
-      dirtyChunkCount: this.countDirtyChunks(),
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    }, async () => {
-      await this.saveMetadata(true);
-    });
-    recordSaveEvent('save.engine.forced_save_complete', {
-      paused: this.simulationPaused,
-      dirtyChunkCount: this.countDirtyChunks(),
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    });
-  }
-
-  public stopAfterSuccessfulSave(): void {
-    recordSaveEvent('save.engine.shutdown_begin', {
-      paused: this.simulationPaused,
-      running: this.running,
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    });
-    measureSaveSync('save.engine.world_shutdown', {
-      paused: this.simulationPaused,
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    }, () => {
-      this.stop();
-    });
-    recordSaveEvent('save.engine.shutdown_complete', {
-      paused: this.simulationPaused,
-      running: this.running,
-    });
-  }
-
-  /** Compatibility path for non-application callers; Save and Exit uses the split methods. */
-  public async saveAndStop(): Promise<void> {
-    await this.performForcedSave();
-    this.stopAfterSuccessfulSave();
+  /**
+   * Halt the world session after a fail-loud corruption error: stop accepting
+   * new reads/writes and settle already-accepted operations by closing the
+   * service — WITHOUT saving the corrupt state — then dispose the engine. The
+   * application-owned shared backend stays open.
+   */
+  public async abortForCorruption(): Promise<void> {
+    try {
+      await this.persistence.close();
+    } catch (error) {
+      console.warn('[Engine] error closing service after corruption:', error);
+    }
+    this.stop();
   }
 
   public stop(): void {
@@ -1043,11 +1020,10 @@ export class Engine {
     });
 
     measureSaveSync('save.engine.dispose_world_systems', {
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+      persistenceStats: this.persistence.getStats(),
       dirtyChunkCount: this.countDirtyChunks(),
     }, () => {
       this.chunkStreamer.dispose();
-      this.chunkPersistenceQueue.dispose();
       this.fallingBlockManager.dispose();
       this.lightningRenderer.dispose();
       this.rainSplashRenderer.dispose();
@@ -1069,7 +1045,7 @@ export class Engine {
     });
 
     measureSaveSync('save.engine.dispose_renderer', {
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+      persistenceStats: this.persistence.getStats(),
     }, () => {
       this.renderer.dispose();
       this.renderer.domElement.remove();
@@ -1346,70 +1322,43 @@ export class Engine {
     return dirtyChunks;
   }
 
+  private currentMetadata(): WorldMetadata {
+    const metadata = this.persistence.getMetadata();
+    if (metadata === null) throw new Error('No world metadata loaded');
+    return metadata;
+  }
+
   private snapshotMetadata(): WorldMetadata {
     const weather = this.weatherController.getState(); const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);
-    return { ...this.saveCoordinator.getMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize() };
+    return { ...this.currentMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize() };
   }
 
-  private async saveMetadata(force: boolean): Promise<void> {
-    if (this.metadataSaveInFlight !== null) {
-      if (!force || this.metadataSaveInFlightForce) {
-        recordSaveEvent('save.engine.coalesced_metadata_save', {
-          requestedForce: force,
-          activeForce: this.metadataSaveInFlightForce,
-        });
-        return this.metadataSaveInFlight;
-      }
-      recordSaveEvent('save.engine.forced_save_waiting_for_autosave', {
-        requestedForce: true,
-        activeForce: false,
-      });
-      await this.metadataSaveInFlight;
-      return this.saveMetadata(true);
-    }
-    this.metadataSaveInFlightForce = force;
-    const snapshot = measureSaveSync('save.engine.snapshot_metadata', {
-      force,
-      paused: this.simulationPaused,
-      dirtyChunkCount: this.countDirtyChunks(),
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-    }, () => this.snapshotMetadata());
-    this.saveCoordinator.update(snapshot);
-    recordSaveEvent('save.engine.metadata_updated', {
-      force,
-      dirtyChunkCount: this.countDirtyChunks(),
-      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+  /**
+   * Persist a metadata snapshot on the serialized write lane. Autosave / death /
+   * debug callers fire-and-forget; the Save-and-Quit bridge calls the service
+   * directly so it can await + barrier. Background metadata failures are logged.
+   */
+  private saveMetadata(force: boolean): Promise<void> {
+    const priority = force ? WRITE_PRIORITY_FORCED : WRITE_PRIORITY_BACKGROUND;
+    const snapshot = this.snapshotMetadata();
+    return this.persistence.saveMetadata(snapshot, priority).catch((error) => {
+      console.warn('[Engine] metadata save failed:', error);
     });
-    this.metadataSaveInFlight = (async () => {
-      if (this.chunkSavePumpInFlight !== null) {
-        await measureSaveAsync('save.engine.wait_chunk_save_pump', {
-          force,
-          paused: this.simulationPaused,
-          chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-        }, async () => {
-          await this.chunkSavePumpInFlight;
-        });
-      }
-      await measureSaveAsync('save.engine.coordinator_save', {
-        force,
-        paused: this.simulationPaused,
-        dirtyChunkCount: this.countDirtyChunks(),
-        chunkQueueStats: this.chunkPersistenceQueue.getStats(),
-      }, async () => {
-        await this.saveCoordinator.save(force);
-      });
-    })().finally(() => {
-      this.metadataSaveInFlight = null;
-      this.metadataSaveInFlightForce = false;
-      recordSaveEvent('save.engine.metadata_save_settled', { force });
-    });
-    return this.metadataSaveInFlight;
   }
 
-  private async pumpChunkSaves(): Promise<number> {
-    if (this.chunkSavePumpInFlight !== null) return this.chunkSavePumpInFlight;
-    this.chunkSavePumpInFlight = this.chunkPersistenceQueue.saveSomeDirty(this.chunkManager, CHUNK_SAVE_PUMP_MAX_CHUNKS).finally(() => { this.chunkSavePumpInFlight = null; });
-    return this.chunkSavePumpInFlight;
+  /**
+   * Bounded background autosave, triggered externally by the tick loop (the
+   * service has no timers). Skips pumping while the world is closing/closed or
+   * when the write lane already has pending work, so background writes do not
+   * pile up unboundedly.
+   */
+  private pumpChunkSaves(): void {
+    const stats = this.persistence.getStats();
+    if (stats.closing || stats.closed) return;
+    if (stats.write.pending >= CHUNK_SAVE_PUMP_MAX_CHUNKS) return;
+    void this.persistence.saveSomeDirty(this.chunkManager, CHUNK_SAVE_PUMP_MAX_CHUNKS).catch((error) => {
+      console.warn('[Engine] autosave pump failed:', error);
+    });
   }
 
   private updateHeldItemMesh(): void {

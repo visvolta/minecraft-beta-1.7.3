@@ -5,7 +5,8 @@ import type { WorldGenerator } from './WorldGenerator';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from './chunkConstants';
 import type { LightEngine } from './generation/lighting/LightEngine';
 import { ChunkGenerationQueue, type ChunkGenerationStats } from './streaming/ChunkGenerationQueue';
-import type { ChunkPersistenceQueue } from '../persistence/queue/ChunkPersistenceQueue';
+import type { WorldPersistenceService } from '../persistence2/WorldPersistenceService';
+import { RecordCorruptionError } from '../persistence2/codec/PersistenceError';
 
 /** Chebyshev radius (square) for loading chunks around the camera. */
 export const CHUNK_LOAD_RADIUS = 6;
@@ -35,7 +36,7 @@ export class ChunkStreamer {
   private readonly chunkRenderer: ChunkRenderer;
   private readonly lightEngine: LightEngine;
   private readonly generationQueue: ChunkGenerationQueue;
-  private readonly persistenceQueue: ChunkPersistenceQueue;
+  private readonly persistence: WorldPersistenceService;
   private readonly desiredChunks = new Set<string>();
   private readonly loadingChunks = new Set<string>();
 
@@ -45,6 +46,8 @@ export class ChunkStreamer {
   private lastPriorityHeadingZ = Number.NaN;
   private started = false;
   private disposed = false;
+  /** Set when a corrupt record halts the world; stops further chunk dispatch. */
+  private halted = false;
 
   public constructor(
     chunkManager: ChunkManager,
@@ -52,14 +55,15 @@ export class ChunkStreamer {
     chunkRenderer: ChunkRenderer,
     lightEngine: LightEngine,
     worldSeed: bigint,
-    persistenceQueue: ChunkPersistenceQueue,
+    persistence: WorldPersistenceService,
     private readonly trustPersistedLighting = false,
-    private readonly onChunkLoaded?: (chunk: Chunk) => void
+    private readonly onChunkLoaded?: (chunk: Chunk) => void,
+    private readonly onPersistenceError?: (error: RecordCorruptionError) => void,
   ) {
     this.chunkManager = chunkManager;
     this.chunkRenderer = chunkRenderer;
     this.lightEngine = lightEngine;
-    this.persistenceQueue = persistenceQueue;
+    this.persistence = persistence;
     this.generationQueue = new ChunkGenerationQueue(chunkManager, generator, worldSeed);
   }
 
@@ -83,7 +87,7 @@ export class ChunkStreamer {
     downstreamMeshQueue: number,
     downstreamUploadQueue: number,
   ): void {
-    if (this.disposed) return;
+    if (this.disposed || this.halted) return;
     const chunkX = Math.floor(cameraWorldX / CHUNK_SIZE_X);
     const chunkZ = Math.floor(cameraWorldZ / CHUNK_SIZE_Z);
 
@@ -183,26 +187,33 @@ export class ChunkStreamer {
       if (dist > CHUNK_UNLOAD_RADIUS) {
         toUnload.push({ x: chunk.chunkX, z: chunk.chunkZ });
       } else {
-        this.persistenceQueue.cancelUnload(chunk);
+        this.persistence.cancelUnload(chunk);
       }
     }
 
     for (const { x, z } of toUnload) {
       const chunk = this.chunkManager.getChunk(x, z);
       if (chunk) {
+        // Stop normal mutation first: snapshot scheduled ticks before unloading.
         chunk.requireScheduledTickUnloadSnapshot();
         if (!chunk.isPersistenceDirty()) {
           this.chunkRenderer.removeChunkMesh(x, z);
           this.chunkManager.removeChunk(x, z);
           this.markNeighboursDirty(x, z);
         } else {
-          this.persistenceQueue.requestUnload(chunk).then(() => {
+          // State-transition unload: save the final revision once and remove the
+          // chunk only after the write succeeds (no save-until-clean loop).
+          this.persistence.requestUnload(chunk).then(() => {
             if (this.disposed) return;
             if (!this.desiredChunks.has(this.key(x, z))) {
               this.chunkRenderer.removeChunkMesh(x, z);
               this.chunkManager.removeChunk(x, z);
               this.markNeighboursDirty(x, z);
             }
+          }).catch((error) => {
+            // Unload save failed: keep the chunk loaded; it is retried on the next
+            // streaming update. (Failures are still surfaced by a forced-save barrier.)
+            console.warn(`[ChunkStreamer] unload save failed for ${this.key(x, z)}:`, error);
           });
         }
       }
@@ -210,23 +221,18 @@ export class ChunkStreamer {
   }
 
   private dispatchLoad(x: number, z: number, priority: number, critical: boolean): void {
-    if (this.disposed) return;
+    if (this.disposed || this.halted) return;
     const k = this.key(x, z);
     this.loadingChunks.add(k);
 
-    this.persistenceQueue.enqueueRead(x, z).then(chunk => {
+    this.persistence.loadChunk(x, z).then(chunk => {
       if (this.disposed) return;
       if (!this.desiredChunks.has(k)) {
         this.loadingChunks.delete(k);
         return;
       }
 
-      if (chunk === 'corrupt') {
-        // Leave it as missing but block generation to prevent overwrite
-        const dummy = this.chunkManager.getOrCreateChunk(x, z);
-        dummy.markCorrupt();
-        this.loadingChunks.delete(k);
-      } else if (chunk === undefined) {
+      if (chunk === undefined) {
         // Miss, fallback to generation
         this.generationQueue.enqueue(x, z, priority, critical);
         this.loadingChunks.delete(k);
@@ -250,6 +256,18 @@ export class ChunkStreamer {
         this.markNeighboursDirty(managed.chunkX, managed.chunkZ);
         this.loadingChunks.delete(k);
         this.onChunkLoaded?.(managed);
+      }
+    }).catch((error) => {
+      this.loadingChunks.delete(k);
+      if (error instanceof RecordCorruptionError) {
+        // Fail loud: a present-but-invalid record halts the world. Never treat it
+        // as missing, never regenerate over it, never fall back to legacy.
+        this.halted = true;
+        this.onPersistenceError?.(error);
+      } else {
+        // Non-corruption read failure: leave the chunk unloaded; retried on the
+        // next streaming update.
+        console.warn(`[ChunkStreamer] chunk read failed for ${k}:`, error);
       }
     });
   }

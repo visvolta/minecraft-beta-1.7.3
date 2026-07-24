@@ -18,6 +18,11 @@
     "validate:saves": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateSaves.js",
     "validate:regions": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateRegions.js",
     "validate:persistence-integration": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePersistenceIntegration.js",
+    "validate:persistence2-core": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePersistence2Core.js",
+    "validate:persistence2-executors": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePersistence2Executors.js",
+    "validate:persistence2-service": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePersistence2Service.js",
+    "validate:persistence2": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePersistence2Core.js && node .validation/scripts/validatePersistence2Executors.js && node .validation/scripts/validatePersistence2Service.js",
+    "validate:persistence2-hang-probe": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/persistence2HangProbe.js",
     "validate:player-spawn": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePlayerSpawn.js",
     "validate:player-rendering": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validatePlayerRendering.js",
     "validate:inventory": "tsc -p tsconfig.validation.json && node scripts/fixValidationImports.mjs && node .validation/scripts/validateInventory.js",
@@ -55,6 +60,7 @@
   "devDependencies": {
     "@types/node": "^26.1.1",
     "@types/three": "^0.185.1",
+    "fake-indexeddb": "6.2.5",
     "sass": "^1.101.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"
