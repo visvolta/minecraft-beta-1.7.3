@@ -3,6 +3,10 @@ export const CHUNK_SIZE_X = 16;
 export const CHUNK_SIZE_Y = 128;
 export const CHUNK_SIZE_Z = 16;
 
+/** Vertical section height for chunk-local sectionized iteration. */
+export const CHUNK_SECTION_HEIGHT = 16;
+/** Number of 16×16×16 sections in a 16×128×16 chunk. */
+export const CHUNK_SECTION_COUNT = CHUNK_SIZE_Y / CHUNK_SECTION_HEIGHT;
 /** Total blocks per chunk: 16 × 128 × 16. */
 export const CHUNK_VOLUME = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
 

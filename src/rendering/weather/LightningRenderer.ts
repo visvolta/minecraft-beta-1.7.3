@@ -41,21 +41,28 @@ export class LightningRenderer {
   }
 
   public update(state: LightningState): void {
+    const bolts = state.getBolts();
+    if (bolts.length === 0) {
+      this.mesh.visible = false;
+      this.lastFlashStrength = state.getFlashStrength();
+      this.lastActiveCount = 0;
+      return;
+    }
+
     const positions: number[] = [];
     const colors: number[] = [];
     const indices: number[] = [];
 
-    for (const bolt of state.getBolts()) {
+    for (const bolt of bolts) {
       this.emitBolt(bolt.x, bolt.y, bolt.z, bolt.seed, positions, colors, indices);
     }
 
-    this.mesh.geometry.dispose();
-    const geometry = new THREE.BufferGeometry();
+    const geometry = this.mesh.geometry;
+    geometry.dispose();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
     geometry.setIndex(indices);
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
-    this.mesh.geometry = geometry;
     this.mesh.visible = positions.length > 0;
 
     this.lastFlashStrength = state.getFlashStrength();

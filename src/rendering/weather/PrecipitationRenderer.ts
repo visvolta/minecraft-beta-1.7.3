@@ -162,6 +162,7 @@ export class PrecipitationRenderer {
   private lastUpdateMs = 0;
   private lastVertexCount = 0;
   private lastIndexCount = 0;
+  private lastAppliedAlphaStrength = Number.NaN;
 
   public constructor(
     scene: THREE.Scene,
@@ -624,11 +625,14 @@ export class PrecipitationRenderer {
   }
 
   private updateVertexAlphaFromStrength(atmos: AtmosphericState): void {
+    const clamped = atmos.rainStrength < 0 ? 0 : atmos.rainStrength > 1 ? 1 : atmos.rainStrength;
+    if (Math.abs(clamped - this.lastAppliedAlphaStrength) < 1e-4) return;
     // Per-frame: multiply baseline vertex-alpha by rain strength.
     // Vertex baseline is stored on `.userData.baselineAlpha` per mesh
     // so the multiplication is idempotent (we don't compound).
-    scaleAlphaFromBaseline(this.rainMesh, atmos.rainStrength);
-    scaleAlphaFromBaseline(this.snowMesh, atmos.rainStrength);
+    const updatedRain = scaleAlphaFromBaseline(this.rainMesh, clamped);
+    const updatedSnow = scaleAlphaFromBaseline(this.snowMesh, clamped);
+    if (updatedRain || updatedSnow) this.lastAppliedAlphaStrength = clamped;
   }
 }
 
@@ -723,11 +727,11 @@ function swapGeometry(mesh: THREE.Mesh, buffers: BuildBuffers): void {
   (mesh.material as THREE.Material).needsUpdate = true;
 }
 
-function scaleAlphaFromBaseline(mesh: THREE.Mesh, strength: number): void {
+function scaleAlphaFromBaseline(mesh: THREE.Mesh, strength: number): boolean {
   const baseline = mesh.userData.baselineAlpha as Float32Array | undefined;
-  if (baseline === undefined) return;
+  if (baseline === undefined) return false;
   const attr = mesh.geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
-  if (attr === undefined) return;
+  if (attr === undefined) return false;
   const arr = attr.array as Float32Array;
   const n = baseline.length;
   const clamped = strength < 0 ? 0 : strength > 1 ? 1 : strength;
@@ -735,4 +739,5 @@ function scaleAlphaFromBaseline(mesh: THREE.Mesh, strength: number): void {
     arr[i * 4 + 3] = baseline[i]! * clamped;
   }
   attr.needsUpdate = true;
+  return true;
 }

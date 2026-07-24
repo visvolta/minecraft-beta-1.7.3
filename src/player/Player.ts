@@ -31,12 +31,12 @@ export const PLAYER_EYE_HEIGHT = FIRST_PERSON_CAMERA_OFFSET_Y;
  * Position is the feet centre (bottom-centre of the hitbox), matching
  * Beta's own convention and keeping ground/eye-height math simple.
  */
-export interface PlayerDamageEvent { readonly source: DamageSource; readonly amount: number; readonly lethal: boolean; }
+export interface PlayerDamageEvent { readonly source: DamageSource; readonly amount: number; readonly lethal: boolean; readonly fullHit: boolean; }
 
 export class Player extends Entity {
   public readonly typeId = 0;
   public readonly typeStringId = 'Player';
-  public gameMode: GameMode = GameMode.Creative;
+  public gameMode: GameMode = GameMode.Survival;
   public isFlying = false;
   public maxHealth = 20;
   public health = 20;
@@ -162,7 +162,7 @@ export class Player extends Entity {
 
     this.lastDamageSource=source;this.lastAttacker=source.attacker;this.recentHealth=this.health;this.healthFlashTicks=20;
     if(fullHit&&source.appliesKnockback&&source.attacker){const dx=this.position.x-source.attacker.position.x,dz=this.position.z-source.attacker.position.z,length=Math.hypot(dx,dz);if(length>1e-6){this.velocity.x+=dx/length*8;this.velocity.z+=dz/length*8;}this.velocity.y=Math.max(this.velocity.y,8);this.attackedAtYaw=Math.atan2(dz,dx)-this.bodyYaw;}
-    this.setHealth(this.health-healthDamage);this.addExhaustion(.3);if(this.health===0)this.deathSequence++;this.damageListener?.({ source, amount: healthDamage, lethal: this.health === 0 });return true;
+    this.setHealth(this.health-healthDamage);this.addExhaustion(.3);if(this.health===0)this.deathSequence++;this.damageListener?.({ source, amount: healthDamage, lethal: this.health === 0, fullHit });return true;
   }
   public attackFromMob(amount:number,attacker:DamageAttacker):boolean{return this.attackEntityFrom(DamageSource.mob(attacker),amount);}
 

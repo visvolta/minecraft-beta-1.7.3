@@ -53,6 +53,7 @@ export class ChunkStreamer {
     lightEngine: LightEngine,
     worldSeed: bigint,
     persistenceQueue: ChunkPersistenceQueue,
+    private readonly trustPersistedLighting = false,
     private readonly onChunkLoaded?: (chunk: Chunk) => void
   ) {
     this.chunkManager = chunkManager;
@@ -235,13 +236,16 @@ export class ChunkStreamer {
         managed.loadGeneratedBlocks(chunk.copyBlocks());
         managed.loadGeneratedMetadata(chunk.copyMetadata());
         managed.loadLightData(chunk.copyLight());
+        managed.setPersistedLightingDataLoaded(chunk.loadedPersistedLightingData());
         const heightmap = chunk.copyHeightmap();
         if (heightmap) managed.loadHeightmap(heightmap);
         managed.setTerrainPopulated(chunk.isTerrainPopulated());
         managed.getScheduledTicks().load(chunk.getScheduledTicks().drainAll());
         managed.markPersistenceClean(chunk.getPersistenceRevision());
 
-        this.lightEngine.initializeChunkLighting(managed);
+        if (!(this.trustPersistedLighting && chunk.loadedPersistedLightingData())) {
+          this.lightEngine.initializeChunkLighting(managed);
+        }
         this.lightEngine.reconcileChunkBorders(managed);
         this.markNeighboursDirty(managed.chunkX, managed.chunkZ);
         this.loadingChunks.delete(k);

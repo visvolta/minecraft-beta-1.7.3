@@ -70,6 +70,8 @@ export class WorldTickScheduler {
   private skippedStaleThisTick = 0;
   private processedNeighboursThisTick = 0;
   private randomMetrics: RandomTickMetrics;
+  private metricsDirty = true;
+  private lastDispatcherTimeMs = 0;
 
   public constructor(
     private readonly chunkManager: ChunkManager,
@@ -84,6 +86,7 @@ export class WorldTickScheduler {
   }
 
   public schedule(worldX: number, worldY: number, worldZ: number, blockId: BlockId, delayTicks: number): boolean {
+    this.metricsDirty = true;
     if (worldY < 0 || worldY >= CHUNK_SIZE_Y) return false;
     const coords = worldToChunkLocal(worldX, worldZ);
     const chunk = this.chunkManager.getChunk(coords.chunkX, coords.chunkZ);
@@ -106,6 +109,7 @@ export class WorldTickScheduler {
 
   /** First half of one Engine-owned fixed simulation tick. */
   public beginTick(gameTick: number): void {
+    this.metricsDirty = true;
     this.gameTick = Math.max(this.gameTick + 1, Math.trunc(gameTick));
     this.tickStartTime = performance.now();
     this.processedScheduledThisTick = 0;
@@ -140,35 +144,8 @@ export class WorldTickScheduler {
   /** Final flush after Engine runs its existing Player/entity fixed-step branch. */
   public endTick(): void {
     this.processedNeighboursThisTick += this.flushNeighbourUpdates();
-    const neighbourMetrics = this.updateWorld.getNeighbourQueueMetrics();
-    this.metrics = {
-      gameTick: this.gameTick,
-      pendingScheduledTicks: this.countPendingScheduledTicks(),
-      overdueScheduledTicks: this.countOverdueScheduledTicks(),
-      processedScheduledTicks: this.processedScheduledThisTick,
-      skippedStaleTicks: this.skippedStaleThisTick,
-      duplicateSuppressedTicks: this.countDuplicateSuppressions(),
-      rejectedUnloadedSchedules: this.rejectedUnloadedSchedules,
-      unloadedDiscardedTicks: this.unloadedDiscardedTicks,
-      pendingNeighbourUpdates: this.updateWorld.getPendingNeighbourUpdateCount(),
-      processedNeighbourUpdates: this.processedNeighboursThisTick,
-      duplicateNeighbourUpdates: neighbourMetrics.duplicateSuppressed,
-      discardedUnloadedNeighbourUpdates: neighbourMetrics.unloadedDiscarded,
-      runawayLimitActivations: neighbourMetrics.runawayActivations,
-      runawayDiscardedUpdates: neighbourMetrics.runawayDiscarded,
-      maximumUpdateDepth: neighbourMetrics.maximumDepth,
-      lastAbortedGenerationId: neighbourMetrics.lastAbortedGenerationId,
-      lastAbortReason: neighbourMetrics.lastAbortReason,
-      boundaryReconciliationNotifications: this.boundaryReconciliationNotifications,
-      randomTicksProcessed: this.randomMetrics.dispatched,
-      oldestPendingScheduledTickAge: this.oldestPendingAge(),
-      detachedChunkTickQueues: 0,
-      detachedPendingTicks: 0,
-      restoredDetachedTicks: 0,
-      discardedDetachedTicks: this.unloadedDiscardedTicks,
-      dispatcherTimeMs: performance.now() - this.tickStartTime,
-      randomTickMetrics: this.randomMetrics,
-    };
+    this.lastDispatcherTimeMs = performance.now() - this.tickStartTime;
+    this.metricsDirty = true;
   }
 
   /** Compatibility helper for validators; production is driven by Engine.beginTick/endTick. */
@@ -186,6 +163,10 @@ export class WorldTickScheduler {
   }
 
   public getMetrics(): TickSchedulerMetrics {
+    if (this.metricsDirty) {
+      this.metrics = this.buildMetrics();
+      this.metricsDirty = false;
+    }
     return this.metrics;
   }
 
@@ -195,6 +176,7 @@ export class WorldTickScheduler {
 
   /** Rebase persisted relative ordering into this session and index the loaded queue head. */
   public indexLoadedChunkTicks(chunk: Chunk): void {
+    this.metricsDirty = true;
     const entries = chunk.getScheduledTicks().drainAll();
     entries.sort((a, b) => a.dueTick - b.dueTick || a.sequence - b.sequence);
     for (const entry of entries) {
@@ -212,6 +194,7 @@ export class WorldTickScheduler {
 
   /** Targeted, capability-filtered reconciliation for newly loaded horizontal boundaries. */
   public reconcileChunkBoundaries(chunk: Chunk): number {
+    this.metricsDirty = true;
     const generationId = this.updateWorld.createUpdateGeneration();
     let enqueued = 0;
     const baseX = chunk.chunkX * CHUNK_SIZE_X;
@@ -301,6 +284,7 @@ export class WorldTickScheduler {
   }
 
   private discardUnloadedChunkTicks(chunk: Chunk): void {
+    this.metricsDirty = true;
     this.historicalDuplicateSuppressions += chunk.getScheduledTicks().getDuplicateSuppressions();
     this.unloadedDiscardedTicks += chunk.getScheduledTicks().drainAll().length;
   }
@@ -346,6 +330,38 @@ export class WorldTickScheduler {
       () => this.randomTicks.nextLong(),
       this.events,
     );
+  }
+
+  private buildMetrics(): TickSchedulerMetrics {
+    const neighbourMetrics = this.updateWorld.getNeighbourQueueMetrics();
+    return {
+      gameTick: this.gameTick,
+      pendingScheduledTicks: this.countPendingScheduledTicks(),
+      overdueScheduledTicks: this.countOverdueScheduledTicks(),
+      processedScheduledTicks: this.processedScheduledThisTick,
+      skippedStaleTicks: this.skippedStaleThisTick,
+      duplicateSuppressedTicks: this.countDuplicateSuppressions(),
+      rejectedUnloadedSchedules: this.rejectedUnloadedSchedules,
+      unloadedDiscardedTicks: this.unloadedDiscardedTicks,
+      pendingNeighbourUpdates: this.updateWorld.getPendingNeighbourUpdateCount(),
+      processedNeighbourUpdates: this.processedNeighboursThisTick,
+      duplicateNeighbourUpdates: neighbourMetrics.duplicateSuppressed,
+      discardedUnloadedNeighbourUpdates: neighbourMetrics.unloadedDiscarded,
+      runawayLimitActivations: neighbourMetrics.runawayActivations,
+      runawayDiscardedUpdates: neighbourMetrics.runawayDiscarded,
+      maximumUpdateDepth: neighbourMetrics.maximumDepth,
+      lastAbortedGenerationId: neighbourMetrics.lastAbortedGenerationId,
+      lastAbortReason: neighbourMetrics.lastAbortReason,
+      boundaryReconciliationNotifications: this.boundaryReconciliationNotifications,
+      randomTicksProcessed: this.randomMetrics.dispatched,
+      oldestPendingScheduledTickAge: this.oldestPendingAge(),
+      detachedChunkTickQueues: 0,
+      detachedPendingTicks: 0,
+      restoredDetachedTicks: 0,
+      discardedDetachedTicks: this.unloadedDiscardedTicks,
+      dispatcherTimeMs: this.lastDispatcherTimeMs,
+      randomTickMetrics: this.randomMetrics,
+    };
   }
 
   private countPendingScheduledTicks(): number {

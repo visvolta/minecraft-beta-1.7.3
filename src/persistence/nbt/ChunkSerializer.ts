@@ -106,10 +106,12 @@ export class ChunkSerializer {
     const betaData = dataTag?.type === 'byteArray' ? dataTag.value : new Uint8Array(16384);
 
     const skyLightTag = level.get('SkyLight');
-    const betaSkyLight = skyLightTag?.type === 'byteArray' ? skyLightTag.value : new Uint8Array(16384);
+    const hasSkyLight = skyLightTag?.type === 'byteArray' && skyLightTag.value.length === 16384;
+    const betaSkyLight = hasSkyLight ? skyLightTag.value : new Uint8Array(16384);
 
     const blockLightTag = level.get('BlockLight');
-    const betaBlockLight = blockLightTag?.type === 'byteArray' ? blockLightTag.value : new Uint8Array(16384);
+    const hasBlockLight = blockLightTag?.type === 'byteArray' && blockLightTag.value.length === 16384;
+    const betaBlockLight = hasBlockLight ? blockLightTag.value : new Uint8Array(16384);
 
     const heightMapTag = level.get('HeightMap');
     const betaHeightMap = heightMapTag?.type === 'byteArray' ? heightMapTag.value : new Uint8Array(256);
@@ -142,6 +144,7 @@ export class ChunkSerializer {
     chunk.loadLightData(tsLight);
     chunk.loadHeightmap(tsHeight);
     chunk.setTerrainPopulated(true);
+    chunk.setPersistedLightingDataLoaded(hasSkyLight && hasBlockLight);
 
     const tileTicksTag = level.get('TileTicks');
     const lastUpdateTag = level.get('LastUpdate');

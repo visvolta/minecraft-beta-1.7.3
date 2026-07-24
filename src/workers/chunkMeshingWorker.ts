@@ -5,6 +5,7 @@ import { ChunkManager } from '../world/ChunkManager';
 import { ChunkMesher } from '../rendering/ChunkMesher';
 import type { AtlasUvRect } from '../assets/TextureAtlas';
 import { VegetationColorProvider } from '../world/generation/climate/VegetationColors';
+import { ChunkPassMask, computeChunkPassMask, hasChunkPass } from '../rendering/meshing/ChunkPassMask';
 import type {
   ChunkMeshJob,
   ChunkMeshResult,
@@ -28,17 +29,25 @@ class WorkerAtlas {
   }
 }
 
+const atlas = new WorkerAtlas();
+
+function ownArrayBuffer(view: ArrayBufferView): ArrayBuffer {
+  if (view.byteOffset === 0 && view.byteLength === view.buffer.byteLength) {
+    return view.buffer as ArrayBuffer;
+  }
+  return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+}
+
 function attributeBuffer(geometry: THREE.BufferGeometry, name: string): ArrayBuffer {
   const attribute = geometry.getAttribute(name);
   if (attribute === undefined) {
     return new Float32Array().buffer;
   }
-  return attribute.array.slice().buffer as ArrayBuffer;
+  return ownArrayBuffer(attribute.array as ArrayBufferView);
 }
 
 function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
   const index = geometry.getIndex();
-  const indices = index === null ? new Uint32Array() : new Uint32Array(index.array as ArrayLike<number>);
   const position = geometry.getAttribute('position');
   return {
     positions: attributeBuffer(geometry, 'position'),
@@ -54,9 +63,30 @@ function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
     faceBrightness: attributeBuffer(geometry, 'faceBrightness'),
     fluidTextureKinds: attributeBuffer(geometry, 'fluidTextureKind'),
     fluidFrameUvs: attributeBuffer(geometry, 'fluidFrameUv'),
-    indices: indices.buffer as ArrayBuffer,
+    indices: index === null ? new Uint32Array().buffer : new Uint32Array(index.array as ArrayLike<number>).buffer,
     vertexCount: position?.count ?? 0,
     indexCount: index?.count ?? 0,
+  };
+}
+
+function createEmptyMeshAttributeBuffers(): MeshAttributeBuffers {
+  return {
+    positions: new Float32Array().buffer,
+    normals: new Float32Array().buffer,
+    uvs: new Float32Array().buffer,
+    normalColors: new Float32Array().buffer,
+    debugColors: new Float32Array().buffer,
+    aoColors: new Float32Array().buffer,
+    tintColors: new Float32Array().buffer,
+    skyLightLevels: new Float32Array().buffer,
+    blockLightLevels: new Float32Array().buffer,
+    aoFactorScalars: new Float32Array().buffer,
+    faceBrightness: new Float32Array().buffer,
+    fluidTextureKinds: new Float32Array().buffer,
+    fluidFrameUvs: new Float32Array().buffer,
+    indices: new Uint32Array().buffer,
+    vertexCount: 0,
+    indexCount: 0,
   };
 }
 
@@ -108,15 +138,16 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
       throw new Error(`Missing target chunk ${job.targetChunkX},${job.targetChunkZ}`);
     }
 
-    const atlas = new WorkerAtlas();
     atlas.set(job.atlasUvs);
-    const mesher = new ChunkMesher(manager, registry, atlas as never, new VegetationColorProvider(BigInt(job.worldSeed)));
-    const terrainGeometry = mesher.build(target);
-    const waterGeometry = mesher.buildWater(target);
-    const lavaGeometry = mesher.buildLava(target);
-    const cutoutGeometry = mesher.buildCutouts(target);
-    const fireGeometry = mesher.buildFires(target);
-    const translucentGeometry = mesher.buildTranslucent(target);
+    const vegetationColors = new VegetationColorProvider(BigInt(job.worldSeed));
+    const mesher = new ChunkMesher(manager, registry, atlas as never, vegetationColors);
+    const mask = computeChunkPassMask(target.getBlockDataView(), registry);
+    const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? mesher.build(target) : null;
+    const waterGeometry = hasChunkPass(mask, ChunkPassMask.Water) ? mesher.buildWater(target) : null;
+    const lavaGeometry = hasChunkPass(mask, ChunkPassMask.Lava) ? mesher.buildLava(target) : null;
+    const cutoutGeometry = hasChunkPass(mask, ChunkPassMask.Cutout) ? mesher.buildCutouts(target) : null;
+    const fireGeometry = hasChunkPass(mask, ChunkPassMask.Fire) ? mesher.buildFires(target) : null;
+    const translucentGeometry = hasChunkPass(mask, ChunkPassMask.Translucent) ? mesher.buildTranslucent(target) : null;
 
     const result: ChunkMeshResult = {
       type: 'meshResult',
@@ -124,20 +155,20 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
       chunkX: job.targetChunkX,
       chunkZ: job.targetChunkZ,
       targetRevision: job.targetRevision,
-      terrain: extractGeometry(terrainGeometry),
-      water: extractGeometry(waterGeometry),
-      lava: extractGeometry(lavaGeometry),
-      cutout: extractGeometry(cutoutGeometry),
-      fire: extractGeometry(fireGeometry),
-      translucent: extractGeometry(translucentGeometry),
+      terrain: terrainGeometry ? extractGeometry(terrainGeometry) : createEmptyMeshAttributeBuffers(),
+      water: waterGeometry ? extractGeometry(waterGeometry) : createEmptyMeshAttributeBuffers(),
+      lava: lavaGeometry ? extractGeometry(lavaGeometry) : createEmptyMeshAttributeBuffers(),
+      cutout: cutoutGeometry ? extractGeometry(cutoutGeometry) : createEmptyMeshAttributeBuffers(),
+      fire: fireGeometry ? extractGeometry(fireGeometry) : createEmptyMeshAttributeBuffers(),
+      translucent: translucentGeometry ? extractGeometry(translucentGeometry) : createEmptyMeshAttributeBuffers(),
       durationMs: performance.now() - start,
     };
-    terrainGeometry.dispose();
-    waterGeometry.dispose();
-    lavaGeometry.dispose();
-    cutoutGeometry.dispose();
-    fireGeometry.dispose();
-    translucentGeometry.dispose();
+    terrainGeometry?.dispose();
+    waterGeometry?.dispose();
+    lavaGeometry?.dispose();
+    cutoutGeometry?.dispose();
+    fireGeometry?.dispose();
+    translucentGeometry?.dispose();
     workerSelf.postMessage(result, transferList(result));
   } catch (error) {
     workerSelf.postMessage({

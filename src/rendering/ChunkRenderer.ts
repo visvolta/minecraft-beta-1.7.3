@@ -6,6 +6,7 @@ import { ChunkMesher } from './ChunkMesher';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { TextureAtlas } from '../assets/TextureAtlas';
 import { ChunkMeshingQueue, type ChunkMeshQueueStats, type ChunkMeshGeometrySet } from './meshing/ChunkMeshingQueue';
+import { ChunkPassMask, computeChunkPassMask, hasChunkPass } from './meshing/ChunkPassMask';
 import { getLightBrightness, TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
 import type { FluidAnimationSystem } from './fluid/FluidAnimationSystem';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
@@ -17,6 +18,27 @@ export const MESH_REBUILD_BUDGET = 4;
 
 export const FOG_HEIGHT_START = 62;
 export const FOG_HEIGHT_END = 96;
+const RUNTIME_GEOMETRY_VALIDATION_ENABLED = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
+
+function createEmptyGeometry(): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
+  geometry.setAttribute('normalColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('debugColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('aoColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
+  geometry.setAttribute('color', geometry.getAttribute('normalColor'));
+  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(), 1));
+  return geometry;
+}
 
 export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
   const uniforms = {
@@ -283,6 +305,7 @@ function attachFireAnimationShader(material: THREE.MeshBasicMaterial, fireAnimat
 
 export class ChunkRenderer {
   private readonly chunkManager: ChunkManager;
+  private readonly blockRegistry: BlockRegistry;
   private readonly mesher: ChunkMesher;
   private readonly meshQueue: ChunkMeshingQueue;
 
@@ -336,6 +359,7 @@ export class ChunkRenderer {
     worldSeed: bigint,
   ) {
     this.chunkManager = chunkManager;
+    this.blockRegistry = blockRegistry;
     this.mesher = new ChunkMesher(chunkManager, blockRegistry, atlas, new VegetationColorProvider(worldSeed));
     this.meshQueue = new ChunkMeshingQueue(chunkManager, atlas, worldSeed);
     this.atlas = atlas;
@@ -609,6 +633,10 @@ export class ChunkRenderer {
     return this.terrainMaterial;
   }
 
+  public getBlockRegistry(): BlockRegistry {
+    return this.blockRegistry;
+  }
+
   public getVisibleMeshCount(): number {
     return (
       this.terrainMeshes.size +
@@ -622,6 +650,27 @@ export class ChunkRenderer {
 
   public getMeshUploadsThisFrame(): number {
     return this.meshUploadsThisFrame;
+  }
+
+  public getPassMeshCounts(): {
+    terrain: number;
+    cutout: number;
+    water: number;
+    lava: number;
+    translucent: number;
+    fire: number;
+    depth: number;
+    stateBuckets: number;
+  } {
+    const terrain = this.terrainMeshes.size;
+    const cutout = this.cutoutMeshes.size;
+    const water = this.waterMeshes.size;
+    const lava = this.lavaMeshes.size;
+    const translucent = this.translucentMeshes.size;
+    const fire = this.fireMeshes.size;
+    const depth = this.translucentDepthMeshes.size + this.waterDepthMeshes.size + this.lavaDepthMeshes.size;
+    const stateBuckets = [terrain, cutout, depth, translucent, water, lava, fire].filter((count) => count > 0).length;
+    return { terrain, cutout, water, lava, translucent, fire, depth, stateBuckets };
   }
 
   public getMeshingStats(): ChunkMeshQueueStats {
@@ -673,7 +722,7 @@ export class ChunkRenderer {
     }
 
     const key = this.key(result.chunkX, result.chunkZ);
-    if (!this.validateGeometrySet(result)) {
+    if (RUNTIME_GEOMETRY_VALIDATION_ENABLED && !this.validateGeometrySet(result)) {
       result.terrain.dispose();
       result.water.dispose();
       result.lava.dispose();
@@ -758,14 +807,15 @@ export class ChunkRenderer {
 
   private rebuildChunk(chunk: Chunk): void {
     const key = this.key(chunk.chunkX, chunk.chunkZ);
+    const mask = computeChunkPassMask(chunk.getBlockDataView(), this.blockRegistry);
 
-    const terrainGeometry = this.mesher.build(chunk);
+    const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? this.mesher.build(chunk) : createEmptyGeometry();
     this.applyColorModeToGeometry(terrainGeometry);
     this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, terrainGeometry);
 
-    const waterGeometry = this.mesher.buildWater(chunk);
-    const lavaGeometry = this.mesher.buildLava(chunk);
-    const translucentGeometry = this.mesher.buildTranslucent(chunk);
+    const waterGeometry = hasChunkPass(mask, ChunkPassMask.Water) ? this.mesher.buildWater(chunk) : createEmptyGeometry();
+    const lavaGeometry = hasChunkPass(mask, ChunkPassMask.Lava) ? this.mesher.buildLava(chunk) : createEmptyGeometry();
+    const translucentGeometry = hasChunkPass(mask, ChunkPassMask.Translucent) ? this.mesher.buildTranslucent(chunk) : createEmptyGeometry();
 
     // Depth pre-pass — clones, colorWrite false, depthWrite true
     this.upsertMesh(this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, chunk, key, translucentGeometry.clone());
@@ -778,11 +828,11 @@ export class ChunkRenderer {
     this.applyColorModeToGeometry(lavaGeometry);
     this.upsertMesh(this.lavaMeshes, this.lavaGroup, this.lavaMaterial, chunk, key, lavaGeometry);
 
-    const cutoutGeometry = this.mesher.buildCutouts(chunk);
+    const cutoutGeometry = hasChunkPass(mask, ChunkPassMask.Cutout) ? this.mesher.buildCutouts(chunk) : createEmptyGeometry();
     this.applyColorModeToGeometry(cutoutGeometry);
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, cutoutGeometry);
 
-    const fireGeometry = this.mesher.buildFires(chunk);
+    const fireGeometry = hasChunkPass(mask, ChunkPassMask.Fire) ? this.mesher.buildFires(chunk) : createEmptyGeometry();
     this.applyColorModeToGeometry(fireGeometry);
     this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, fireGeometry);
 

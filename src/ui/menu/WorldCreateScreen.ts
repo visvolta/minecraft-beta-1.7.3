@@ -4,7 +4,7 @@ import { applyDirtBackground, guiHeight, guiWidth, GuiButton, Screen, TextBox } 
 export interface WorldCreateResult { readonly name: string; readonly seedText: string; readonly gameMode: GameMode; }
 
 export class WorldCreateScreen extends Screen {
-  private mode = GameMode.Creative;
+  private mode = GameMode.Survival;
   private readonly name = new TextBox('New World');
   private readonly seed = new TextBox('');
   private readonly modeButton: GuiButton;
@@ -16,7 +16,7 @@ export class WorldCreateScreen extends Screen {
     super(); applyDirtBackground(this.root);
     const title=document.createElement('div'); title.textContent='Create New World'; title.style.cssText='position:absolute;left:0;right:0;top:20px;text-align:center;font:18px Minecraft, monospace;color:white';
     this.seed.element.placeholder='Seed for the World Generator';
-    this.modeButton=new GuiButton('Game Mode: Creative',()=>{this.mode=this.mode===GameMode.Creative?GameMode.Survival:GameMode.Creative;this.modeButton.element.textContent=`Game Mode: ${this.mode===GameMode.Creative?'Creative':'Survival'}`;},200,20);
+    this.modeButton=new GuiButton('Game Mode: Survival',()=>{this.mode=this.mode===GameMode.Creative?GameMode.Survival:GameMode.Creative;this.modeButton.element.textContent=`Game Mode: ${this.mode===GameMode.Creative?'Creative':'Survival'}`;},200,20);
     this.createButton=new GuiButton('Create New World',()=>{const trimmed=this.name.value.trim();if(trimmed.length>0)create({name:trimmed,seedText:this.seed.value,gameMode:this.mode});},200,20);
     this.cancel=new GuiButton('Cancel',back,200,20);
     this.root.append(title,this.nameLabel,this.name.element,this.seedLabel,this.seed.element,this.modeButton.element,this.createButton.element,this.cancel.element);

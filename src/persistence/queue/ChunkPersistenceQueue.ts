@@ -254,6 +254,38 @@ export class ChunkPersistenceQueue {
     }
   }
 
+  public async saveSomeDirty(chunks: Iterable<Chunk>, maxChunks: number): Promise<number> {
+    if (this.disposed || maxChunks <= 0) return 0;
+    const snapshots: Array<{ chunk: Chunk; revision: number; regionX: number; regionZ: number }> = [];
+    let saved = 0;
+    for (const chunk of chunks) {
+      if (saved >= maxChunks) break;
+      if (!chunk.isPersistenceDirty() || this.unloads.has(chunkKey(chunk.chunkX, chunk.chunkZ))) continue;
+      const revision = await this.saveChunk(chunk);
+      snapshots.push({
+        chunk,
+        revision,
+        regionX: Math.floor(chunk.chunkX / 32),
+        regionZ: Math.floor(chunk.chunkZ / 32),
+      });
+      saved++;
+    }
+    const touchedRegions = new Set<string>();
+    for (const snapshot of snapshots) {
+      touchedRegions.add(`${snapshot.regionX},${snapshot.regionZ}`);
+    }
+    for (const key of touchedRegions) {
+      const [regionX, regionZ] = key.split(',').map(Number) as [number, number];
+      await this.regionCoordinator.commitRegion(regionX, regionZ);
+    }
+    for (const { chunk, revision } of snapshots) {
+      if (chunk.getPersistenceRevision() === revision) {
+        chunk.markPersistenceClean(revision);
+      }
+    }
+    return saved;
+  }
+
   public async saveAllDirty(chunks: Iterable<Chunk>): Promise<void> {
     if (this.disposed) return;
     const promises: Promise<{ chunk: Chunk, revision: number }>[] = [];
@@ -265,9 +297,11 @@ export class ChunkPersistenceQueue {
     const snapshots = await Promise.all(promises);
     await this.regionCoordinator.commitAll();
 
-    // Now that commit All is done, mark them clean
+    // Now that commit All is done, mark them clean only if no newer changes landed.
     for (const { chunk, revision } of snapshots) {
-      chunk.markPersistenceClean(revision);
+      if (chunk.getPersistenceRevision() === revision) {
+        chunk.markPersistenceClean(revision);
+      }
     }
 
     // Also await any unloads that are currently saving

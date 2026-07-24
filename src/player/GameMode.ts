@@ -4,7 +4,7 @@ export enum GameMode {
 }
 
 export function parseGameMode(value: unknown): GameMode {
-  return value === GameMode.Survival ? GameMode.Survival : GameMode.Creative;
+  return value === GameMode.Creative ? GameMode.Creative : GameMode.Survival;
 }
 
 export function isCreativeMode(mode: GameMode): boolean {

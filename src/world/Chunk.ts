@@ -3,6 +3,8 @@ import { BlockIds } from '../blocks/BlockId';
 import { ScheduledTickQueue } from './ticks/ScheduledTickQueue';
 import {
   AIR_BLOCK_ID,
+  CHUNK_SECTION_COUNT,
+  CHUNK_SECTION_HEIGHT,
   CHUNK_SIZE_X,
   CHUNK_SIZE_Y,
   CHUNK_SIZE_Z,
@@ -47,6 +49,7 @@ export class Chunk {
   private readonly blocks: Uint8Array;
   private readonly metadata: Uint8Array;
   private readonly light: Uint8Array;
+  private readonly sectionNonAirCounts: Uint16Array;
   private dirty: boolean;
   private blockRevision = 0;
   private metadataRevision = 0;
@@ -57,6 +60,7 @@ export class Chunk {
   private lastSavedRevision = 0;
   private terrainPopulated = false;
   private corrupt = false;
+  private hasPersistedLightingData = false;
   private readonly scheduledTicks = new ScheduledTickQueue(() => this.markPersistenceDirty());
 
   /**
@@ -86,6 +90,7 @@ export class Chunk {
     this.blocks = new Uint8Array(CHUNK_VOLUME);
     this.metadata = new Uint8Array(CHUNK_VOLUME);
     this.light = new Uint8Array(CHUNK_VOLUME);
+    this.sectionNonAirCounts = new Uint16Array(CHUNK_SECTION_COUNT);
     // Air is 0; Uint8Array is zero-filled by default.
     this.dirty = true;
   }
@@ -150,6 +155,22 @@ export class Chunk {
 
   public markCorrupt(): void {
     this.corrupt = true;
+  }
+
+  public setPersistedLightingDataLoaded(loaded: boolean): void {
+    this.hasPersistedLightingData = loaded;
+  }
+
+  public loadedPersistedLightingData(): boolean {
+    return this.hasPersistedLightingData;
+  }
+
+  public getSectionCount(): number {
+    return CHUNK_SECTION_COUNT;
+  }
+
+  public isSectionEmpty(sectionIndex: number): boolean {
+    return sectionIndex < 0 || sectionIndex >= CHUNK_SECTION_COUNT ? true : this.sectionNonAirCounts[sectionIndex] === 0;
   }
 
   public getRevision(): number {
@@ -329,11 +350,15 @@ export class Chunk {
     }
 
     const i = this.index(localX, localY, localZ);
-    if (this.blocks[i] === blockId) {
+    const previous = this.blocks[i]!;
+    if (previous === blockId) {
       return;
     }
 
     this.blocks[i] = blockId;
+    const sectionIndex = this.sectionIndex(localY);
+    if (previous === AIR_BLOCK_ID && blockId !== AIR_BLOCK_ID) this.sectionNonAirCounts[sectionIndex]! += 1;
+    else if (previous !== AIR_BLOCK_ID && blockId === AIR_BLOCK_ID) this.sectionNonAirCounts[sectionIndex]! -= 1;
     this.markBlockDataChanged();
   }
 
@@ -358,6 +383,8 @@ export class Chunk {
     }
 
     if (changed) {
+      const sectionBlockCount = CHUNK_SECTION_HEIGHT * CHUNK_SIZE_X * CHUNK_SIZE_Z;
+      this.sectionNonAirCounts.fill(blockId === AIR_BLOCK_ID ? 0 : sectionBlockCount);
       this.markBlockDataChanged();
     }
   }
@@ -390,6 +417,7 @@ export class Chunk {
     }
 
     if (changed) {
+      this.recomputeSectionNonAirCount(this.sectionIndex(localY));
       this.markBlockDataChanged();
     }
   }
@@ -410,7 +438,16 @@ export class Chunk {
     }
 
     this.blocks.set(data);
+    this.recomputeSectionNonAirCounts();
     this.markBlockDataChanged();
+  }
+
+  /**
+   * Read-only access to the live block-id storage. Internal performance hook:
+   * callers must never mutate the returned array.
+   */
+  public getBlockDataView(): Uint8Array {
+    return this.blocks;
   }
 
   public copyBlocks(): Uint8Array {
@@ -553,5 +590,35 @@ export class Chunk {
       localZ * CHUNK_SIZE_X +
       localY * CHUNK_SIZE_X * CHUNK_SIZE_Z
     );
+  }
+
+  private sectionIndex(localY: number): number {
+    return Math.floor(localY / CHUNK_SECTION_HEIGHT);
+  }
+
+  private recomputeSectionNonAirCounts(): void {
+    this.sectionNonAirCounts.fill(0);
+    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
+      const sectionIndex = this.sectionIndex(y);
+      const layerStart = y * CHUNK_SIZE_X * CHUNK_SIZE_Z;
+      const layerEnd = layerStart + CHUNK_SIZE_X * CHUNK_SIZE_Z;
+      for (let index = layerStart; index < layerEnd; index++) {
+        if (this.blocks[index] !== AIR_BLOCK_ID) this.sectionNonAirCounts[sectionIndex]! += 1;
+      }
+    }
+  }
+
+  private recomputeSectionNonAirCount(sectionIndex: number): void {
+    let count = 0;
+    const startY = sectionIndex * CHUNK_SECTION_HEIGHT;
+    const endY = Math.min(CHUNK_SIZE_Y, startY + CHUNK_SECTION_HEIGHT);
+    for (let y = startY; y < endY; y++) {
+      const layerStart = y * CHUNK_SIZE_X * CHUNK_SIZE_Z;
+      const layerEnd = layerStart + CHUNK_SIZE_X * CHUNK_SIZE_Z;
+      for (let index = layerStart; index < layerEnd; index++) {
+        if (this.blocks[index] !== AIR_BLOCK_ID) count += 1;
+      }
+    }
+    this.sectionNonAirCounts[sectionIndex] = count;
   }
 }

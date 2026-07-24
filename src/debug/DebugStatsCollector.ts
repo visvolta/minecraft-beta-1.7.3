@@ -19,6 +19,7 @@ import type { PerformanceProfiler } from './PerformanceProfiler';
 import type { WorldTickScheduler } from '../world/ticks/WorldTickScheduler';
 import type { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import type { WorldEventQueue } from '../world/events/WorldEventQueue';
+import { SectionVisibilityAnalyzer } from '../world/visibility/SectionVisibility';
 
 function formatHexColor(hex: number): string {
   return `#${hex.toString(16).padStart(6, '0').toUpperCase()}`;
@@ -43,6 +44,7 @@ export class DebugStatsCollector {
   private readonly worldTickScheduler: WorldTickScheduler;
   private readonly fallingBlockManager: FallingBlockManager;
   private readonly events: WorldEventQueue | undefined;
+  private readonly visibilityAnalyzer: SectionVisibilityAnalyzer;
   private readonly frameTimeTracker = new FrameTimeTracker();
 
   public constructor(
@@ -82,6 +84,7 @@ export class DebugStatsCollector {
     this.fallingBlockManager = fallingBlockManager;
     this.events = events;
     this.climateSampler = new ClimateSampler(worldSeed);
+    this.visibilityAnalyzer = new SectionVisibilityAnalyzer(chunkManager, chunkRenderer.getBlockRegistry());
   }
 
   public recordFrame(deltaSeconds: number): void {
@@ -128,6 +131,8 @@ export class DebugStatsCollector {
     const cloudInfo = this.cloudRenderer.getDebugInfo();
     const perf = this.performanceProfiler.getSnapshot();
     const tickMetrics = this.worldTickScheduler.getMetrics();
+    const passCounts = this.chunkRenderer.getPassMeshCounts();
+    const compiledProgramCount = ((this.threeRenderer.info as unknown as { programs?: unknown[] }).programs?.length) ?? 0;
 
     // Stage 18: weather stats.
     const w = this.weatherController.getState();
@@ -143,6 +148,7 @@ export class DebugStatsCollector {
       thunderTime: w.thunderTime,
     };
     const precipStats = this.precipitationRenderer.getStats();
+    const occlusionStats = this.visibilityAnalyzer.analyze(this.sceneRenderer.camera);
 
     return {
       fps: this.frameTimeTracker.getFps(),
@@ -168,6 +174,29 @@ export class DebugStatsCollector {
 
       triangleCount: info.render.triangles,
       drawCalls: info.render.calls,
+      compiledProgramCount,
+      rendererGeometryCount: info.memory.geometries,
+      rendererTextureCount: info.memory.textures,
+      terrainPassMeshes: passCounts.terrain,
+      cutoutPassMeshes: passCounts.cutout,
+      waterPassMeshes: passCounts.water,
+      lavaPassMeshes: passCounts.lava,
+      translucentPassMeshes: passCounts.translucent,
+      firePassMeshes: passCounts.fire,
+      depthPassMeshes: passCounts.depth,
+      approximateStateBuckets: passCounts.stateBuckets,
+      transparentPassOrder: '19 depth -> 20 translucent -> 21 water -> 22 lava -> 25 fire -> 30 weather',
+      occlusionLoadedSections: occlusionStats.loadedSections,
+      occlusionRenderableSections: occlusionStats.renderableSections,
+      occlusionEmptySections: occlusionStats.emptySections,
+      occlusionFrustumVisibleSections: occlusionStats.frustumVisibleSections,
+      occlusionFrustumRejectedSections: occlusionStats.frustumRejectedSections,
+      occlusionReachableSections: occlusionStats.reachableSections,
+      occlusionPortalVisibleSections: occlusionStats.portalVisibleSections,
+      occlusionPortalCulledSections: occlusionStats.portalCulledSections,
+      occlusionFrustumVisibleChunks: occlusionStats.frustumVisibleChunks,
+      occlusionPortalVisibleChunks: occlusionStats.portalVisibleChunks,
+      occlusionCpuMs: occlusionStats.occlusionCpuMs,
       dirtyChunkQueueSize: this.chunkManager.countDirtyChunks(),
       chunkGenerationQueueSize: perf.generationQueueSize,
       oldestCriticalGenerationAgeMs: perf.oldestCriticalGenerationAgeMs,

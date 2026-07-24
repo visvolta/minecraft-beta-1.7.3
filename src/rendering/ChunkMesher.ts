@@ -12,6 +12,8 @@ import type { Chunk } from '../world/Chunk';
 import type { ChunkManager } from '../world/ChunkManager';
 import {
   AIR_BLOCK_ID,
+  CHUNK_SECTION_COUNT,
+  CHUNK_SECTION_HEIGHT,
   CHUNK_SIZE_X,
   CHUNK_SIZE_Y,
   CHUNK_SIZE_Z,
@@ -23,6 +25,7 @@ import { FluidTextureKind } from '../world/fluid/FluidTextureKind';
 import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 import { getBetaFluidCornerHeight } from './fluid/FluidSurfaceGeometry';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
+import { ChunkPassMask, classifyBlockPassMask, hasChunkPass } from './meshing/ChunkPassMask';
 import { getRailShapeForBlock } from '../world/rails/RailShapes';
 
 type Corner = readonly [number, number, number];
@@ -51,6 +54,11 @@ interface VertexSmoothLighting {
   readonly blockLevels: Quad4;
   readonly aoFactors: Quad4;
   readonly flipDiagonal: boolean;
+}
+
+interface SectionPassCache {
+  readonly blockRevision: number;
+  readonly passMasks: Uint8Array;
 }
 
 const AO_LEVEL_TO_FACTOR = [0.4, 0.6, 0.8, 1.0] as const;
@@ -563,9 +571,39 @@ export class ChunkMesher {
   private readonly blockRegistry: BlockRegistry;
   private readonly atlas: TextureAtlas;
   private readonly vegetationColors: VegetationColorProvider | undefined;
+  private readonly sectionPassCache = new WeakMap<Chunk, SectionPassCache>();
 
   public constructor(chunkManager: ChunkManager, blockRegistry: BlockRegistry, atlas: TextureAtlas, vegetationColors?: VegetationColorProvider) {
     this.chunkManager = chunkManager; this.blockRegistry = blockRegistry; this.atlas = atlas; this.vegetationColors = vegetationColors;
+  }
+
+  private getSectionPassMasks(chunk: Chunk): Uint8Array {
+    const cached = this.sectionPassCache.get(chunk);
+    if (cached !== undefined && cached.blockRevision === chunk.getBlockRevision()) {
+      return cached.passMasks;
+    }
+    const masks = new Uint8Array(CHUNK_SECTION_COUNT);
+    const blocks = chunk.getBlockDataView();
+    const fullMask = ChunkPassMask.Terrain | ChunkPassMask.Water | ChunkPassMask.Lava | ChunkPassMask.Cutout | ChunkPassMask.Fire | ChunkPassMask.Translucent;
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (chunk.isSectionEmpty(sectionIndex)) continue;
+      const startY = sectionIndex * CHUNK_SECTION_HEIGHT;
+      const startIndex = startY * CHUNK_SIZE_X * CHUNK_SIZE_Z;
+      const endIndex = startIndex + CHUNK_SECTION_HEIGHT * CHUNK_SIZE_X * CHUNK_SIZE_Z;
+      let mask = ChunkPassMask.None;
+      for (let index = startIndex; index < endIndex; index++) {
+        mask |= classifyBlockPassMask(blocks[index] as BlockId, this.blockRegistry);
+        if (mask === fullMask) break;
+      }
+      masks[sectionIndex] = mask;
+    }
+    this.sectionPassCache.set(chunk, { blockRevision: chunk.getBlockRevision(), passMasks: masks });
+    return masks;
+  }
+
+  private sectionYRange(sectionIndex: number): { startY: number; endY: number } {
+    const startY = sectionIndex * CHUNK_SECTION_HEIGHT;
+    return { startY, endY: Math.min(CHUNK_SIZE_Y, startY + CHUNK_SECTION_HEIGHT) };
   }
 
   private resolveVegetationTint(blockId: BlockId, face: BlockFace, fallback: readonly [number, number, number], worldX: number, worldZ: number): readonly [number, number, number] {
@@ -812,9 +850,13 @@ export class ChunkMesher {
   public build(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
-    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
-      for (let z = 0; z < CHUNK_SIZE_Z; z++) {
-        for (let x = 0; x < CHUNK_SIZE_X; x++) {
+    const sectionPassMasks = this.getSectionPassMasks(chunk);
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (!hasChunkPass(sectionPassMasks[sectionIndex]!, ChunkPassMask.Terrain)) continue;
+      const { startY, endY } = this.sectionYRange(sectionIndex);
+      for (let y = startY; y < endY; y++) {
+        for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+          for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
           if (blockId === AIR_BLOCK_ID || !this.isOpaqueMeshBlock(blockId)) {
             continue;
@@ -864,6 +906,7 @@ export class ChunkMesher {
         }
       }
     }
+    }
 
     return buffers.toGeometry();
   }
@@ -881,9 +924,13 @@ export class ChunkMesher {
   public buildCutouts(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
-    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
-      for (let z = 0; z < CHUNK_SIZE_Z; z++) {
-        for (let x = 0; x < CHUNK_SIZE_X; x++) {
+    const sectionPassMasks = this.getSectionPassMasks(chunk);
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (!hasChunkPass(sectionPassMasks[sectionIndex]!, ChunkPassMask.Cutout)) continue;
+      const { startY, endY } = this.sectionYRange(sectionIndex);
+      for (let y = startY; y < endY; y++) {
+        for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+          for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
           if (blockId === AIR_BLOCK_ID) {
             continue;
@@ -1010,6 +1057,7 @@ export class ChunkMesher {
         }
       }
     }
+    }
 
     return buffers.toGeometry();
   }
@@ -1034,9 +1082,13 @@ export class ChunkMesher {
     const V0 = 0;  // raw row index, shader divides by 32
     const V1 = 1;  // raw row index
 
-    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
-      for (let z = 0; z < CHUNK_SIZE_Z; z++) {
-        for (let x = 0; x < CHUNK_SIZE_X; x++) {
+    const sectionPassMasks = this.getSectionPassMasks(chunk);
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (!hasChunkPass(sectionPassMasks[sectionIndex]!, ChunkPassMask.Fire)) continue;
+      const { startY, endY } = this.sectionYRange(sectionIndex);
+      for (let y = startY; y < endY; y++) {
+        for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+          for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
           if (blockId !== BlockIds.Fire) continue;
 
@@ -1207,6 +1259,7 @@ export class ChunkMesher {
         }
       }
     }
+    }
 
     return buffers.toGeometry();
   }
@@ -1317,9 +1370,13 @@ export class ChunkMesher {
   public buildTranslucent(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
-    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
-      for (let z = 0; z < CHUNK_SIZE_Z; z++) {
-        for (let x = 0; x < CHUNK_SIZE_X; x++) {
+    const sectionPassMasks = this.getSectionPassMasks(chunk);
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (!hasChunkPass(sectionPassMasks[sectionIndex]!, ChunkPassMask.Translucent)) continue;
+      const { startY, endY } = this.sectionYRange(sectionIndex);
+      for (let y = startY; y < endY; y++) {
+        for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+          for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
           if (!this.isTranslucentSolid(blockId)) continue;
 
@@ -1347,6 +1404,7 @@ export class ChunkMesher {
         }
       }
     }
+    }
 
     return buffers.toGeometry();
   }
@@ -1354,9 +1412,13 @@ export class ChunkMesher {
   public buildWater(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
-    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
-      for (let z = 0; z < CHUNK_SIZE_Z; z++) {
-        for (let x = 0; x < CHUNK_SIZE_X; x++) {
+    const sectionPassMasks = this.getSectionPassMasks(chunk);
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (!hasChunkPass(sectionPassMasks[sectionIndex]!, ChunkPassMask.Water)) continue;
+      const { startY, endY } = this.sectionYRange(sectionIndex);
+      for (let y = startY; y < endY; y++) {
+        for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+          for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
           if (!this.isWater(blockId)) continue;
           const definition = this.blockRegistry.getById(blockId);
@@ -1366,6 +1428,7 @@ export class ChunkMesher {
         }
       }
     }
+    }
 
     return buffers.toGeometry();
   }
@@ -1373,9 +1436,13 @@ export class ChunkMesher {
   public buildLava(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
 
-    for (let y = 0; y < CHUNK_SIZE_Y; y++) {
-      for (let z = 0; z < CHUNK_SIZE_Z; z++) {
-        for (let x = 0; x < CHUNK_SIZE_X; x++) {
+    const sectionPassMasks = this.getSectionPassMasks(chunk);
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (!hasChunkPass(sectionPassMasks[sectionIndex]!, ChunkPassMask.Lava)) continue;
+      const { startY, endY } = this.sectionYRange(sectionIndex);
+      for (let y = startY; y < endY; y++) {
+        for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+          for (let x = 0; x < CHUNK_SIZE_X; x++) {
           const blockId = chunk.getBlock(x, y, z);
           if (!this.isLava(blockId)) continue;
           const definition = this.blockRegistry.getById(blockId);
@@ -1384,6 +1451,7 @@ export class ChunkMesher {
           this.buildFluidBlock(buffers, chunk, x, y, z, blockId, definition);
         }
       }
+    }
     }
 
     return buffers.toGeometry();

@@ -3,18 +3,25 @@ import type { TextureAtlas } from '../../assets/TextureAtlas';
 import type { Chunk } from '../../world/Chunk';
 import type { ChunkManager } from '../../world/ChunkManager';
 import { getWorkerCount, isWorkerFeatureEnabled } from '../../world/streaming/WorkerFeatureFlags';
-import type { ChunkMeshJob, ChunkMeshResult, MeshAttributeBuffers } from './ChunkMeshJobTypes';
+import type {
+  ChunkMeshJob,
+  ChunkMeshResult,
+  MeshAttributeBuffers,
+} from './ChunkMeshJobTypes';
 
 interface PendingMeshJob {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly priority: number;
+  readonly enqueuedAtMs: number;
 }
 
 interface ActiveMeshJob {
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly targetRevision: number;
+  readonly priority: number;
+  readonly enqueuedAtMs: number;
   readonly worker: Worker;
 }
 
@@ -92,6 +99,7 @@ export class ChunkMeshingQueue {
   public constructor(chunkManager: ChunkManager, atlas: TextureAtlas, private readonly worldSeed: bigint) {
     this.chunkManager = chunkManager;
     this.atlas = atlas;
+    this.chunkManager.addRemoveListener((chunk) => this.onChunkRemoved(chunk.chunkX, chunk.chunkZ));
     if (this.useWorkers) {
       try {
         for (let i = 0; i < getWorkerCount('meshing'); i++) this.spawnWorker();
@@ -115,17 +123,40 @@ export class ChunkMeshingQueue {
     this.active.clear();
     this.completedResults.length = 0;
     this.pendingUploads.length = 0;
+    this.pendingUploadKeys.clear();
+    this.uploadedRevisions.clear();
+    this.dispatchCounts.clear();
+    this.staleCounts.clear();
   }
 
   public enqueue(chunk: Chunk, priority: number): void {
     const mapKey = key(chunk.chunkX, chunk.chunkZ);
-    if (this.uploadedRevisions.get(mapKey) === chunk.getRevision()) return;
-    if (this.pending.has(mapKey)) return;
+    const revision = chunk.getRevision();
+    if (this.uploadedRevisions.get(mapKey) === revision) return;
+    if (this.pendingUploadKeys.has(this.revisionKey(chunk.chunkX, chunk.chunkZ, revision))) return;
     for (const active of this.active.values()) {
       if (active.chunkX === chunk.chunkX && active.chunkZ === chunk.chunkZ) return;
     }
-    if (this.pendingUploadKeys.has(this.revisionKey(chunk.chunkX, chunk.chunkZ, chunk.getRevision()))) return;
-    this.pending.set(mapKey, { chunkX: chunk.chunkX, chunkZ: chunk.chunkZ, priority });
+
+    const existing = this.pending.get(mapKey);
+    if (existing !== undefined) {
+      if (priority < existing.priority) {
+        this.pending.set(mapKey, {
+          chunkX: chunk.chunkX,
+          chunkZ: chunk.chunkZ,
+          priority,
+          enqueuedAtMs: existing.enqueuedAtMs,
+        });
+      }
+      return;
+    }
+
+    this.pending.set(mapKey, {
+      chunkX: chunk.chunkX,
+      chunkZ: chunk.chunkZ,
+      priority,
+      enqueuedAtMs: performance.now(),
+    });
   }
 
   public cancel(chunkX: number, chunkZ: number): void {
@@ -224,7 +255,8 @@ export class ChunkMeshingQueue {
           this.pending.set(key(active.chunkX, active.chunkZ), {
             chunkX: active.chunkX,
             chunkZ: active.chunkZ,
-            priority: 0,
+            priority: active.priority,
+            enqueuedAtMs: active.enqueuedAtMs,
           });
           this.idleWorkers.push(active.worker);
         }
@@ -237,7 +269,8 @@ export class ChunkMeshingQueue {
         this.pending.set(key(active.chunkX, active.chunkZ), {
           chunkX: active.chunkX,
           chunkZ: active.chunkZ,
-          priority: 0,
+          priority: active.priority,
+          enqueuedAtMs: active.enqueuedAtMs,
         });
         this.active.delete(jobId);
       }
@@ -268,6 +301,8 @@ export class ChunkMeshingQueue {
         chunkX: chunk.chunkX,
         chunkZ: chunk.chunkZ,
         targetRevision: revision,
+        priority: next.priority,
+        enqueuedAtMs: next.enqueuedAtMs,
         worker,
       });
       const mapKey = key(chunk.chunkX, chunk.chunkZ);
@@ -347,6 +382,18 @@ export class ChunkMeshingQueue {
     this.staleCounts.set(mapKey, (this.staleCounts.get(mapKey) ?? 0) + 1);
   }
 
+  private onChunkRemoved(chunkX: number, chunkZ: number): void {
+    const mapKey = key(chunkX, chunkZ);
+    this.pending.delete(mapKey);
+    this.removePendingUploadsForChunk(chunkX, chunkZ);
+    this.pendingUploadKeys.forEach((revisionKey) => {
+      if (revisionKey.startsWith(`${chunkX},${chunkZ}@`)) this.pendingUploadKeys.delete(revisionKey);
+    });
+    this.uploadedRevisions.delete(mapKey);
+    this.dispatchCounts.delete(mapKey);
+    this.staleCounts.delete(mapKey);
+  }
+
   private revisionKey(chunkX: number, chunkZ: number, revision: number): string {
     return `${chunkX},${chunkZ}@${revision}`;
   }
@@ -354,10 +401,15 @@ export class ChunkMeshingQueue {
   private takeNextPending(): PendingMeshJob | undefined {
     let bestKey: string | undefined;
     let best: PendingMeshJob | undefined;
+    let bestScore = Infinity;
+    const now = performance.now();
     for (const [mapKey, candidate] of this.pending) {
-      if (best === undefined || candidate.priority < best.priority) {
+      const ageBonus = Math.min(500, (now - candidate.enqueuedAtMs) * 0.02);
+      const score = candidate.priority - ageBonus;
+      if (best === undefined || score < bestScore) {
         best = candidate;
         bestKey = mapKey;
+        bestScore = score;
       }
     }
     if (bestKey !== undefined) this.pending.delete(bestKey);

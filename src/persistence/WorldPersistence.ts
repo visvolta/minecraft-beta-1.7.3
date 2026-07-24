@@ -97,7 +97,7 @@ export function metadataToIndexEntry(metadata: WorldMetadata): WorldIndexEntry {
   return {
     worldId: metadata.worldId,
     displayName: metadata.displayName ?? metadata.name,
-    gameMode: metadata.gameMode ?? GameMode.Creative,
+    gameMode: metadata.gameMode ?? GameMode.Survival,
     seed: metadata.seed,
     createdAt: metadata.createdAt ?? 0,
     lastPlayedAt: metadata.lastPlayedAt ?? metadata.lastPlayedMs,

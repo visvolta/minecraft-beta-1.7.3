@@ -130,7 +130,7 @@ import type { WorldSaveCoordinator } from '../persistence/coordinator/WorldSaveC
 import { RegionCoordinator } from '../persistence/queue/RegionCoordinator';
 import { ChunkPersistenceQueue } from '../persistence/queue/ChunkPersistenceQueue';
 import type { WorldStorage } from '../persistence/storage/WorldStorage';
-import type { WorldMetadata } from '../persistence/metadata/WorldMetadata';
+import { GENERATOR_VERSION, SAVE_VERSION, type WorldMetadata } from '../persistence/metadata/WorldMetadata';
 import { PlayerModel } from '../player/PlayerModel';
 import { PlayerAnimator } from '../player/PlayerAnimator';
 import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
@@ -175,6 +175,9 @@ interface EntityLightingUniforms {
 
 const MAX_DELTA_SECONDS = 0.1;
 const METADATA_AUTOSAVE_MS = 30_000;
+const CHUNK_SAVE_PUMP_INTERVAL_MS = 500;
+const CHUNK_SAVE_PUMP_MAX_CHUNKS = 2;
+const DEBUG_GEOMETRY_MEMORY_SAMPLE_MS = 250;
 
 export class Engine {
   private readonly renderer: Renderer;
@@ -269,6 +272,7 @@ export class Engine {
   private readonly debugStatsCollector: DebugStatsCollector;
   private readonly blockTestGrid: BlockTestGrid;
   private readonly performanceProfiler = new PerformanceProfiler();
+  private nextDebugGeometryMemorySampleMs = 0;
   private rawLightDebugMode = false;
   private ambientOcclusionDebugMode = false;
 
@@ -279,7 +283,9 @@ export class Engine {
   private readonly chunkPersistenceQueue: ChunkPersistenceQueue;
   private lastFrameTimeMs: number | null = null;
   private lastMetadataAutosaveMs = 0;
+  private lastChunkSavePumpMs = 0;
   private metadataSaveInFlight:Promise<void>|null=null;
+  private chunkSavePumpInFlight:Promise<number>|null=null;
   private deathSavePending=false;
   private readonly playerModel: PlayerModel;
   private readonly playerAnimator: PlayerAnimator;
@@ -340,7 +346,7 @@ export class Engine {
     );
     this.cameraController.setRotation(metadata.player.yaw, metadata.player.pitch);
 
-    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setDamageListener((event)=>{const kind=event.source.category==='fall'?(event.amount>4?'fall-big':'fall-small'):'hurt';this.audioManager.play({type:'player.damage',kind,x:this.player.position.x,y:this.player.position.y,z:this.player.position.z});});this.player.viewBobbingEnabled=this.settings.video.viewBobbing;this.player.setGameMode(metadata.gameMode ?? GameMode.Creative);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
+    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setDamageListener((event)=>{if(!event.fullHit)return;this.audioManager.play({type:'player.damage',kind:'hurt',x:this.player.position.x,y:this.player.position.y,z:this.player.position.z});});this.player.viewBobbingEnabled=this.settings.video.viewBobbing;this.player.setGameMode(metadata.gameMode ?? GameMode.Survival);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
     this.playerController = new PlayerController(
       this.input,
       this.cameraController,
@@ -354,6 +360,7 @@ export class Engine {
     this.blockUpdateWorld.setPowerEngine(this.redstonePowerEngine);
     this.playerPhysics=new PlayerPhysics(blockRegistry,this.blockBehaviourRegistry,this.blockUpdateWorld);
     this.playerSurvivalController=new PlayerSurvivalController(this.player,this.blockUpdateWorld,blockRegistry,()=>metadata.difficulty);
+    this.playerSurvivalController.setLandingSoundListener((event)=>{this.audioManager.play({type:'step',material:event.material,x:event.x,y:event.y,z:event.z,volume:event.volume,pitch:event.pitch});});
     this.cameraModeController = new CameraModeController(this.input, this.blockUpdateWorld, blockRegistry);
     this.playerModel = new PlayerModel();
     this.playerAnimator = new PlayerAnimator();
@@ -793,7 +800,8 @@ export class Engine {
     this.fireAnimationSystem = new FireAnimationSystem();
 
     this.chunkRenderer = new ChunkRenderer(this.renderer.scene, this.chunkManager, blockRegistry, this.atlas, this.fluidAnimationSystem, this.fireAnimationSystem, worldSeed);
-    this.chunkStreamer = new ChunkStreamer(this.chunkManager, this.worldGenerator, this.chunkRenderer, this.lightEngine, worldSeed, this.chunkPersistenceQueue, (chunk) => {
+    const trustPersistedLighting = metadata.saveVersion === SAVE_VERSION && metadata.generatorVersion === GENERATOR_VERSION;
+    this.chunkStreamer = new ChunkStreamer(this.chunkManager, this.worldGenerator, this.chunkRenderer, this.lightEngine, worldSeed, this.chunkPersistenceQueue, trustPersistedLighting, (chunk) => {
         this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
         this.worldTickScheduler.indexLoadedChunkTicks(chunk);
         this.worldTickScheduler.reconcileChunkBoundaries(chunk);
@@ -1033,6 +1041,7 @@ export class Engine {
       this.simulationAccumulatorTicks--;
     }
     const now = performance.now();
+    if (now - this.lastChunkSavePumpMs >= CHUNK_SAVE_PUMP_INTERVAL_MS) { this.lastChunkSavePumpMs = now; void this.pumpChunkSaves(); }
     if (now - this.lastMetadataAutosaveMs >= METADATA_AUTOSAVE_MS) { this.lastMetadataAutosaveMs = now; void this.saveMetadata(false); }
     this.chestManager.update(); this.chestRenderer.update(deltaSeconds); this.signTextRenderer.update(); this.furnaceManager.tick(this.blockUpdateWorld, this.smeltingRegistry, this.fuelRegistry);
     
@@ -1163,7 +1172,13 @@ export class Engine {
     for (const system of this.updatables) system.update(deltaSeconds);
 
     this.performanceProfiler.recordMeshUpload(this.chunkRenderer.getMeshUploadsThisFrame());
-    this.performanceProfiler.setApproximateGeometryMemoryMb(this.chunkRenderer.getApproximateGeometryMemoryBytes() / (1024 * 1024));
+    if (this.debugOverlay.isVisible()) {
+      const debugNow = performance.now();
+      if (debugNow >= this.nextDebugGeometryMemorySampleMs) {
+        this.performanceProfiler.setApproximateGeometryMemoryMb(this.chunkRenderer.getApproximateGeometryMemoryBytes() / (1024 * 1024));
+        this.nextDebugGeometryMemorySampleMs = debugNow + DEBUG_GEOMETRY_MEMORY_SAMPLE_MS;
+      }
+    }
     this.performanceProfiler.endUpdate();
     this.performanceProfiler.beginRender();
     this.renderer.renderer.clear(); this.renderer.render();
@@ -1234,7 +1249,13 @@ export class Engine {
     return { ...this.saveCoordinator.getMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize() };
   }
 
-  private async saveMetadata(force: boolean): Promise<void> { if (this.metadataSaveInFlight !== null) return this.metadataSaveInFlight; this.saveCoordinator.update(this.snapshotMetadata()); this.metadataSaveInFlight = this.saveCoordinator.save(force).finally(() => { this.metadataSaveInFlight = null; }); return this.metadataSaveInFlight; }
+  private async saveMetadata(force: boolean): Promise<void> { if (this.metadataSaveInFlight !== null) return this.metadataSaveInFlight; this.saveCoordinator.update(this.snapshotMetadata()); this.metadataSaveInFlight = (async () => { if (this.chunkSavePumpInFlight !== null) await this.chunkSavePumpInFlight; await this.saveCoordinator.save(force); })().finally(() => { this.metadataSaveInFlight = null; }); return this.metadataSaveInFlight; }
+
+  private async pumpChunkSaves(): Promise<number> {
+    if (this.chunkSavePumpInFlight !== null) return this.chunkSavePumpInFlight;
+    this.chunkSavePumpInFlight = this.chunkPersistenceQueue.saveSomeDirty(this.chunkManager, CHUNK_SAVE_PUMP_MAX_CHUNKS).finally(() => { this.chunkSavePumpInFlight = null; });
+    return this.chunkSavePumpInFlight;
+  }
 
   private updateHeldItemMesh(): void {
     const stack = this.inventory.getStack(this.selectedSlot);
