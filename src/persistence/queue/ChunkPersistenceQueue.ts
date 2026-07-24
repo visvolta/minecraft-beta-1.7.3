@@ -440,12 +440,43 @@ export class ChunkPersistenceQueue {
     console.info('[SavePipelineTrace] save.queue.dirty_chunk_count', candidates.length);
     console.info('[SavePipelineTrace] save.queue.dirty_flush_begin', { ...this.diagnosticSnapshot(), dirtyChunkCount: candidates.length });
     const dirtyFlushWatchdog = setTimeout(() => console.warn('[SavePipelineTrace] save.queue.dirty_flush_pending', this.diagnosticSnapshot()), 5000);
-    const snapshots = await measureSaveAsync('save.queue.flush_dirty_chunks', {
-      dirtyChunkCount: candidates.length,
-      pendingUnloadCount: this.unloads.size,
-      queueStats: this.getStats(),
-    }, async () => Promise.all(candidates.map((chunk) => this.saveChunk(chunk).then((revision) => ({ chunk, revision })) )));
-    clearTimeout(dirtyFlushWatchdog);
+    let snapshots: Array<{ chunk: Chunk; revision: number }>;
+    try {
+      snapshots = await measureSaveAsync('save.queue.flush_dirty_chunks', {
+        dirtyChunkCount: candidates.length,
+        pendingUnloadCount: this.unloads.size,
+        queueStats: this.getStats(),
+      }, async () => {
+        // Bucket dirty chunks by region so each region is opened once (the
+        // deduped getRegion makes every chunk after the first a synchronous
+        // cache hit) and chunks are saved sequentially — Beta-like "one region
+        // at a time, direct save" semantics in async form. Fail-fast: the first
+        // chunk-save error aborts the flush and propagates unchanged (matches
+        // the prior Promise.all reject semantics; only concurrency/ordering
+        // changes). activeSaves accounting and revision snapshots stay inside
+        // the single shared saveChunk core.
+        const byRegion = new Map<string, Chunk[]>();
+        for (const chunk of candidates) {
+          const regionKey = `${Math.floor(chunk.chunkX / 32)},${Math.floor(chunk.chunkZ / 32)}`;
+          let bucket = byRegion.get(regionKey);
+          if (bucket === undefined) {
+            bucket = [];
+            byRegion.set(regionKey, bucket);
+          }
+          bucket.push(chunk);
+        }
+        const saved: Array<{ chunk: Chunk; revision: number }> = [];
+        for (const bucket of byRegion.values()) {
+          for (const chunk of bucket) {
+            const revision = await this.saveChunk(chunk);
+            saved.push({ chunk, revision });
+          }
+        }
+        return saved;
+      });
+    } finally {
+      clearTimeout(dirtyFlushWatchdog);
+    }
     console.info('[SavePipelineTrace] save.queue.dirty_flush_complete', { ...this.diagnosticSnapshot(), savedChunkCount: snapshots.length });
 
     await measureSaveAsync('save.queue.commit_all_regions', {
