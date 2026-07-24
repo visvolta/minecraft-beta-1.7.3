@@ -4,7 +4,7 @@ import { RegionCoordinator } from './RegionCoordinator.ts';
 import { encodeNbt, decodeNbt } from '../nbt/NbtCodec.ts';
 import { RegionCorruptionError } from '../region/RegionCorruptionError.ts';
 import type { NbtCompound, NbtTag } from '../nbt/Nbt.ts';
-import { measureSaveAsync, measureSaveSync, recordSaveEvent, recordSaveFailure } from '../debug/SavePipelineTrace.ts';
+import { getActiveSaveTrace, measureSaveAsync, measureSaveSync, recordSaveEvent, recordSaveFailure } from '../debug/SavePipelineTrace.ts';
 
 /**
  * Bridge between chunk persistence and the EntityManager. Lets chunks save and
@@ -27,7 +27,11 @@ interface QueuedUnload {
   chunk: Chunk;
   resolve: () => void;
   reject: (err: unknown) => void;
+  completion: Promise<void>;
   canceled: boolean;
+  settled: boolean;
+  processing: boolean;
+  retryTimerActive: boolean;
   retries: number;
 }
 
@@ -106,19 +110,24 @@ export class ChunkPersistenceQueue {
         retries: queued.retries,
         queueStats: this.getStats(),
       });
-      return Promise.resolve();
+      return queued.completion;
     }
 
-    return new Promise((resolve, reject) => {
-      queued = { chunk, resolve, reject, canceled: false, retries: 0 };
-      this.unloads.set(key, queued);
+    let complete!: () => void;
+    let fail!: (error: unknown) => void;
+    const completion = new Promise<void>((resolve, reject) => {
+      complete = resolve;
+      fail = reject;
+    });
+    queued = { chunk, resolve: complete, reject: fail, completion, canceled: false, settled: false, processing: false, retryTimerActive: false, retries: 0 };
+    this.unloads.set(key, queued);
       recordSaveEvent('save.queue.unload_enqueued', {
         key,
         queueStats: this.getStats(),
         persistenceRevision: chunk.getPersistenceRevision(),
       });
-      void this.processUnload(queued!);
-    });
+    void this.processUnload(queued);
+    return completion;
   }
 
   public cancelUnload(chunk: Chunk): void {
@@ -127,6 +136,7 @@ export class ChunkPersistenceQueue {
     if (queued) {
       queued.canceled = true;
       this.unloads.delete(key);
+      this.settleUnload(queued);
       recordSaveEvent('save.queue.unload_canceled', {
         key,
         retries: queued.retries,
@@ -142,7 +152,10 @@ export class ChunkPersistenceQueue {
       this.pendingPeriodicFlush = null;
     }
     while (this.reads.length > 0) this.reads.shift()!.resolve(undefined);
-    for (const unload of this.unloads.values()) unload.resolve();
+    for (const unload of this.unloads.values()) {
+      unload.canceled = true;
+      this.settleUnload(unload);
+    }
     this.unloads.clear();
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear();
@@ -266,10 +279,21 @@ export class ChunkPersistenceQueue {
     }
   }
 
+  private settleUnload(unload: QueuedUnload, error?: unknown): void {
+    if (unload.settled) return;
+    unload.settled = true;
+    unload.processing = false;
+    unload.retryTimerActive = false;
+    if (error === undefined) unload.resolve();
+    else unload.reject(error);
+  }
+
   private async processUnload(unload: QueuedUnload): Promise<void> {
+    unload.processing = true;
+    unload.retryTimerActive = false;
     const key = chunkKey(unload.chunk.chunkX, unload.chunk.chunkZ);
     if (this.disposed) {
-      unload.resolve();
+      this.settleUnload(unload);
       return;
     }
     recordSaveEvent('save.queue.unload_begin', {
@@ -280,7 +304,7 @@ export class ChunkPersistenceQueue {
     try {
       const snapshotRevision = await this.saveChunk(unload.chunk);
       if (this.disposed) {
-        unload.resolve();
+        this.settleUnload(unload);
         return;
       }
       if (!unload.canceled) {
@@ -321,11 +345,16 @@ export class ChunkPersistenceQueue {
         queueStats: this.getStats(),
       });
       if (!unload.canceled && !this.disposed) {
+        unload.processing = false;
+        unload.retryTimerActive = true;
         const timer = setTimeout(() => {
           this.retryTimers.delete(timer);
           void this.processUnload(unload);
         }, retryDelayMs);
         this.retryTimers.add(timer);
+      } else {
+        this.unloads.delete(key);
+        this.settleUnload(unload, err);
       }
       return;
     }
@@ -337,7 +366,7 @@ export class ChunkPersistenceQueue {
         retries: unload.retries,
         queueStats: this.getStats(),
       });
-      unload.resolve();
+      this.settleUnload(unload);
     }
   }
 
@@ -369,8 +398,34 @@ export class ChunkPersistenceQueue {
     return saved;
   }
 
+  public async commitRegions(): Promise<void> {
+    await this.regionCoordinator.commitAll();
+  }
+
+  private diagnosticSnapshot(): Record<string, unknown> {
+    return {
+      operationId: getActiveSaveTrace()?.id ?? null,
+      disposed: this.disposed,
+      activeSaves: this.activeSaves,
+      retryTimers: this.retryTimers.size,
+      pendingUnloads: [...this.unloads.entries()].map(([key, unload]) => ({
+        key,
+        processing: unload.processing,
+        canceled: unload.canceled,
+        settled: unload.settled,
+        retries: unload.retries,
+        retryTimerActive: unload.retryTimerActive,
+        completionState: unload.settled ? 'settled' : 'pending',
+      })),
+    };
+  }
+
   public async saveAllDirty(chunks: Iterable<Chunk>): Promise<void> {
-    if (this.disposed) return;
+    console.info('[SavePipelineTrace] save.queue.save_all_dirty_enter', this.diagnosticSnapshot());
+    if (this.disposed) {
+      console.info('[SavePipelineTrace] save.queue.save_all_dirty_complete', { ...this.diagnosticSnapshot(), reason: 'disposed' });
+      return;
+    }
     const candidates = measureSaveSync('save.queue.collect_dirty_chunks', {
       queueStats: this.getStats(),
     }, () => {
@@ -381,11 +436,17 @@ export class ChunkPersistenceQueue {
       return collected;
     });
 
+    console.info('[SavePipelineTrace] save.queue.dirty_enumeration_complete', { ...this.diagnosticSnapshot(), dirtyChunkCount: candidates.length });
+    console.info('[SavePipelineTrace] save.queue.dirty_chunk_count', candidates.length);
+    console.info('[SavePipelineTrace] save.queue.dirty_flush_begin', { ...this.diagnosticSnapshot(), dirtyChunkCount: candidates.length });
+    const dirtyFlushWatchdog = setTimeout(() => console.warn('[SavePipelineTrace] save.queue.dirty_flush_pending', this.diagnosticSnapshot()), 5000);
     const snapshots = await measureSaveAsync('save.queue.flush_dirty_chunks', {
       dirtyChunkCount: candidates.length,
       pendingUnloadCount: this.unloads.size,
       queueStats: this.getStats(),
     }, async () => Promise.all(candidates.map((chunk) => this.saveChunk(chunk).then((revision) => ({ chunk, revision })) )));
+    clearTimeout(dirtyFlushWatchdog);
+    console.info('[SavePipelineTrace] save.queue.dirty_flush_complete', { ...this.diagnosticSnapshot(), savedChunkCount: snapshots.length });
 
     await measureSaveAsync('save.queue.commit_all_regions', {
       savedChunkCount: snapshots.length,
@@ -406,20 +467,11 @@ export class ChunkPersistenceQueue {
     const unloadPromises = measureSaveSync('save.queue.capture_pending_unloads', {
       pendingUnloadCount: this.unloads.size,
       queueStats: this.getStats(),
-    }, () => {
-      const pending: Promise<void>[] = [];
-      for (const unload of this.unloads.values()) {
-        pending.push(new Promise<void>((resolve) => {
-          const originalResolve = unload.resolve;
-          unload.resolve = () => {
-            originalResolve();
-            resolve();
-          };
-        }));
-      }
-      return pending;
-    });
+    }, () => [...this.unloads.values()].map((unload) => unload.completion));
 
+    console.info('[SavePipelineTrace] save.queue.pending_unload_count', { ...this.diagnosticSnapshot(), pendingUnloadCount: unloadPromises.length });
+    console.info('[SavePipelineTrace] save.queue.wait_unloads_begin', this.diagnosticSnapshot());
+    const unloadWatchdog = setTimeout(() => console.warn('[SavePipelineTrace] save.queue.wait_unloads_pending', this.diagnosticSnapshot()), 5000);
     await measureSaveAsync('save.queue.wait_unload_saves', {
       pendingUnloadCount: unloadPromises.length,
       queueStats: this.getStats(),
@@ -427,5 +479,8 @@ export class ChunkPersistenceQueue {
     }, async () => {
       await Promise.all(unloadPromises);
     });
+    clearTimeout(unloadWatchdog);
+    console.info('[SavePipelineTrace] save.queue.wait_unloads_complete', this.diagnosticSnapshot());
+    console.info('[SavePipelineTrace] save.queue.save_all_dirty_complete', this.diagnosticSnapshot());
   }
 }

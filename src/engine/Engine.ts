@@ -286,6 +286,7 @@ export class Engine {
   private lastMetadataAutosaveMs = 0;
   private lastChunkSavePumpMs = 0;
   private metadataSaveInFlight:Promise<void>|null=null;
+  private metadataSaveInFlightForce = false;
   private chunkSavePumpInFlight:Promise<number>|null=null;
   private deathSavePending=false;
   private readonly playerModel: PlayerModel;
@@ -920,8 +921,37 @@ export class Engine {
 
   public get isPaused(): boolean { return this.simulationPaused; }
 
-  public async saveAndStop(): Promise<void> {
-    recordSaveEvent('save.engine.begin_save_and_stop', {
+  public prepareForcedSave(): void {
+    this.saveCoordinator.update(this.snapshotMetadata());
+    recordSaveEvent('save.engine.forced_save_snapshot_ready', {
+      paused: this.simulationPaused,
+      dirtyChunkCount: this.countDirtyChunks(),
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    });
+  }
+
+  public async flushForcedSaveChunks(): Promise<void> {
+    console.info('[SavePipelineTrace] save.engine.flush_chunks_enter', { operationId: getActiveSaveTrace()?.id ?? null, dirtyChunkCount: this.countDirtyChunks(), queueStats: this.chunkPersistenceQueue.getStats() });
+    await measureSaveAsync('save.engine.flush_forced_save_chunks', {
+      dirtyChunkCount: this.countDirtyChunks(),
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    }, async () => this.saveCoordinator.flushDirtyChunks());
+  }
+
+  public async commitForcedSaveRegions(): Promise<void> {
+    await measureSaveAsync('save.engine.commit_forced_save_regions', {
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    }, async () => this.saveCoordinator.commitRegions());
+  }
+
+  public async writeForcedSaveMetadata(): Promise<void> {
+    await measureSaveAsync('save.engine.write_forced_save_metadata', {
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    }, async () => this.saveCoordinator.writeMetadata());
+  }
+
+  public async performForcedSave(): Promise<void> {
+    recordSaveEvent('save.engine.begin_forced_save', {
       paused: this.simulationPaused,
       dirtyChunkCount: this.countDirtyChunks(),
       chunkQueueStats: this.chunkPersistenceQueue.getStats(),
@@ -933,12 +963,35 @@ export class Engine {
     }, async () => {
       await this.saveMetadata(true);
     });
+    recordSaveEvent('save.engine.forced_save_complete', {
+      paused: this.simulationPaused,
+      dirtyChunkCount: this.countDirtyChunks(),
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    });
+  }
+
+  public stopAfterSuccessfulSave(): void {
+    recordSaveEvent('save.engine.shutdown_begin', {
+      paused: this.simulationPaused,
+      running: this.running,
+      chunkQueueStats: this.chunkPersistenceQueue.getStats(),
+    });
     measureSaveSync('save.engine.world_shutdown', {
       paused: this.simulationPaused,
       chunkQueueStats: this.chunkPersistenceQueue.getStats(),
     }, () => {
       this.stop();
     });
+    recordSaveEvent('save.engine.shutdown_complete', {
+      paused: this.simulationPaused,
+      running: this.running,
+    });
+  }
+
+  /** Compatibility path for non-application callers; Save and Exit uses the split methods. */
+  public async saveAndStop(): Promise<void> {
+    await this.performForcedSave();
+    this.stopAfterSuccessfulSave();
   }
 
   public stop(): void {
@@ -1299,7 +1352,22 @@ export class Engine {
   }
 
   private async saveMetadata(force: boolean): Promise<void> {
-    if (this.metadataSaveInFlight !== null) return this.metadataSaveInFlight;
+    if (this.metadataSaveInFlight !== null) {
+      if (!force || this.metadataSaveInFlightForce) {
+        recordSaveEvent('save.engine.coalesced_metadata_save', {
+          requestedForce: force,
+          activeForce: this.metadataSaveInFlightForce,
+        });
+        return this.metadataSaveInFlight;
+      }
+      recordSaveEvent('save.engine.forced_save_waiting_for_autosave', {
+        requestedForce: true,
+        activeForce: false,
+      });
+      await this.metadataSaveInFlight;
+      return this.saveMetadata(true);
+    }
+    this.metadataSaveInFlightForce = force;
     const snapshot = measureSaveSync('save.engine.snapshot_metadata', {
       force,
       paused: this.simulationPaused,
@@ -1332,6 +1400,8 @@ export class Engine {
       });
     })().finally(() => {
       this.metadataSaveInFlight = null;
+      this.metadataSaveInFlightForce = false;
+      recordSaveEvent('save.engine.metadata_save_settled', { force });
     });
     return this.metadataSaveInFlight;
   }

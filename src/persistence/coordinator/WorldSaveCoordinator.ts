@@ -4,7 +4,7 @@ import type { ChunkPersistenceQueue } from '../queue/ChunkPersistenceQueue';
 import type { ChunkManager } from '../../world/ChunkManager';
 import { Difficulty } from '../../world/Difficulty';
 import { GameMode } from '../../player/GameMode';
-import { measureSaveAsync, measureSaveSync, recordSaveEvent } from '../debug/SavePipelineTrace';
+import { getActiveSaveTrace, measureSaveAsync, measureSaveSync, recordSaveEvent } from '../debug/SavePipelineTrace';
 
 export interface SaveMetrics { readonly dirty: boolean; readonly saves: number; readonly failures: number; readonly lastError: string | undefined; }
 const KEY = 'metadata.json';
@@ -42,6 +42,26 @@ export class WorldSaveCoordinator {
       this.metadata = metadata;
       this.dirty = true;
     }
+  }
+
+  public async flushDirtyChunks(): Promise<void> {
+    console.info('[SavePipelineTrace] save.coordinator.flush_chunks_enter', { operationId: getActiveSaveTrace()?.id ?? null, queueStats: this.chunkQueue?.getStats() ?? null });
+    if (this.chunkQueue !== undefined && this.chunkManager !== undefined) {
+      await this.chunkQueue.saveAllDirty(this.chunkManager);
+    }
+  }
+
+  public async commitRegions(): Promise<void> {
+    if (this.chunkQueue !== undefined) await this.chunkQueue.commitRegions();
+  }
+
+  public async writeMetadata(): Promise<void> {
+    const now = Date.now();
+    this.metadata = { ...this.metadata, lastPlayedMs: now, lastPlayedAt: now };
+    await this.storage.put(this.metadata.worldId, KEY, encodeWorldMetadata(this.metadata));
+    this.dirty = false;
+    this.saves++;
+    this.lastError = undefined;
   }
 
   public async save(force = false): Promise<void> {

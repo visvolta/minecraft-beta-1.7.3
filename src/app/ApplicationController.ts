@@ -29,7 +29,8 @@ import { GameMode } from '../player/GameMode';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { Chunk } from '../world/Chunk';
 import { applyGuiScaleCssVariables, setGlobalGuiScaleSetting } from '../ui/GuiScale';
-import { beginSaveTrace, endSaveTrace, recordSaveEvent } from '../persistence/debug/SavePipelineTrace';
+import { beginSaveTrace, endSaveTrace, recordSaveEvent, type SavePipelineTrace } from '../persistence/debug/SavePipelineTrace';
+import { SaveExitOperation } from '../persistence/coordinator/SaveExitOperation';
 
 export type ApplicationState = 'boot' | 'main_menu' | 'world_select' | 'world_create' | 'world_loading' | 'in_game' | 'pause_menu' | 'options' | 'video_settings' | 'controls' | 'confirm_delete' | 'error';
 
@@ -53,6 +54,7 @@ export class ApplicationController {
   private pauseEscapeArmed = true;
   private activeLoadToken = 0;
   private loadInProgress = false;
+  private saveExitInFlight = false;
   private spawnPreparation: SpawnPreparationState | null = null;
   private readonly resize = (): void => applyGuiScaleCssVariables();
   private readonly audioActivation = (): void => { void this.audio.activate(); };
@@ -98,7 +100,6 @@ export class ApplicationController {
 
   private async showMainMenu(): Promise<void> {
     this.cancelActiveLoadOperation();
-    await this.unloadWorld();
     this.audio.setMusicContext('menu');
     this.setScreen(new MainMenuScreen({ singleplayer: () => void this.showWorldSelect(), options: () => this.showOptions('main'), quit: () => this.showError('Quit Game', 'You can close this browser tab when ready.') }), 'main_menu');
   }
@@ -183,8 +184,24 @@ export class ApplicationController {
   }
 
   private async saveQuitToTitle(): Promise<void> {
-    if (this.engine === null) return;
-    const trace = beginSaveTrace('save-and-exit', {
+    console.info('[SavePipelineTrace] save.application.handler_enter', {
+      applicationState: this.state,
+      hasEngine: this.engine !== null,
+      saveExitInFlight: this.saveExitInFlight,
+    });
+    if (this.engine === null) {
+      console.warn('[SavePipelineTrace] save.application.early_exit_no_engine', { applicationState: this.state });
+      return;
+    }
+    if (this.saveExitInFlight) {
+      console.warn('[SavePipelineTrace] save.application.early_exit_already_in_flight', { applicationState: this.state });
+      return;
+    }
+    this.saveExitInFlight = true;
+    console.info('[SavePipelineTrace] save.application.guard_acquired');
+    let trace: SavePipelineTrace;
+    try {
+      trace = beginSaveTrace('save-and-exit', {
       applicationState: this.state,
       enginePaused: this.engine.isPaused,
       hasEngine: true,
@@ -193,7 +210,14 @@ export class ApplicationController {
       applicationState: this.state,
       enginePaused: this.engine.isPaused,
     });
+    console.info('[SavePipelineTrace] save.application.enter');
+    } catch (error) {
+      console.error('[SavePipelineTrace] save.application.pre_try_failure', { errorName: error instanceof Error ? error.name : typeof error, errorMessage: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined, applicationState: this.state, hasEngine: this.engine !== null });
+      this.saveExitInFlight = false;
+      return;
+    }
     try {
+      console.info('[SavePipelineTrace] save.application.before_loading_screen');
       this.screen?.dispose();
       const loading = new LoadingScreen();
       this.setScreen(loading, 'world_loading');
@@ -201,12 +225,49 @@ export class ApplicationController {
       recordSaveEvent('save.application.loading_screen_ready', {
         applicationState: this.state,
       });
-      await trace.measureAsync('save.application.unload_world', {
-        applicationState: this.state,
-      }, async () => {
-        await this.unloadWorld();
+      console.info('[SavePipelineTrace] save.application.loading_screen_ready');
+      const operation = new SaveExitOperation();
+      console.info('[SavePipelineTrace] save.application.operation_created', { operationId: operation.id });
+      await operation.run({
+        prepare: async () => {
+          recordSaveEvent('save.application.prepare_complete', { operationId: operation.id });
+        },
+        snapshot: async () => {
+          if (this.engine === null) throw new Error('Save and Exit engine disappeared before snapshot.');
+          this.engine.prepareForcedSave();
+          recordSaveEvent('save.application.snapshot_complete', { operationId: operation.id });
+        },
+        saveChunks: async () => {
+          if (this.engine === null) throw new Error('Save and Exit engine disappeared before chunk persistence.');
+          await trace.measureAsync('save.application.flush_dirty_chunks', {
+            operationId: operation.id,
+            applicationState: this.state,
+          }, async () => this.engine!.flushForcedSaveChunks());
+        },
+        commitRegions: async () => {
+          if (this.engine === null) throw new Error('Save and Exit engine disappeared before region commit.');
+          await trace.measureAsync('save.application.commit_regions', {
+            operationId: operation.id,
+          }, async () => this.engine!.commitForcedSaveRegions());
+        },
+        writeMetadata: async () => {
+          if (this.engine === null) throw new Error('Save and Exit engine disappeared before metadata write.');
+          await trace.measureAsync('save.application.write_metadata', {
+            operationId: operation.id,
+          }, async () => this.engine!.writeForcedSaveMetadata());
+          recordSaveEvent('save.application.persistence_complete', { operationId: operation.id });
+        },
+        shutdown: async () => {
+          if (this.engine === null) throw new Error('Save and Exit engine disappeared before shutdown.');
+          this.engine.stopAfterSuccessfulSave();
+          recordSaveEvent('save.application.shutdown_complete', { operationId: operation.id });
+          this.engine = null;
+          recordSaveEvent('save.application.engine_reference_cleared', { operationId: operation.id });
+          this.audio.endWorldSession();
+        },
       });
       await trace.measureAsync('save.application.menu_transition', {
+        operationId: operation.id,
         applicationState: this.state,
       }, async () => {
         await this.showMainMenu();
@@ -225,6 +286,12 @@ export class ApplicationController {
       console.error(error);
       if (this.engine !== null) this.engine.setPaused(true);
       this.showError('Save failed', error instanceof Error ? error.message : String(error));
+    } finally {
+      this.saveExitInFlight = false;
+      console.info('[SavePipelineTrace] save.application.handler_complete', {
+        applicationState: this.state,
+        hasEngine: this.engine !== null,
+      });
     }
   }
 
