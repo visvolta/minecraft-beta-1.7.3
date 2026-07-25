@@ -306,6 +306,7 @@ export class PerformanceProfiler {
   private loadedChunks = 0;
   private visibleChunks = 0;
   private dirtyChunks = 0;
+  private dirtyChunkScanMs = 0;
 
   private profilerSelfMs = 0;
   private debugCollectMs = 0;
@@ -382,6 +383,10 @@ export class PerformanceProfiler {
     this.loadedChunks = loaded;
     this.visibleChunks = visible;
     this.dirtyChunks = dirty;
+  }
+
+  public recordDirtyChunkScanMs(value: number): void {
+    if (this.enabled) this.dirtyChunkScanMs = value;
   }
 
   public recordProfilerOverhead(ms: number): void { if (this.enabled) this.profilerSelfMs += Math.max(0, ms); }
@@ -477,7 +482,7 @@ export class PerformanceProfiler {
       approximateGeometryMemoryMb: this.approximateGeometryMemoryMb,
       jsHeapUsedMb: mem.used,
       jsHeapTotalMb: mem.total,
-      dirtyChunkScanMs: 0,
+      dirtyChunkScanMs: this.dirtyChunkScanMs,
       loadedChunks: this.loadedChunks,
       visibleChunks: this.visibleChunks,
       dirtyChunks: this.dirtyChunks,

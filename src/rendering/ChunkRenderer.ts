@@ -48,6 +48,17 @@ function geometryIsEmpty(geometry: THREE.BufferGeometry): boolean {
   return position === undefined || position.count === 0;
 }
 
+function createDepthGeometry(source: THREE.BufferGeometry): THREE.BufferGeometry {
+  const depth = new THREE.BufferGeometry();
+  const position = source.getAttribute('position');
+  if (position !== undefined) depth.setAttribute('position', position);
+  const index = source.getIndex();
+  if (index !== null) depth.setIndex(index);
+  if (source.boundingBox !== null) depth.boundingBox = source.boundingBox.clone();
+  if (source.boundingSphere !== null) depth.boundingSphere = source.boundingSphere.clone();
+  return depth;
+}
+
 export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
   const uniforms = {
     uSkylightSubtracted: { value: 0 },
@@ -337,15 +348,15 @@ export class ChunkRenderer {
   private readonly lavaDepthMaterial: THREE.MeshBasicMaterial;
   private readonly translucentDepthMaterial: THREE.MeshBasicMaterial;
 
-  private readonly terrainMeshes = new Map<string, THREE.Mesh>();
-  private readonly waterMeshes = new Map<string, THREE.Mesh>();
-  private readonly lavaMeshes = new Map<string, THREE.Mesh>();
-  private readonly translucentMeshes = new Map<string, THREE.Mesh>();
-  private readonly cutoutMeshes = new Map<string, THREE.Mesh>();
-  private readonly fireMeshes = new Map<string, THREE.Mesh>();
-  private readonly waterDepthMeshes = new Map<string, THREE.Mesh>();
-  private readonly lavaDepthMeshes = new Map<string, THREE.Mesh>();
-  private readonly translucentDepthMeshes = new Map<string, THREE.Mesh>();
+  private readonly terrainMeshes = new Map<number, THREE.Mesh>();
+  private readonly waterMeshes = new Map<number, THREE.Mesh>();
+  private readonly lavaMeshes = new Map<number, THREE.Mesh>();
+  private readonly translucentMeshes = new Map<number, THREE.Mesh>();
+  private readonly cutoutMeshes = new Map<number, THREE.Mesh>();
+  private readonly fireMeshes = new Map<number, THREE.Mesh>();
+  private readonly waterDepthMeshes = new Map<number, THREE.Mesh>();
+  private readonly lavaDepthMeshes = new Map<number, THREE.Mesh>();
+  private readonly translucentDepthMeshes = new Map<number, THREE.Mesh>();
 
   private readonly atlas: TextureAtlas;
   private readonly fluidAnimationSystem: FluidAnimationSystem;
@@ -520,8 +531,7 @@ export class ChunkRenderer {
 
     if (this.meshQueue.isWorkerEnabled()) {
       const scanStart = performance.now();
-      for (const chunk of this.chunkManager) {
-        if (!chunk.isDirty()) continue;
+      for (const chunk of this.chunkManager.getRenderDirtyChunks()) {
         const cameraChunkX = Math.floor(cameraWorldX / CHUNK_SIZE_X);
         const cameraChunkZ = Math.floor(cameraWorldZ / CHUNK_SIZE_Z);
         const dx = chunk.chunkX - cameraChunkX;
@@ -547,8 +557,7 @@ export class ChunkRenderer {
     const budget = MESH_REBUILD_BUDGET;
 
     const scanStart = performance.now();
-    for (const chunk of this.chunkManager) {
-      if (!chunk.isDirty()) continue;
+    for (const chunk of this.chunkManager.getRenderDirtyChunks()) {
       this.rebuildChunk(chunk);
       rebuilt += 1;
       if (rebuilt >= budget) break;
@@ -588,7 +597,7 @@ export class ChunkRenderer {
 
   public removeChunkMesh(chunkX: number, chunkZ: number): void {
     const key = chunkKey(chunkX, chunkZ);
-    const groups: Array<[Map<string, THREE.Mesh>, THREE.Group]> = [
+    const groups: Array<[Map<number, THREE.Mesh>, THREE.Group]> = [
       [this.terrainMeshes, this.terrainGroup],
       [this.waterMeshes, this.waterGroup],
       [this.lavaMeshes, this.lavaGroup],
@@ -611,7 +620,7 @@ export class ChunkRenderer {
 
   public dispose(): void {
     this.meshQueue.dispose();
-    const allMaps: Array<[Map<string, THREE.Mesh>, THREE.Group]> = [
+    const allMaps: Array<[Map<number, THREE.Mesh>, THREE.Group]> = [
       [this.terrainMeshes, this.terrainGroup],
       [this.waterMeshes, this.waterGroup],
       [this.lavaMeshes, this.lavaGroup],
@@ -864,7 +873,7 @@ export class ChunkRenderer {
     if (geometryIsEmpty(translucentGeometry)) this.removeMesh(this.translucentDepthMeshes, this.translucentDepthGroup, key);
     else this.upsertMesh(this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, chunk, key, translucentGeometry.clone());
     if (geometryIsEmpty(waterGeometry)) this.removeMesh(this.waterDepthMeshes, this.waterDepthGroup, key);
-    else this.upsertMesh(this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, chunk, key, waterGeometry.clone());
+    else this.upsertMesh(this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, chunk, key, createDepthGeometry(waterGeometry));
     if (geometryIsEmpty(lavaGeometry)) this.removeMesh(this.lavaDepthMeshes, this.lavaDepthGroup, key);
     else this.upsertMesh(this.lavaDepthMeshes, this.lavaDepthGroup, this.lavaDepthMaterial, chunk, key, lavaGeometry.clone());
 
@@ -1052,9 +1061,9 @@ export class ChunkRenderer {
   }
 
   private removeMesh(
-    meshes: Map<string, THREE.Mesh>,
+    meshes: Map<number, THREE.Mesh>,
     group: THREE.Group,
-    key: string,
+    key: number,
   ): void {
     const existing = meshes.get(key);
     if (existing === undefined) return;
@@ -1064,11 +1073,11 @@ export class ChunkRenderer {
   }
 
   private upsertMesh(
-    meshes: Map<string, THREE.Mesh>,
+    meshes: Map<number, THREE.Mesh>,
     group: THREE.Group,
     material: THREE.MeshBasicMaterial,
     chunk: Chunk,
-    key: string,
+    key: number,
     geometry: THREE.BufferGeometry,
   ): void {
     if (geometryIsEmpty(geometry)) {

@@ -63,6 +63,35 @@ export class BlockBehaviourRegistry {
   }
 }
 
+export function forEachBlockBounds(
+  registry: BlockRegistry,
+  behaviours: BlockBehaviourRegistry,
+  world: BlockUpdateWorld,
+  x: number, y: number, z: number,
+  type: BoundingBoxType,
+  fullCubeScratch: AABB | undefined,
+  visitor: (bounds: AABB) => void,
+): void {
+  const blockId = world.getBlock(x, y, z);
+  if (blockId === 0) return;
+  const behaviour = behaviours.get(blockId);
+  if (behaviour.getBoundingBoxes) {
+    const ctx: BlockBehaviourContext = { world, gameTick: 0 };
+    const bounds = behaviour.getBoundingBoxes(ctx, x, y, z, type);
+    if (bounds !== undefined) {
+      for (const bound of bounds) visitor(bound);
+      return;
+    }
+  }
+  const def = registry.getById(blockId);
+  if (type === 'collision' && (!def || !def.solid)) return;
+  if (fullCubeScratch !== undefined) {
+    visitor(fullCubeScratch.setBounds(x, y, z, x + 1, y + 1, z + 1));
+  } else {
+    visitor(new AABB(x, y, z, x + 1, y + 1, z + 1));
+  }
+}
+
 export function getBlockBounds(
   registry: BlockRegistry,
   behaviours: BlockBehaviourRegistry,
@@ -70,15 +99,7 @@ export function getBlockBounds(
   x: number, y: number, z: number,
   type: BoundingBoxType
 ): AABB[] {
-  const blockId = world.getBlock(x, y, z);
-  if (blockId === 0) return [];
-  const behaviour = behaviours.get(blockId);
-  if (behaviour.getBoundingBoxes) {
-    const ctx: BlockBehaviourContext = { world, gameTick: 0 };
-    const bounds = behaviour.getBoundingBoxes(ctx, x, y, z, type);
-    if (bounds !== undefined) return bounds;
-  }
-  const def = registry.getById(blockId);
-  if (type === 'collision' && (!def || !def.solid)) return [];
-  return [new AABB(x, y, z, x + 1, y + 1, z + 1)];
+  const bounds: AABB[] = [];
+  forEachBlockBounds(registry, behaviours, world, x, y, z, type, undefined, (bound) => bounds.push(bound));
+  return bounds;
 }

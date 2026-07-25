@@ -89,6 +89,10 @@ export interface PersistencePerformanceStats {
   readonly lastFlushBarrierMs: number;
 }
 
+type MutablePersistencePerformanceStats = {
+  -readonly [Key in keyof PersistencePerformanceStats]: PersistencePerformanceStats[Key];
+};
+
 /** Aggregated service diagnostics for watchdogs / error screens / risk snapshot. */
 export interface ServiceDiagnostics {
   worldId: string | null;
@@ -115,9 +119,9 @@ export class WorldPersistenceService {
   private readonly writeExec = new PrioritySerialExecutor();
   private readonly readExec: BoundedExecutor;
   private readonly clock: () => number;
-  private readonly unloads = new Map<string, UnloadState>();
+  private readonly unloads = new Map<number, UnloadState>();
   /** chunk key -> number of accepted-but-not-settled saves (avoids re-selecting in-flight chunks). */
-  private readonly inFlightChunks = new Map<string, number>();
+  private readonly inFlightChunks = new Map<number, number>();
   private pendingBackgroundSaves = 0;
   private metadataWriteInFlight = false;
   private lastError: PersistenceErrorInfo | null = null;
@@ -129,7 +133,7 @@ export class WorldPersistenceService {
   private closed = false;
   private entityHooks: PersistenceEntityHooks | null = null;
   private simulationTickProvider: () => number = () => 0;
-  private performanceStats: PersistencePerformanceStats = {
+  private performanceStats: MutablePersistencePerformanceStats = {
     lastChunkEncodeMs: 0,
     lastChunkWriteMs: 0,
     lastChunkReadMs: 0,
@@ -233,7 +237,7 @@ export class WorldPersistenceService {
     return this.readExec.enqueue(async () => {
       const readStart = performance.now();
       const bytes = await this.backend.readRecord(worldId, METADATA_KEY);
-      this.performanceStats = { ...this.performanceStats, lastMetadataReadMs: performance.now() - readStart };
+      this.performanceStats.lastMetadataReadMs = performance.now() - readStart;
       if (bytes === undefined) {
         this.metadata = null;
         return undefined;
@@ -266,7 +270,7 @@ export class WorldPersistenceService {
       const metadataStart = performance.now();
       const bytes = encodeWorldMetadata(metadata);
       await this.backend.writeRecord(worldId, METADATA_KEY, bytes);
-      this.performanceStats = { ...this.performanceStats, lastMetadataWriteMs: performance.now() - metadataStart };
+      this.performanceStats.lastMetadataWriteMs = performance.now() - metadataStart;
     }, priority);
     return task.then(
       () => {
@@ -296,11 +300,11 @@ export class WorldPersistenceService {
     return this.readExec.enqueue(async () => {
       const readStart = performance.now();
       const bytes = await this.backend.readChunk(worldId, chunkX, chunkZ);
-      this.performanceStats = { ...this.performanceStats, lastChunkReadMs: performance.now() - readStart };
+      this.performanceStats.lastChunkReadMs = performance.now() - readStart;
       if (bytes === undefined) return undefined;
       const decodeStart = performance.now();
       const chunk = await this.decodeChunkRecord(bytes, chunkX, chunkZ, worldId);
-      this.performanceStats = { ...this.performanceStats, lastChunkDecodeMs: performance.now() - decodeStart };
+      this.performanceStats.lastChunkDecodeMs = performance.now() - decodeStart;
       return chunk;
     });
   }
@@ -327,10 +331,10 @@ export class WorldPersistenceService {
       const snapshotRevision = chunk.getPersistenceRevision();
       const encodeStart = performance.now();
       const recordBytes = await this.encodeChunkRecord(chunk, snapshotRevision);
-      this.performanceStats = { ...this.performanceStats, lastChunkEncodeMs: performance.now() - encodeStart };
+      this.performanceStats.lastChunkEncodeMs = performance.now() - encodeStart;
       const writeStart = performance.now();
       await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes);
-      this.performanceStats = { ...this.performanceStats, lastChunkWriteMs: performance.now() - writeStart };
+      this.performanceStats.lastChunkWriteMs = performance.now() - writeStart;
       // Captured-revision invariant: clean only if still at the captured revision.
       if (chunk.getPersistenceRevision() === snapshotRevision) {
         chunk.markPersistenceClean(snapshotRevision);
@@ -345,7 +349,7 @@ export class WorldPersistenceService {
     );
   }
 
-  private finishChunkSave(key: string, isBackground: boolean, error: unknown): void {
+  private finishChunkSave(key: number, isBackground: boolean, error: unknown): void {
     const count = (this.inFlightChunks.get(key) ?? 1) - 1;
     if (count <= 0) this.inFlightChunks.delete(key);
     else this.inFlightChunks.set(key, count);
@@ -430,11 +434,11 @@ export class WorldPersistenceService {
       const snapshotRevision = chunk.getPersistenceRevision();
       const encodeStart = performance.now();
       const recordBytes = await this.encodeChunkRecord(chunk, snapshotRevision);
-      this.performanceStats = { ...this.performanceStats, lastChunkEncodeMs: performance.now() - encodeStart };
+      this.performanceStats.lastChunkEncodeMs = performance.now() - encodeStart;
       if (state.canceled) return;
       const writeStart = performance.now();
       await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes);
-      this.performanceStats = { ...this.performanceStats, lastChunkWriteMs: performance.now() - writeStart };
+      this.performanceStats.lastChunkWriteMs = performance.now() - writeStart;
       if (chunk.getPersistenceRevision() === snapshotRevision) {
         chunk.markPersistenceClean(snapshotRevision);
       }
@@ -525,7 +529,7 @@ export class WorldPersistenceService {
     try {
       await this.writeExec.flushBarrier();
     } finally {
-      this.performanceStats = { ...this.performanceStats, lastFlushBarrierMs: performance.now() - start };
+      this.performanceStats.lastFlushBarrierMs = performance.now() - start;
     }
   }
 

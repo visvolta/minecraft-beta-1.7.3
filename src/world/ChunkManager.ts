@@ -1,11 +1,14 @@
 import { Chunk } from './Chunk';
+import { chunkKey } from './chunkKey';
 
 /**
  * Sole owner of loaded chunks in memory.
  * Create / lookup / remove only — no terrain, meshing, or rendering.
  */
 export class ChunkManager {
-  private readonly chunks = new Map<string, Chunk>();
+  private readonly chunks = new Map<number, Chunk>();
+  private readonly renderDirtyChunks = new Set<Chunk>();
+  private readonly persistenceDirtyChunks = new Set<Chunk>();
   private readonly removeListeners: Array<(chunk: Chunk) => void> = [];
   private readonly createListeners: Array<(chunk: Chunk) => void> = [];
 
@@ -37,6 +40,7 @@ export class ChunkManager {
 
     const chunk = new Chunk(chunkX, chunkZ);
     this.chunks.set(mapKey, chunk);
+    this.attachDirtyTracking(chunk);
     for (const listener of this.createListeners) listener(chunk);
     return chunk;
   }
@@ -50,6 +54,9 @@ export class ChunkManager {
     const chunk = this.chunks.get(mapKey);
     if (chunk === undefined) return false;
     for (const listener of this.removeListeners) listener(chunk);
+    this.renderDirtyChunks.delete(chunk);
+    this.persistenceDirtyChunks.delete(chunk);
+    chunk.setDirtyTrackingListeners(undefined, undefined);
     return this.chunks.delete(mapKey);
   }
 
@@ -66,25 +73,27 @@ export class ChunkManager {
   }
 
   public clear(): void {
+    for (const chunk of this.chunks.values()) chunk.setDirtyTrackingListeners(undefined, undefined);
     this.chunks.clear();
+    this.renderDirtyChunks.clear();
+    this.persistenceDirtyChunks.clear();
   }
 
-  /**
-   * Number of currently loaded chunks marked dirty (awaiting a mesh
-   * rebuild). Debug-overlay-only; iterates all loaded chunks, so it's
-   * O(loaded chunks) — fine at the small debug-overlay refresh rate,
-   * not intended for per-frame gameplay use.
-   */
+  public getRenderDirtyChunks(): ReadonlySet<Chunk> {
+    return this.renderDirtyChunks;
+  }
+
+  public getPersistenceDirtyChunks(): ReadonlySet<Chunk> {
+    return this.persistenceDirtyChunks;
+  }
+
+  /** Number of currently loaded chunks awaiting a mesh rebuild. */
   public countDirtyChunks(): number {
-    let count = 0;
+    return this.renderDirtyChunks.size;
+  }
 
-    for (const chunk of this.chunks.values()) {
-      if (chunk.isDirty()) {
-        count += 1;
-      }
-    }
-
-    return count;
+  public countPersistenceDirtyChunks(): number {
+    return this.persistenceDirtyChunks.size;
   }
 
   public forEach(callback: (chunk: Chunk) => void): void {
@@ -97,7 +106,22 @@ export class ChunkManager {
     return this.chunks.values();
   }
 
-  private key(chunkX: number, chunkZ: number): string {
-    return `${chunkX},${chunkZ}`;
+  private attachDirtyTracking(chunk: Chunk): void {
+    chunk.setDirtyTrackingListeners(
+      (dirtyChunk, dirty) => {
+        if (dirty) this.renderDirtyChunks.add(dirtyChunk);
+        else this.renderDirtyChunks.delete(dirtyChunk);
+      },
+      (dirtyChunk, dirty) => {
+        if (dirty) this.persistenceDirtyChunks.add(dirtyChunk);
+        else this.persistenceDirtyChunks.delete(dirtyChunk);
+      },
+    );
+    if (chunk.isDirty()) this.renderDirtyChunks.add(chunk);
+    if (chunk.isPersistenceDirty()) this.persistenceDirtyChunks.add(chunk);
+  }
+
+  private key(chunkX: number, chunkZ: number): number {
+    return chunkKey(chunkX, chunkZ);
   }
 }

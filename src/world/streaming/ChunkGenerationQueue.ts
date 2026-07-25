@@ -12,6 +12,11 @@ interface PendingChunk {
   readonly enqueuedAtMs: number;
 }
 
+interface PendingGenerationHeapEntry {
+  readonly mapKey: number;
+  readonly job: PendingChunk;
+}
+
 interface ActiveJob {
   readonly chunkX: number;
   readonly chunkZ: number;
@@ -59,8 +64,10 @@ export class ChunkGenerationQueue {
   private readonly fallbackGenerator: WorldGenerator;
   private readonly worldSeed: bigint;
   private useWorkers: boolean;
-  private readonly pending = new Map<string, PendingChunk>();
+  private readonly pending = new Map<number, PendingChunk>();
+  private readonly pendingHeap: PendingGenerationHeapEntry[] = [];
   private readonly active = new Map<number, ActiveJob>();
+  private readonly activeChunkKeys = new Set<number>();
   private readonly workers: Worker[] = [];
   private readonly idleWorkers: Worker[] = [];
   private readonly completedResults: ChunkGenerationResult[] = [];
@@ -105,7 +112,9 @@ export class ChunkGenerationQueue {
     this.workers.length = 0;
     this.idleWorkers.length = 0;
     this.pending.clear();
+    this.pendingHeap.length = 0;
     this.active.clear();
+    this.activeChunkKeys.clear();
   }
 
   public enqueue(chunkX: number, chunkZ: number, priority: number, critical: boolean): void {
@@ -113,16 +122,12 @@ export class ChunkGenerationQueue {
     if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
       return;
     }
-    for (const active of this.active.values()) {
-      if (active.chunkX === chunkX && active.chunkZ === chunkZ) {
-        return;
-      }
-    }
+    if (this.activeChunkKeys.has(mapKey)) return;
     const existing = this.pending.get(mapKey);
     if (existing !== undefined && existing.priority <= priority && existing.critical === critical) {
       return;
     }
-    this.pending.set(mapKey, {
+    this.setPending(mapKey, {
       chunkX,
       chunkZ,
       priority,
@@ -131,7 +136,7 @@ export class ChunkGenerationQueue {
     });
   }
 
-  public cancelUndesired(desired: ReadonlySet<string>): void {
+  public cancelUndesired(desired: ReadonlySet<number>): void {
     for (const mapKey of this.pending.keys()) {
       if (!desired.has(mapKey)) {
         this.pending.delete(mapKey);
@@ -142,7 +147,7 @@ export class ChunkGenerationQueue {
   public process(
     maxSyncJobs: number,
     maxSyncMs: number,
-    desired: ReadonlySet<string>,
+    desired: ReadonlySet<number>,
     allowNonCriticalDispatch: boolean,
   ): CompletedChunkGeneration[] {
     const processStart = performance.now();
@@ -170,7 +175,7 @@ export class ChunkGenerationQueue {
         break;
       }
       if (!allowNonCriticalDispatch && !next.critical) {
-        this.pending.set(chunkKey(next.chunkX, next.chunkZ), next);
+        this.setPending(chunkKey(next.chunkX, next.chunkZ), next);
         break;
       }
       if (!desired.has(chunkKey(next.chunkX, next.chunkZ))) {
@@ -226,7 +231,8 @@ export class ChunkGenerationQueue {
         const active = this.active.get(message.jobId);
         this.active.delete(message.jobId);
         if (active !== undefined) {
-          this.pending.set(chunkKey(active.chunkX, active.chunkZ), {
+          this.activeChunkKeys.delete(chunkKey(active.chunkX, active.chunkZ));
+          this.setPending(chunkKey(active.chunkX, active.chunkZ), {
             chunkX: active.chunkX,
             chunkZ: active.chunkZ,
             priority: active.priority,
@@ -241,7 +247,8 @@ export class ChunkGenerationQueue {
       this.errors += 1;
       for (const [jobId, active] of this.active) {
         if (active.worker !== worker) continue;
-        this.pending.set(chunkKey(active.chunkX, active.chunkZ), {
+        this.activeChunkKeys.delete(chunkKey(active.chunkX, active.chunkZ));
+        this.setPending(chunkKey(active.chunkX, active.chunkZ), {
           chunkX: active.chunkX,
           chunkZ: active.chunkZ,
           priority: active.priority,
@@ -255,6 +262,7 @@ export class ChunkGenerationQueue {
       this.workers.length = 0;
       this.idleWorkers.length = 0;
       this.active.clear();
+      this.activeChunkKeys.clear();
     };
     this.workers.push(worker);
     this.idleWorkers.push(worker);
@@ -267,7 +275,7 @@ export class ChunkGenerationQueue {
         return;
       }
       if (!allowNonCriticalDispatch && !next.critical) {
-        this.pending.set(chunkKey(next.chunkX, next.chunkZ), next);
+        this.setPending(chunkKey(next.chunkX, next.chunkZ), next);
         return;
       }
       const worker = this.idleWorkers.pop()!;
@@ -281,6 +289,7 @@ export class ChunkGenerationQueue {
         sentAtMs: performance.now(),
         worker,
       });
+      this.activeChunkKeys.add(chunkKey(next.chunkX, next.chunkZ));
       const job: ChunkGenerationJob = {
         type: 'generate',
         jobId,
@@ -292,12 +301,13 @@ export class ChunkGenerationQueue {
     }
   }
 
-  private drainWorkerResults(completed: CompletedChunkGeneration[], desired: ReadonlySet<string>): void {
+  private drainWorkerResults(completed: CompletedChunkGeneration[], desired: ReadonlySet<number>): void {
     while (this.completedResults.length > 0) {
       const result = this.completedResults.shift()!;
       const active = this.active.get(result.jobId);
       this.active.delete(result.jobId);
       if (active !== undefined) {
+        this.activeChunkKeys.delete(chunkKey(active.chunkX, active.chunkZ));
         this.idleWorkers.push(active.worker);
       }
 
@@ -324,24 +334,62 @@ export class ChunkGenerationQueue {
     }
   }
 
+  private setPending(mapKey: number, job: PendingChunk): void {
+    this.pending.set(mapKey, job);
+    const entry: PendingGenerationHeapEntry = { mapKey, job };
+    this.pendingHeap.push(entry);
+    this.siftPendingUp(this.pendingHeap.length - 1, performance.now());
+  }
+
   private takeNextPending(): PendingChunk | undefined {
-    let bestKey: string | undefined;
-    let best: PendingChunk | undefined;
-    let bestScore = Infinity;
     const now = performance.now();
-    for (const [mapKey, candidate] of this.pending) {
-      const ageBonus = Math.min(500, (now - candidate.enqueuedAtMs) * 0.02);
-      const score = candidate.priority - ageBonus;
-      if (best === undefined || score < bestScore) {
-        best = candidate;
-        bestKey = mapKey;
-        bestScore = score;
+    while (this.pendingHeap.length > 0) {
+      const entry = this.popPendingHeap(now);
+      if (this.pending.get(entry.mapKey) !== entry.job) continue;
+      this.pending.delete(entry.mapKey);
+      return entry.job;
+    }
+    return undefined;
+  }
+
+  private pendingScore(job: PendingChunk, now: number): number {
+    return job.priority - Math.min(500, (now - job.enqueuedAtMs) * 0.02);
+  }
+
+  private isPendingBefore(a: PendingGenerationHeapEntry, b: PendingGenerationHeapEntry, now: number): boolean {
+    const scoreA = this.pendingScore(a.job, now);
+    const scoreB = this.pendingScore(b.job, now);
+    return scoreA < scoreB || (scoreA === scoreB && a.job.enqueuedAtMs < b.job.enqueuedAtMs);
+  }
+
+  private siftPendingUp(index: number, now: number): void {
+    let child = index;
+    while (child > 0) {
+      const parent = Math.floor((child - 1) / 2);
+      if (!this.isPendingBefore(this.pendingHeap[child]!, this.pendingHeap[parent]!, now)) break;
+      [this.pendingHeap[child], this.pendingHeap[parent]] = [this.pendingHeap[parent]!, this.pendingHeap[child]!];
+      child = parent;
+    }
+  }
+
+  private popPendingHeap(now: number): PendingGenerationHeapEntry {
+    const first = this.pendingHeap[0]!;
+    const last = this.pendingHeap.pop()!;
+    if (this.pendingHeap.length > 0) {
+      this.pendingHeap[0] = last;
+      let parent = 0;
+      while (true) {
+        const left = parent * 2 + 1;
+        const right = left + 1;
+        let best = parent;
+        if (left < this.pendingHeap.length && this.isPendingBefore(this.pendingHeap[left]!, this.pendingHeap[best]!, now)) best = left;
+        if (right < this.pendingHeap.length && this.isPendingBefore(this.pendingHeap[right]!, this.pendingHeap[best]!, now)) best = right;
+        if (best === parent) break;
+        [this.pendingHeap[parent], this.pendingHeap[best]] = [this.pendingHeap[best]!, this.pendingHeap[parent]!];
+        parent = best;
       }
     }
-    if (bestKey !== undefined) {
-      this.pending.delete(bestKey);
-    }
-    return best;
+    return first;
   }
 
   private getOldestCriticalAgeMs(): number {

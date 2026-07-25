@@ -17,6 +17,11 @@ interface PendingMeshJob {
   readonly enqueuedAtMs: number;
 }
 
+interface PendingMeshHeapEntry {
+  readonly mapKey: number;
+  readonly job: PendingMeshJob;
+}
+
 interface ActiveMeshJob {
   readonly chunkX: number;
   readonly chunkZ: number;
@@ -117,16 +122,19 @@ export class ChunkMeshingQueue {
   private readonly chunkManager: ChunkManager;
   private readonly atlas: TextureAtlas;
   private useWorkers = typeof Worker !== 'undefined' && isWorkerFeatureEnabled('meshing');
-  private readonly pending = new Map<string, PendingMeshJob>();
+  private readonly pending = new Map<number, PendingMeshJob>();
+  private readonly pendingHeap: PendingMeshHeapEntry[] = [];
   private readonly active = new Map<number, ActiveMeshJob>();
+  private readonly activeChunkKeys = new Set<number>();
   private readonly workers: Worker[] = [];
+  private readonly workerSnapshotRevisions = new Map<Worker, Map<number, { chunkX: number; chunkZ: number; revision: number }>>();
   private readonly idleWorkers: Worker[] = [];
   private readonly completedResults: ChunkMeshResult[] = [];
   private readonly pendingUploads: ChunkMeshResult[] = [];
   private readonly pendingUploadKeys = new Set<string>();
-  private readonly uploadedRevisions = new Map<string, number>();
-  private readonly dispatchCounts = new Map<string, number>();
-  private readonly staleCounts = new Map<string, number>();
+  private readonly uploadedRevisions = new Map<number, number>();
+  private readonly dispatchCounts = new Map<number, number>();
+  private readonly staleCounts = new Map<number, number>();
   private nextJobId = 1;
   private completed = 0;
   private stale = 0;
@@ -168,9 +176,12 @@ export class ChunkMeshingQueue {
   public dispose(): void {
     for (const worker of this.workers) worker.terminate();
     this.workers.length = 0;
+    this.workerSnapshotRevisions.clear();
     this.idleWorkers.length = 0;
     this.pending.clear();
+    this.pendingHeap.length = 0;
     this.active.clear();
+    this.activeChunkKeys.clear();
     this.completedResults.length = 0;
     this.pendingUploads.length = 0;
     this.pendingUploadKeys.clear();
@@ -184,14 +195,12 @@ export class ChunkMeshingQueue {
     const revision = chunk.getRevision();
     if (this.uploadedRevisions.get(mapKey) === revision) return;
     if (this.pendingUploadKeys.has(this.revisionKey(chunk.chunkX, chunk.chunkZ, revision))) return;
-    for (const active of this.active.values()) {
-      if (active.chunkX === chunk.chunkX && active.chunkZ === chunk.chunkZ) return;
-    }
+    if (this.activeChunkKeys.has(mapKey)) return;
 
     const existing = this.pending.get(mapKey);
     if (existing !== undefined) {
       if (priority < existing.priority) {
-        this.pending.set(mapKey, {
+        this.setPending(mapKey, {
           chunkX: chunk.chunkX,
           chunkZ: chunk.chunkZ,
           priority,
@@ -201,7 +210,7 @@ export class ChunkMeshingQueue {
       return;
     }
 
-    this.pending.set(mapKey, {
+    this.setPending(mapKey, {
       chunkX: chunk.chunkX,
       chunkZ: chunk.chunkZ,
       priority,
@@ -305,6 +314,7 @@ export class ChunkMeshingQueue {
 
   private spawnWorker(): void {
     const worker = new Worker(new URL('../../workers/chunkMeshingWorker.ts', import.meta.url), { type: 'module' });
+    this.workerSnapshotRevisions.set(worker, new Map());
     worker.onmessage = (event: MessageEvent<ChunkMeshResult | { type: 'meshError'; jobId: number; message: string }>): void => {
       const message = event.data;
       if (message.type === 'meshResult') {
@@ -314,7 +324,8 @@ export class ChunkMeshingQueue {
         const active = this.active.get(message.jobId);
         this.active.delete(message.jobId);
         if (active !== undefined) {
-          this.pending.set(chunkKey(active.chunkX, active.chunkZ), {
+          this.activeChunkKeys.delete(chunkKey(active.chunkX, active.chunkZ));
+          this.setPending(chunkKey(active.chunkX, active.chunkZ), {
             chunkX: active.chunkX,
             chunkZ: active.chunkZ,
             priority: active.priority,
@@ -328,7 +339,8 @@ export class ChunkMeshingQueue {
       this.errors += 1;
       for (const [jobId, active] of this.active) {
         if (active.worker !== worker) continue;
-        this.pending.set(chunkKey(active.chunkX, active.chunkZ), {
+        this.activeChunkKeys.delete(chunkKey(active.chunkX, active.chunkZ));
+        this.setPending(chunkKey(active.chunkX, active.chunkZ), {
           chunkX: active.chunkX,
           chunkZ: active.chunkZ,
           priority: active.priority,
@@ -341,6 +353,8 @@ export class ChunkMeshingQueue {
       this.workers.length = 0;
       this.idleWorkers.length = 0;
       this.active.clear();
+      this.activeChunkKeys.clear();
+      this.workerSnapshotRevisions.clear();
     };
     worker.postMessage({ type: 'init', atlasUvs: this.atlas.getAllUvRects().map(([name, rect]) => ({ name, rect })), worldSeed: this.worldSeed.toString() });
     this.workers.push(worker);
@@ -364,7 +378,7 @@ export class ChunkMeshingQueue {
       const jobId = this.nextJobId++;
       const revision = chunk.getRevision();
       const jobStart = performance.now();
-      const job = this.buildJob(jobId, chunk, revision);
+      const job = this.buildJob(jobId, chunk, revision, worker);
       const jobBuildMs = performance.now() - jobStart;
       this.lastJobBuildMs += jobBuildMs;
       const bytesTransferred = this.snapshotBytes(job);
@@ -384,6 +398,7 @@ export class ChunkMeshingQueue {
         bytesCopied,
         worker,
       });
+      this.activeChunkKeys.add(chunkKey(chunk.chunkX, chunk.chunkZ));
       const mapKey = chunkKey(chunk.chunkX, chunk.chunkZ);
       this.dispatchCounts.set(mapKey, (this.dispatchCounts.get(mapKey) ?? 0) + 1);
       const transfers: Transferable[] = [];
@@ -404,6 +419,7 @@ export class ChunkMeshingQueue {
       const active = this.active.get(result.jobId);
       this.active.delete(result.jobId);
       if (active !== undefined) {
+        this.activeChunkKeys.delete(chunkKey(active.chunkX, active.chunkZ));
         this.idleWorkers.push(active.worker);
         this.lastWorkerDurationMs = result.durationMs;
         this.lastTransferLatencyMs = Math.max(0, performance.now() - active.sentAtMs - result.durationMs);
@@ -426,23 +442,36 @@ export class ChunkMeshingQueue {
     this.lastDrainMs = performance.now() - drainStart;
   }
 
-  private buildJob(jobId: number, target: Chunk, revision: number): ChunkMeshJob {
+  private buildJob(jobId: number, target: Chunk, revision: number, worker: Worker): ChunkMeshJob {
     const chunks = [];
+    const cached = this.workerSnapshotRevisions.get(worker);
+    if (cached === undefined) throw new Error('Missing meshing worker snapshot cache.');
+
+    for (const [key, entry] of cached) {
+      if (Math.abs(entry.chunkX - target.chunkX) > 1 || Math.abs(entry.chunkZ - target.chunkZ) > 1) cached.delete(key);
+    }
+
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
         const chunk = this.chunkManager.getChunk(target.chunkX + dx, target.chunkZ + dz);
         if (chunk === undefined) continue;
+        const chunkRevision = chunk.getRevision();
+        const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+        const previous = cached.get(key);
+        if (previous?.revision === chunkRevision) continue;
+
         const blocks = chunk.copyBlocks();
         const metadata = chunk.copyMetadata();
         const light = chunk.copyLight();
         chunks.push({
           chunkX: chunk.chunkX,
           chunkZ: chunk.chunkZ,
-          revision: chunk.getRevision(),
+          revision: chunkRevision,
           blocks: blocks.buffer as ArrayBuffer,
           metadata: metadata.buffer as ArrayBuffer,
           light: light.buffer as ArrayBuffer,
         });
+        cached.set(key, { chunkX: chunk.chunkX, chunkZ: chunk.chunkZ, revision: chunkRevision });
       }
     }
     return {
@@ -504,6 +533,7 @@ export class ChunkMeshingQueue {
 
   private onChunkRemoved(chunkX: number, chunkZ: number): void {
     const mapKey = chunkKey(chunkX, chunkZ);
+    for (const cached of this.workerSnapshotRevisions.values()) cached.delete(mapKey);
     this.pending.delete(mapKey);
     this.removePendingUploadsForChunk(chunkX, chunkZ);
     this.pendingUploadKeys.forEach((revisionKey) => {
@@ -518,21 +548,61 @@ export class ChunkMeshingQueue {
     return `${chunkX},${chunkZ}@${revision}`;
   }
 
+  private setPending(mapKey: number, job: PendingMeshJob): void {
+    this.pending.set(mapKey, job);
+    const entry: PendingMeshHeapEntry = { mapKey, job };
+    this.pendingHeap.push(entry);
+    this.siftPendingUp(this.pendingHeap.length - 1, performance.now());
+  }
+
   private takeNextPending(): PendingMeshJob | undefined {
-    let bestKey: string | undefined;
-    let best: PendingMeshJob | undefined;
-    let bestScore = Infinity;
     const now = performance.now();
-    for (const [mapKey, candidate] of this.pending) {
-      const ageBonus = Math.min(500, (now - candidate.enqueuedAtMs) * 0.02);
-      const score = candidate.priority - ageBonus;
-      if (best === undefined || score < bestScore) {
-        best = candidate;
-        bestKey = mapKey;
-        bestScore = score;
+    while (this.pendingHeap.length > 0) {
+      const entry = this.popPendingHeap(now);
+      if (this.pending.get(entry.mapKey) !== entry.job) continue;
+      this.pending.delete(entry.mapKey);
+      return entry.job;
+    }
+    return undefined;
+  }
+
+  private pendingScore(job: PendingMeshJob, now: number): number {
+    return job.priority - Math.min(500, (now - job.enqueuedAtMs) * 0.02);
+  }
+
+  private isPendingBefore(a: PendingMeshHeapEntry, b: PendingMeshHeapEntry, now: number): boolean {
+    const scoreA = this.pendingScore(a.job, now);
+    const scoreB = this.pendingScore(b.job, now);
+    return scoreA < scoreB || (scoreA === scoreB && a.job.enqueuedAtMs < b.job.enqueuedAtMs);
+  }
+
+  private siftPendingUp(index: number, now: number): void {
+    let child = index;
+    while (child > 0) {
+      const parent = Math.floor((child - 1) / 2);
+      if (!this.isPendingBefore(this.pendingHeap[child]!, this.pendingHeap[parent]!, now)) break;
+      [this.pendingHeap[child], this.pendingHeap[parent]] = [this.pendingHeap[parent]!, this.pendingHeap[child]!];
+      child = parent;
+    }
+  }
+
+  private popPendingHeap(now: number): PendingMeshHeapEntry {
+    const first = this.pendingHeap[0]!;
+    const last = this.pendingHeap.pop()!;
+    if (this.pendingHeap.length > 0) {
+      this.pendingHeap[0] = last;
+      let parent = 0;
+      while (true) {
+        const left = parent * 2 + 1;
+        const right = left + 1;
+        let best = parent;
+        if (left < this.pendingHeap.length && this.isPendingBefore(this.pendingHeap[left]!, this.pendingHeap[best]!, now)) best = left;
+        if (right < this.pendingHeap.length && this.isPendingBefore(this.pendingHeap[right]!, this.pendingHeap[best]!, now)) best = right;
+        if (best === parent) break;
+        [this.pendingHeap[parent], this.pendingHeap[best]] = [this.pendingHeap[best]!, this.pendingHeap[parent]!];
+        parent = best;
       }
     }
-    if (bestKey !== undefined) this.pending.delete(bestKey);
-    return best;
+    return first;
   }
 }

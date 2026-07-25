@@ -57,6 +57,7 @@ export interface PopulatedMeshAttributeBuffers {
   readonly fluidTextureKinds: ArrayBuffer;
   readonly fluidFrameUvs: ArrayBuffer;
   readonly indices: ArrayBuffer;
+  readonly indexType: 'uint16' | 'uint32';
   readonly vertexCount: number;
   readonly indexCount: number;
 }

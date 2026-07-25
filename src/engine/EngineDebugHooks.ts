@@ -10,6 +10,7 @@ import { fluidSurfaceHeight, getFluidLevel, isFallingFluid } from '../world/flui
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import type { ChunkManager } from '../world/ChunkManager';
 import type { RedstonePowerEngine } from '../world/redstone/RedstonePowerEngine';
+import type { LightEngine } from '../world/generation/lighting/LightEngine';
 import type { WorldTickScheduler } from '../world/ticks/WorldTickScheduler';
 import type { PrecipitationSimulator } from '../world/weather/PrecipitationSimulator';
 import type { WeatherController } from '../world/weather/WeatherController';
@@ -40,6 +41,7 @@ export interface EngineDebugHookDependencies {
   readonly entityManager: EntityManager;
   readonly worldTickScheduler: WorldTickScheduler;
   readonly redstonePowerEngine: RedstonePowerEngine;
+  readonly lightEngine: LightEngine;
   readonly fallingBlockManager: FallingBlockManager;
   readonly worldEventQueue: WorldEventQueue;
   readonly blockTestGrid: BlockTestGrid;
@@ -131,6 +133,7 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
     setProfilerEnabled: (enabled: boolean) => {
       try { window.localStorage.setItem('minecraft.profiler.enabled', enabled ? 'true' : 'false'); } catch { /* ignore unavailable storage */ }
       deps.performanceProfiler.setEnabled(enabled);
+      deps.lightEngine.setMetricsEnabled(enabled);
       return deps.performanceProfiler.isEnabled();
     },
     getPerformanceSnapshot: () => deps.performanceProfiler.getSnapshot(),

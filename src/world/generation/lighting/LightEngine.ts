@@ -2,6 +2,7 @@ import type { ChunkManager } from '../../ChunkManager';
 import type { BlockRegistry } from '../../../blocks/BlockRegistry';
 import type { Chunk } from '../../Chunk';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../../chunkConstants';
+import { chunkKey } from '../../chunkKey';
 
 export interface LightEngineMetrics {
   readonly propagationCalls: number;
@@ -44,6 +45,7 @@ const NEIGHBORS = [
 export class LightEngine {
   private readonly chunkManager: ChunkManager;
   private readonly blockRegistry: BlockRegistry;
+  private metricsEnabled = false;
 
   // BFS queue metrics for profiling
   private propagationCallsCount = 0;
@@ -66,11 +68,15 @@ export class LightEngine {
   private queuePushes = 0;
   private removeQueuePushes = 0;
   private queueNodeAllocations = 0;
-  private readonly remeshFanOutChunkKeys = new Set<string>();
+  private readonly remeshFanOutChunkKeys = new Set<number>();
 
   public constructor(chunkManager: ChunkManager, blockRegistry: BlockRegistry) {
     this.chunkManager = chunkManager;
     this.blockRegistry = blockRegistry;
+  }
+
+  public setMetricsEnabled(enabled: boolean): void {
+    this.metricsEnabled = enabled;
   }
 
   /** Returns and resets accumulated BFS queue metrics for profiling. */
@@ -135,100 +141,100 @@ export class LightEngine {
   // ==========================================
 
   public getBlock(x: number, y: number, z: number): number {
-    this.blockReads++;
+    if (this.metricsEnabled) this.blockReads++;
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
-    this.coordinateConversions++;
+    if (this.metricsEnabled) this.coordinateConversions++;
     const chunkX = Math.floor(x / CHUNK_SIZE_X);
     const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
     const localX = x - chunkX * CHUNK_SIZE_X;
     const localZ = z - chunkZ * CHUNK_SIZE_Z;
-    this.chunkLookups++;
+    if (this.metricsEnabled) this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    if (chunk === undefined) { this.missingChunkLookups++; return 0; }
+    if (chunk === undefined) { if (this.metricsEnabled) this.missingChunkLookups++; return 0; }
     return chunk.getBlock(localX, y, localZ);
   }
 
   public getSkylight(x: number, y: number, z: number): number {
-    this.lightReads++;
+    if (this.metricsEnabled) this.lightReads++;
     if (y < 0) return 0;
     if (y >= CHUNK_SIZE_Y) return 15; // Void above gets full skylight
-    this.coordinateConversions++;
+    if (this.metricsEnabled) this.coordinateConversions++;
     const chunkX = Math.floor(x / CHUNK_SIZE_X);
     const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
     const localX = x - chunkX * CHUNK_SIZE_X;
     const localZ = z - chunkZ * CHUNK_SIZE_Z;
-    this.chunkLookups++;
+    if (this.metricsEnabled) this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    if (chunk === undefined) { this.missingChunkLookups++; return y >= 64 ? 15 : 0; }
+    if (chunk === undefined) { if (this.metricsEnabled) this.missingChunkLookups++; return y >= 64 ? 15 : 0; }
     return chunk.getSkylight(localX, y, localZ);
   }
 
   public setSkylight(x: number, y: number, z: number, val: number): void {
     if (y < 0 || y >= CHUNK_SIZE_Y) return;
-    this.coordinateConversions++;
+    if (this.metricsEnabled) this.coordinateConversions++;
     const chunkX = Math.floor(x / CHUNK_SIZE_X);
     const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
     const localX = x - chunkX * CHUNK_SIZE_X;
     const localZ = z - chunkZ * CHUNK_SIZE_Z;
-    this.chunkLookups++;
+    if (this.metricsEnabled) this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
     if (chunk) {
       if (chunk.getSkylight(localX, y, localZ) !== (val & 0x0F)) {
-        this.lightWrites++;
-        this.remeshFanOutChunkKeys.add(`${chunkX},${chunkZ}`);
+        if (this.metricsEnabled) this.lightWrites++;
+        if (this.metricsEnabled) this.remeshFanOutChunkKeys.add(chunkKey(chunkX, chunkZ));
       }
       chunk.setSkylight(localX, y, localZ, val);
     } else {
-      this.missingChunkLookups++;
+      if (this.metricsEnabled) this.missingChunkLookups++;
     }
   }
 
   public getBlocklight(x: number, y: number, z: number): number {
-    this.lightReads++;
+    if (this.metricsEnabled) this.lightReads++;
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
-    this.coordinateConversions++;
+    if (this.metricsEnabled) this.coordinateConversions++;
     const chunkX = Math.floor(x / CHUNK_SIZE_X);
     const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
     const localX = x - chunkX * CHUNK_SIZE_X;
     const localZ = z - chunkZ * CHUNK_SIZE_Z;
-    this.chunkLookups++;
+    if (this.metricsEnabled) this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    if (chunk === undefined) { this.missingChunkLookups++; return 0; }
+    if (chunk === undefined) { if (this.metricsEnabled) this.missingChunkLookups++; return 0; }
     return chunk.getBlocklight(localX, y, localZ);
   }
 
   public setBlocklight(x: number, y: number, z: number, val: number): void {
     if (y < 0 || y >= CHUNK_SIZE_Y) return;
-    this.coordinateConversions++;
+    if (this.metricsEnabled) this.coordinateConversions++;
     const chunkX = Math.floor(x / CHUNK_SIZE_X);
     const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
     const localX = x - chunkX * CHUNK_SIZE_X;
     const localZ = z - chunkZ * CHUNK_SIZE_Z;
-    this.chunkLookups++;
+    if (this.metricsEnabled) this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
     if (chunk) {
       if (chunk.getBlocklight(localX, y, localZ) !== (val & 0x0F)) {
-        this.lightWrites++;
-        this.remeshFanOutChunkKeys.add(`${chunkX},${chunkZ}`);
+        if (this.metricsEnabled) this.lightWrites++;
+        if (this.metricsEnabled) this.remeshFanOutChunkKeys.add(chunkKey(chunkX, chunkZ));
       }
       chunk.setBlocklight(localX, y, localZ, val);
     } else {
-      this.missingChunkLookups++;
+      if (this.metricsEnabled) this.missingChunkLookups++;
     }
   }
 
   public getOpacity(x: number, y: number, z: number): number {
-    this.opacityQueries++;
+    if (this.metricsEnabled) this.opacityQueries++;
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
-    this.coordinateConversions++;
+    if (this.metricsEnabled) this.coordinateConversions++;
     const chunkX = Math.floor(x / CHUNK_SIZE_X);
     const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
     const localX = x - chunkX * CHUNK_SIZE_X;
     const localZ = z - chunkZ * CHUNK_SIZE_Z;
-    this.chunkLookups++;
+    if (this.metricsEnabled) this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
     if (!chunk) {
-      this.missingChunkLookups++;
+      if (this.metricsEnabled) this.missingChunkLookups++;
       return y >= 64 ? 0 : 15; // Unloaded chunk: Air above sea level, Solid stone below
     }
 
@@ -246,7 +252,7 @@ export class LightEngine {
   }
 
   public getEmission(x: number, y: number, z: number): number {
-    this.emissionQueries++;
+    if (this.metricsEnabled) this.emissionQueries++;
     const blockId = this.getBlock(x, y, z);
     if (blockId === 0) return 0;
 
@@ -324,16 +330,16 @@ export class LightEngine {
 
   public propagateSkylightQueue(queue: number[]): void {
     const metricsStart = performance.now();
-    this.propagationCallsCount++;
+    if (this.metricsEnabled) this.propagationCallsCount++;
     const initialQueueNodes = queue.length / 3;
-    if (initialQueueNodes > this.maxBfsQueueSize) this.maxBfsQueueSize = initialQueueNodes;
-    this.totalBfsQueueSize += initialQueueNodes;
+    if (this.metricsEnabled && initialQueueNodes > this.maxBfsQueueSize) this.maxBfsQueueSize = initialQueueNodes;
+    if (this.metricsEnabled) this.totalBfsQueueSize += initialQueueNodes;
     let head = 0;
     while (head < queue.length) {
       const cx = queue[head++]!;
       const cy = queue[head++]!;
       const cz = queue[head++]!;
-      this.nodesProcessed++;
+      if (this.metricsEnabled) this.nodesProcessed++;
       const currentLight = this.getSkylight(cx, cy, cz);
 
       for (const { dx, dy, dz } of NEIGHBORS) {
@@ -342,7 +348,7 @@ export class LightEngine {
         const nz = cz + dz;
 
         if (ny < 0 || ny >= CHUNK_SIZE_Y) continue;
-        if ((dx !== 0 && Math.floor(nx / CHUNK_SIZE_X) !== Math.floor(cx / CHUNK_SIZE_X)) || (dz !== 0 && Math.floor(nz / CHUNK_SIZE_Z) !== Math.floor(cz / CHUNK_SIZE_Z))) this.boundaryTraversals++;
+        if ((dx !== 0 && Math.floor(nx / CHUNK_SIZE_X) !== Math.floor(cx / CHUNK_SIZE_X)) || (dz !== 0 && Math.floor(nz / CHUNK_SIZE_Z) !== Math.floor(cz / CHUNK_SIZE_Z))) if (this.metricsEnabled) this.boundaryTraversals++;
 
         const opacity = this.getOpacity(nx, ny, nz);
         const expected = currentLight - Math.max(1, opacity);
@@ -359,16 +365,16 @@ export class LightEngine {
 
   public propagateBlocklightQueue(queue: number[]): void {
     const metricsStart = performance.now();
-    this.propagationCallsCount++;
+    if (this.metricsEnabled) this.propagationCallsCount++;
     const initialQueueNodes = queue.length / 3;
-    if (initialQueueNodes > this.maxBfsQueueSize) this.maxBfsQueueSize = initialQueueNodes;
-    this.totalBfsQueueSize += initialQueueNodes;
+    if (this.metricsEnabled && initialQueueNodes > this.maxBfsQueueSize) this.maxBfsQueueSize = initialQueueNodes;
+    if (this.metricsEnabled) this.totalBfsQueueSize += initialQueueNodes;
     let head = 0;
     while (head < queue.length) {
       const cx = queue[head++]!;
       const cy = queue[head++]!;
       const cz = queue[head++]!;
-      this.nodesProcessed++;
+      if (this.metricsEnabled) this.nodesProcessed++;
       const currentLight = this.getBlocklight(cx, cy, cz);
 
       for (const { dx, dy, dz } of NEIGHBORS) {
@@ -377,7 +383,7 @@ export class LightEngine {
         const nz = cz + dz;
 
         if (ny < 0 || ny >= CHUNK_SIZE_Y) continue;
-        if ((dx !== 0 && Math.floor(nx / CHUNK_SIZE_X) !== Math.floor(cx / CHUNK_SIZE_X)) || (dz !== 0 && Math.floor(nz / CHUNK_SIZE_Z) !== Math.floor(cz / CHUNK_SIZE_Z))) this.boundaryTraversals++;
+        if ((dx !== 0 && Math.floor(nx / CHUNK_SIZE_X) !== Math.floor(cx / CHUNK_SIZE_X)) || (dz !== 0 && Math.floor(nz / CHUNK_SIZE_Z) !== Math.floor(cz / CHUNK_SIZE_Z))) if (this.metricsEnabled) this.boundaryTraversals++;
 
         const opacity = this.getOpacity(nx, ny, nz);
         const expected = currentLight - Math.max(1, opacity);
@@ -415,14 +421,14 @@ export class LightEngine {
     // Calculate new base value at the coordinate itself
     let newLight = 0;
     if (isSky) {
-      this.coordinateConversions++;
+      if (this.metricsEnabled) this.coordinateConversions++;
       const chunkX = Math.floor(wx / CHUNK_SIZE_X);
       const chunkZ = Math.floor(wz / CHUNK_SIZE_Z);
       const localX = wx - chunkX * CHUNK_SIZE_X;
       const localZ = wz - chunkZ * CHUNK_SIZE_Z;
-      this.chunkLookups++;
+      if (this.metricsEnabled) this.chunkLookups++;
       const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-      if (chunk === undefined) this.missingChunkLookups++;
+      if (chunk === undefined) if (this.metricsEnabled) this.missingChunkLookups++;
       const height = chunk ? chunk.getHeight(localX, localZ) : 128;
       if (wy >= height) {
         newLight = 15;
@@ -590,12 +596,12 @@ export class LightEngine {
 
   private pushLightQueue(queue: number[], x: number, y: number, z: number): void {
     queue.push(x, y, z);
-    this.queuePushes++;
+    if (this.metricsEnabled) this.queuePushes++;
   }
 
   private pushRemoveQueue(queue: number[], x: number, y: number, z: number, val: number): void {
     queue.push(x, y, z, val);
-    this.removeQueuePushes++;
+    if (this.metricsEnabled) this.removeQueuePushes++;
   }
 
 }

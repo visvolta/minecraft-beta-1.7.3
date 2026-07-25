@@ -143,7 +143,7 @@ export class WorkerValidationHarness {
     if (expectedVertexCount !== actual.vertexCount) return `${label}.vertexCount mismatch ${expectedVertexCount} !== ${actual.vertexCount}`;
     const expectedIndex = expected.getIndex()?.array as ArrayLike<number> | undefined;
     const expectedIndices = expectedIndex === undefined ? new Uint32Array() : new Uint32Array(expectedIndex);
-    const actualIndices = new Uint32Array(populated.indices);
+    const actualIndices = populated.indexType === 'uint16' ? new Uint16Array(populated.indices) : new Uint32Array(populated.indices);
     if (expectedIndices.length !== actualIndices.length) return `${label}.indices length mismatch ${expectedIndices.length} !== ${actualIndices.length}`;
     for (let i = 0; i < expectedIndices.length; i++) {
       if (expectedIndices[i] !== actualIndices[i]) return `${label}.indices[${i}] mismatch: ${expectedIndices[i]} !== ${actualIndices[i]}`;

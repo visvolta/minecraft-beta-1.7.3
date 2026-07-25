@@ -106,6 +106,8 @@ function transferList(result: ChunkMeshResult): Transferable[] {
 }
 
 let workerWorldSeed: string | null = null;
+let workerVegetationColors: VegetationColorProvider | null = null;
+const workerManager = new ChunkManager();
 
 const workerSelf = self as unknown as {
   onmessage: ((event: MessageEvent<ChunkMeshWorkerMessage>) => void) | null;
@@ -115,24 +117,31 @@ const workerSelf = self as unknown as {
 workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
   const job = event.data;
   if (job.type === 'init') {
+    workerManager.clear();
     atlas.set(job.atlasUvs);
     workerWorldSeed = job.worldSeed;
+    workerVegetationColors = new VegetationColorProvider(BigInt(job.worldSeed));
     return;
   }
   if (job.type !== 'mesh') return;
 
   try {
     const start = performance.now();
-    const manager = new ChunkManager();
     for (const snapshot of job.chunks) {
-      const chunk = manager.getOrCreateChunk(snapshot.chunkX, snapshot.chunkZ);
+      const chunk = workerManager.getOrCreateChunk(snapshot.chunkX, snapshot.chunkZ);
       chunk.loadGeneratedBlocks(new Uint8Array(snapshot.blocks));
       chunk.loadGeneratedMetadata(new Uint8Array(snapshot.metadata));
       chunk.loadLightData(new Uint8Array(snapshot.light));
       chunk.markClean();
     }
 
-    const target = manager.getChunk(job.targetChunkX, job.targetChunkZ);
+    for (const chunk of workerManager) {
+      if (Math.abs(chunk.chunkX - job.targetChunkX) > 1 || Math.abs(chunk.chunkZ - job.targetChunkZ) > 1) {
+        workerManager.removeChunk(chunk.chunkX, chunk.chunkZ);
+      }
+    }
+
+    const target = workerManager.getChunk(job.targetChunkX, job.targetChunkZ);
     if (target === undefined) {
       throw new Error(`Missing target chunk ${job.targetChunkX},${job.targetChunkZ}`);
     }
@@ -140,8 +149,11 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
     if (job.atlasUvs !== undefined) atlas.set(job.atlasUvs);
     const seed = job.worldSeed ?? workerWorldSeed;
     if (seed === null) throw new Error('Chunk meshing worker received mesh job before init.');
-    const vegetationColors = new VegetationColorProvider(BigInt(seed));
-    const mesher = new ChunkMesher(manager, registry, atlas as never, vegetationColors);
+    if (workerVegetationColors === null || workerWorldSeed !== seed) {
+      workerWorldSeed = seed;
+      workerVegetationColors = new VegetationColorProvider(BigInt(seed));
+    }
+    const mesher = new ChunkMesher(workerManager, registry, atlas as never, workerVegetationColors);
     const mask = computeChunkPassMask(target.getBlockDataView(), registry);
     const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? mesher.build(target) : null;
     const waterGeometry = hasChunkPass(mask, ChunkPassMask.Water) ? mesher.buildWater(target) : null;

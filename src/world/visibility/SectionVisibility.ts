@@ -5,6 +5,7 @@ import type { Chunk } from '../Chunk';
 import type { ChunkManager } from '../ChunkManager';
 import { CHUNK_SECTION_COUNT, CHUNK_SECTION_HEIGHT, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../chunkConstants';
 import { classifyBlockPassMask } from '../../rendering/meshing/ChunkPassMask';
+import { chunkKey } from '../chunkKey';
 
 const FACE_NEG_X = 0;
 const FACE_POS_X = 1;
@@ -80,7 +81,7 @@ export class SectionVisibilityAnalyzer {
     let emptySections = 0;
     let renderableSections = 0;
     let frustumVisibleSections = 0;
-    const frustumVisibleChunks = new Set<string>();
+    const frustumVisibleChunks = new Set<number>();
 
     for (const chunk of this.chunkManager) {
       const metas = this.getChunkSectionMetadata(chunk);
@@ -94,7 +95,7 @@ export class SectionVisibilityAnalyzer {
           renderableSections++;
           if (inFrustum) {
             frustumVisibleSections++;
-            frustumVisibleChunks.add(`${chunk.chunkX},${chunk.chunkZ}`);
+            frustumVisibleChunks.add(chunkKey(chunk.chunkX, chunk.chunkZ));
           }
         }
       }
@@ -106,12 +107,12 @@ export class SectionVisibilityAnalyzer {
       : this.traverseReachableSections(cameraChunkX, cameraSectionY, cameraChunkZ);
 
     let portalVisibleSections = 0;
-    const portalVisibleChunks = new Set<string>();
+    const portalVisibleChunks = new Set<number>();
     for (const entry of loaded) {
       if (entry.meta.renderMask === 0 || !entry.inFrustum) continue;
       if (!reachableSectionKeys.has(sectionKey(entry.chunk.chunkX, entry.sectionIndex, entry.chunk.chunkZ))) continue;
       portalVisibleSections++;
-      portalVisibleChunks.add(`${entry.chunk.chunkX},${entry.chunk.chunkZ}`);
+      portalVisibleChunks.add(chunkKey(entry.chunk.chunkX, entry.chunk.chunkZ));
     }
 
     const frustumRejectedSections = renderableSections - frustumVisibleSections;

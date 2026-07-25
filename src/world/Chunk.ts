@@ -46,10 +46,10 @@ export class Chunk {
   public readonly chunkX: number;
   public readonly chunkZ: number;
 
-  private readonly blocks: Uint8Array;
-  private readonly metadata: Uint8Array;
-  private readonly light: Uint8Array;
-  private readonly sectionNonAirCounts: Uint16Array;
+  private blocks: Uint8Array;
+  private metadata: Uint8Array;
+  private light: Uint8Array;
+  private sectionNonAirCounts: Uint16Array;
   private dirty: boolean;
   private blockRevision = 0;
   private metadataRevision = 0;
@@ -62,6 +62,8 @@ export class Chunk {
   private corrupt = false;
   private hasPersistedLightingData = false;
   private readonly scheduledTicks = new ScheduledTickQueue(() => this.markPersistenceDirty());
+  private renderDirtyListener: ((chunk: Chunk, dirty: boolean) => void) | undefined;
+  private persistenceDirtyListener: ((chunk: Chunk, dirty: boolean) => void) | undefined;
 
   /**
    * Cached per-column height: for each (localX, localZ), one past the
@@ -99,13 +101,25 @@ export class Chunk {
     return this.dirty;
   }
 
+  public setDirtyTrackingListeners(
+    renderListener: ((chunk: Chunk, dirty: boolean) => void) | undefined,
+    persistenceListener: ((chunk: Chunk, dirty: boolean) => void) | undefined,
+  ): void {
+    this.renderDirtyListener = renderListener;
+    this.persistenceDirtyListener = persistenceListener;
+  }
+
   public markDirty(): void {
+    const wasDirty = this.dirty;
     this.dirty = true;
     this.meshRevision += 1;
+    if (!wasDirty) this.renderDirtyListener?.(this, true);
   }
 
   private markPersistenceDirty(): void {
+    const wasDirty = this.isPersistenceDirty();
     this.persistenceRevision += 1;
+    if (!wasDirty) this.persistenceDirtyListener?.(this, true);
   }
 
   /**
@@ -132,10 +146,12 @@ export class Chunk {
     if (this.lastSavedRevision < savedRevision) {
       this.lastSavedRevision = savedRevision;
     }
+    if (!this.isPersistenceDirty()) this.persistenceDirtyListener?.(this, false);
   }
 
   public markAsLoadedFromDisk(): void {
     this.lastSavedRevision = this.persistenceRevision;
+    this.persistenceDirtyListener?.(this, false);
   }
 
   public isTerrainPopulated(): boolean {
@@ -212,7 +228,9 @@ export class Chunk {
   }
 
   public markClean(): void {
+    if (!this.dirty) return;
     this.dirty = false;
+    this.renderDirtyListener?.(this, false);
   }
 
   public isInBounds(localX: number, localY: number, localZ: number): boolean {
@@ -448,6 +466,36 @@ export class Chunk {
    */
   public getBlockDataView(): Uint8Array {
     return this.blocks;
+  }
+
+  /**
+   * Adopts decoded storage from a throwaway persistence chunk. The source must
+   * be discarded immediately after this call; no persistence format or array
+   * contents are changed. Scheduled ticks are transferred separately because
+   * their queue owns simulation-time state rather than raw chunk storage.
+   */
+  public adoptStorageFrom(source: Chunk): void {
+    if (source.chunkX !== this.chunkX || source.chunkZ !== this.chunkZ) {
+      throw new RangeError(`Cannot adopt chunk storage from ${source.chunkX},${source.chunkZ} into ${this.chunkX},${this.chunkZ}.`);
+    }
+    this.blocks = source.blocks;
+    this.metadata = source.metadata;
+    this.light = source.light;
+    this.sectionNonAirCounts = source.sectionNonAirCounts;
+    this.heightmap = source.heightmap;
+    this.precipitationHeightmap = source.precipitationHeightmap;
+    this.blockRevision = source.blockRevision;
+    this.metadataRevision = source.metadataRevision;
+    this.meshRevision = source.meshRevision;
+    this.lightRevision = source.lightRevision;
+    this.weatherRevision = source.weatherRevision;
+    this.persistenceRevision = source.persistenceRevision;
+    this.lastSavedRevision = source.lastSavedRevision;
+    this.terrainPopulated = source.terrainPopulated;
+    this.corrupt = source.corrupt;
+    this.hasPersistedLightingData = source.hasPersistedLightingData;
+    this.dirty = true;
+    this.renderDirtyListener?.(this, true);
   }
 
   public copyBlocks(): Uint8Array {

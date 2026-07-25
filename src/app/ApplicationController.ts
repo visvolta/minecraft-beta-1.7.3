@@ -541,7 +541,7 @@ export class ApplicationController {
     generator: BetaWorldGenerator,
     spawn: { x: number; y: number; z: number },
     loadPerfToken: number | null = null,
-    preparedChunks: ReadonlyMap<string, Chunk> = new Map(),
+    preparedChunks: ReadonlyMap<number, Chunk> = new Map(),
   ): Promise<void> {
     const spawnChunkX = Math.floor(spawn.x / CHUNK_SIZE_X);
     const spawnChunkZ = Math.floor(spawn.z / CHUNK_SIZE_X);
@@ -652,7 +652,7 @@ export class ApplicationController {
     token: number,
     loadPerfToken: number | null = null,
     retainChunks = false,
-  ): Promise<Map<string, Chunk>> {
+  ): Promise<Map<number, Chunk>> {
     this.cancelSpawnPreparation();
     this.activeLoadToken = token;
     const state: SpawnPreparationState = { token, aborted: false, timeoutId: null };
@@ -660,7 +660,7 @@ export class ApplicationController {
     const generator = new BetaWorldGenerator(BigInt(seed));
     const radius = 4;
     const coords: Array<readonly [number, number]> = [];
-    const preparedChunks = new Map<string, Chunk>();
+    const preparedChunks = new Map<number, Chunk>();
     const maxDurationMs = 120_000;
     const startMs = performance.now();
     for (let z = -radius; z <= radius; z++) for (let x = -radius; x <= radius; x++) coords.push([x, z]);

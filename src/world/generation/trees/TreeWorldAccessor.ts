@@ -67,8 +67,8 @@ export function isNonOpaque(blockId: BlockId): boolean {
 export class ScratchTreeWorld implements TreeWorldAccessor {
   private readonly terrainGenerator: BetaTerrainGenerator;
   private readonly worldSeed: bigint;
-  private readonly chunkBlocks = new Map<string, Uint8Array>();
-  private readonly chunkHeightmaps = new Map<string, Int16Array>();
+  private readonly chunkBlocks = new Map<number, Uint8Array>();
+  private readonly chunkHeightmaps = new Map<number, Int16Array>();
   private readonly enableCaves: boolean;
 
   public constructor(worldSeed: bigint, terrainGenerator: BetaTerrainGenerator, enableCaves: boolean) {

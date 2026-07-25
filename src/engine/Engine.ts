@@ -177,6 +177,7 @@ const MAX_DELTA_SECONDS = 0.1;
 const METADATA_AUTOSAVE_MS = 30_000;
 const CHUNK_SAVE_PUMP_INTERVAL_MS = 500;
 const CHUNK_SAVE_PUMP_MAX_CHUNKS = 2;
+const RAIN_COVER_OFFSETS = [-2, 0, 2] as const;
 
 /** Autosave diagnostics (correction 7). */
 interface AutosaveStats {
@@ -327,7 +328,9 @@ export class Engine {
   private readonly heldBlockMaterial: THREE.MeshBasicMaterial;
   private readonly firstPersonHeldBlockMesh: THREE.Mesh;
   private readonly thirdPersonHeldBlockMesh: THREE.Mesh;
-  private lastSelectedStackKey = '';
+  private lastSelectedStackId: number | string | null = null;
+  private lastSelectedStackCount = 0;
+  private lastSelectedStackEmpty = true;
 
   private readonly playerModelUniforms: EntityLightingUniforms | undefined;
 
@@ -854,6 +857,7 @@ export class Engine {
       entityManager: this.entityManager,
       worldTickScheduler: this.worldTickScheduler,
       redstonePowerEngine: this.redstonePowerEngine,
+      lightEngine: this.lightEngine,
       fallingBlockManager: this.fallingBlockManager,
       worldEventQueue: this.worldEventQueue,
       blockTestGrid: this.blockTestGrid,
@@ -887,7 +891,9 @@ export class Engine {
     }
     document.body.appendChild(this.renderer.domElement);
     this.debugOverlay.mount();
-    this.performanceProfiler.setEnabled(readProfilerEnabledSetting());
+    const profilerEnabled = readProfilerEnabledSetting();
+    this.performanceProfiler.setEnabled(profilerEnabled);
+    this.lightEngine.setMetricsEnabled(profilerEnabled);
     this.input.start();
     this.renderer.start();
     this.running = true;
@@ -1325,8 +1331,21 @@ export class Engine {
 
     const currentSlot = this.interactionController.getSelectedSlotIndex();
     const currentStack = this.inventory.getStack(currentSlot);
-    const currentStackKey = currentStack === null ? 'empty' : `${currentStack.identity.id}_${currentStack.count}`;
-    if (this.selectedSlot !== currentSlot || this.lastSelectedStackKey !== currentStackKey) { this.selectedSlot = currentSlot; this.lastSelectedStackKey = currentStackKey; this.updateHeldItemMesh(); }
+    const currentStackEmpty = currentStack === null;
+    const currentStackId = currentStack?.identity.id ?? null;
+    const currentStackCount = currentStack?.count ?? 0;
+    if (
+      this.selectedSlot !== currentSlot
+      || this.lastSelectedStackEmpty !== currentStackEmpty
+      || this.lastSelectedStackId !== currentStackId
+      || this.lastSelectedStackCount !== currentStackCount
+    ) {
+      this.selectedSlot = currentSlot;
+      this.lastSelectedStackEmpty = currentStackEmpty;
+      this.lastSelectedStackId = currentStackId;
+      this.lastSelectedStackCount = currentStackCount;
+      this.updateHeldItemMesh();
+    }
 
     if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && this.input.isActionJustPressed('drop')) {
       const selectedSlotIndex = this.interactionController.getSelectedSlotIndex();
@@ -1355,6 +1374,7 @@ export class Engine {
     }
 
     this.chunkRenderer.update(this.performanceProfiler.getLastFrameTimeMs(), camera.position.x, camera.position.z);
+    this.performanceProfiler.recordDirtyChunkScanMs(this.chunkRenderer.getLastDirtyScanMs());
     const postRenderMeshingStats = this.chunkRenderer.getMeshingStats();
     const geometryCreationMs = this.chunkRenderer.getLastGeometryCreationMs();
     const sceneInsertionMs = this.chunkRenderer.getLastSceneInsertionMs();
@@ -1399,6 +1419,19 @@ export class Engine {
       initializationMs: lightingMetrics.initializationMs,
       borderReconcileMs: lightingMetrics.borderReconcileMs,
       localRelightMs: lightingMetrics.localRelightMs,
+      blockReads: lightingMetrics.blockReads,
+      lightReads: lightingMetrics.lightReads,
+      lightWrites: lightingMetrics.lightWrites,
+      opacityQueries: lightingMetrics.opacityQueries,
+      emissionQueries: lightingMetrics.emissionQueries,
+      coordinateConversions: lightingMetrics.coordinateConversions,
+      chunkLookups: lightingMetrics.chunkLookups,
+      missingChunkLookups: lightingMetrics.missingChunkLookups,
+      boundaryTraversals: lightingMetrics.boundaryTraversals,
+      queuePushes: lightingMetrics.queuePushes,
+      removeQueuePushes: lightingMetrics.removeQueuePushes,
+      queueNodeAllocations: lightingMetrics.queueNodeAllocations,
+      remeshFanOutChunks: lightingMetrics.remeshFanOutChunks,
     });
 
     const fogState = this.fogController.compute({ eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z, rawLightDebugMode: this.rawLightDebugMode, ambientOcclusionDebugMode: this.ambientOcclusionDebugMode, overworldColorHex: atmos.horizon.hex, overworldDensityMultiplier: atmos.fogDensityMultiplier });
@@ -1474,7 +1507,7 @@ export class Engine {
   /** Samples a 3x3 listener neighbourhood four times per second; no vertical world scans. */
   private sampleRainCover(x: number, y: number, z: number): number {
     let exposed = 0; let known = 0;
-    for (const ox of [-2, 0, 2]) for (const oz of [-2, 0, 2]) {
+    for (const ox of RAIN_COVER_OFFSETS) for (const oz of RAIN_COVER_OFFSETS) {
       const wx = Math.floor(x + ox), wz = Math.floor(z + oz); const chunk = this.chunkManager.getChunk(Math.floor(wx / 16), Math.floor(wz / 16));
       if (chunk === undefined) continue;
       const lx = ((wx % 16) + 16) % 16, lz = ((wz % 16) + 16) % 16; const height = chunk.getHeight(lx, lz); known++;
@@ -1575,7 +1608,7 @@ export class Engine {
     if (diag.closing || diag.closed) { this.autosaveStats.lastSelected = 0; return; }
     if (diag.pendingBackgroundSaves > 0) { this.autosaveStats.lastSelected = 0; return; }
     if (dirtyCount === 0) { this.autosaveStats.lastSelected = 0; return; }
-    void this.persistence.saveSomeDirty(this.chunkManager, CHUNK_SAVE_PUMP_MAX_CHUNKS).then((count) => {
+    void this.persistence.saveSomeDirty(this.chunkManager.getPersistenceDirtyChunks(), CHUNK_SAVE_PUMP_MAX_CHUNKS).then((count) => {
       this.autosaveStats.lastSelected = count;
       if (count > 0) this.autosaveStats.lastSuccessMs = performance.now();
     }).catch((error) => {

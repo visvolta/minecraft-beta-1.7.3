@@ -45,8 +45,8 @@ export class ChunkStreamer {
   private readonly lightEngine: LightEngine;
   private readonly generationQueue: ChunkGenerationQueue;
   private readonly persistence: WorldPersistenceService;
-  private readonly desiredChunks = new Set<string>();
-  private readonly loadingChunks = new Set<string>();
+  private readonly desiredChunks = new Set<number>();
+  private readonly loadingChunks = new Set<number>();
 
   private lastChunkX: number | null = null;
   private lastChunkZ: number | null = null;
@@ -59,9 +59,9 @@ export class ChunkStreamer {
   /** Set during Save-and-Quit quiesce: stop accepting work; detach in-flight read results. */
   private quiescing = false;
   /** Accepted read settlements, tracked to settlement so a detached read can never reject unobserved. */
-  private readonly activeReads = new Map<string, Promise<void>>();
+  private readonly activeReads = new Map<number, Promise<void>>();
   /** Accepted unload settlements; the ChunkStreamer is the single owner of unload settlement (correction 2). */
-  private readonly activeUnloads = new Map<string, Promise<void>>();
+  private readonly activeUnloads = new Map<number, Promise<void>>();
   private unloadFailure: unknown = null;
   private lastIntegrationMs = 0;
   private lastGeneratedIntegrationMs = 0;
@@ -246,9 +246,10 @@ export class ChunkStreamer {
         const cameraBoost = Math.max(0, nx * cameraDir.x + nz * cameraDir.z) * 120;
         const movementBoost = moveDir === null ? 0 : Math.max(0, nx * moveDir.x + nz * moveDir.z) * 180;
         const priority = distanceSq * 1000 - (critical ? 5000 : 0) - cameraBoost - movementBoost;
-        this.desiredChunks.add(chunkKey(x, z));
+        const key = chunkKey(x, z);
+        this.desiredChunks.add(key);
 
-        if (!this.chunkManager.hasChunk(x, z) && !this.loadingChunks.has(chunkKey(x, z))) {
+        if (!this.chunkManager.hasChunk(x, z) && !this.loadingChunks.has(key)) {
           toRequest.push({ x, z, priority, critical });
         }
       }
@@ -329,12 +330,8 @@ export class ChunkStreamer {
         // Hit, integrate chunk
         const integrationStart = performance.now();
         const managed = this.chunkManager.getOrCreateChunk(x, z);
-        managed.loadGeneratedBlocks(chunk.copyBlocks());
-        managed.loadGeneratedMetadata(chunk.copyMetadata());
-        managed.loadLightData(chunk.copyLight());
+        managed.adoptStorageFrom(chunk);
         managed.setPersistedLightingDataLoaded(chunk.loadedPersistedLightingData());
-        const heightmap = chunk.copyHeightmap();
-        if (heightmap) managed.loadHeightmap(heightmap);
         managed.setTerrainPopulated(chunk.isTerrainPopulated());
         managed.getScheduledTicks().load(chunk.getScheduledTicks().drainAll());
         managed.markPersistenceClean(chunk.getPersistenceRevision());

@@ -46,9 +46,9 @@ export class EntityManager {
   private readonly entities = new Map<number, Entity>();
   private readonly byUuid = new Map<string, Entity>();
   /** Active entities bucketed by their owning chunk (chunk-first queries). */
-  private readonly byChunk = new Map<string, Set<number>>();
+  private readonly byChunk = new Map<number, Set<number>>();
   /** Entities whose chunk unloaded this session; kept alive, not ticked. */
-  private readonly parked = new Map<string, Entity[]>();
+  private readonly parked = new Map<number, Entity[]>();
   private readonly pendingAdd: Entity[] = [];
   private readonly pendingRemove = new Set<number>();
   private readonly idAllocator = new EntityIdAllocator();
@@ -165,16 +165,11 @@ export class EntityManager {
         continue;
       }
       const box = entity.getAABB().expand(ENTITY_COLLISION_EXPAND, 0, ENTITY_COLLISION_EXPAND);
-      const nearby = this.getEntitiesInAABB(box);
-      for (const other of nearby) {
-        if (other === entity || other.id <= entity.id) {
-          continue;
-        }
-        if (other.removed || !other.canBePushed()) {
-          continue;
-        }
+      this.forEachEntitiesInAABB(box, (other) => {
+        if (other === entity || other.id <= entity.id) return;
+        if (other.removed || !other.canBePushed()) return;
         entity.applyEntityCollision(other);
-      }
+      });
     }
   }
 
@@ -186,17 +181,14 @@ export class EntityManager {
    */
   public collideWithPlayer(player: PushableBody): void {
     const box = player.getAABB().expand(ENTITY_COLLISION_EXPAND, 0, ENTITY_COLLISION_EXPAND);
-    const nearby = this.getEntitiesInAABB(box);
-    for (const entity of nearby) {
-      if (entity.removed || !entity.canBePushed()) {
-        continue;
-      }
+    this.forEachEntitiesInAABB(box, (entity) => {
+      if (entity.removed || !entity.canBePushed()) return;
       const impulse = entityPushImpulse(entity.position, player.position, entity.entityCollisionReduction);
       entity.velocity.x -= impulse.x;
       entity.velocity.z -= impulse.z;
       player.velocity.x += impulse.x;
       player.velocity.z += impulse.z;
-    }
+    });
   }
 
   /** Per-frame interpolation path. Delegates to each entity's own visuals. */
@@ -369,39 +361,41 @@ export class EntityManager {
   }
 
   /**
-   * Returns active entities whose AABB intersects `box`. Begins from the chunk
-   * buckets overlapping the box (never scans the whole world), then filters
-   * locally. Scales to hundreds/thousands of entities.
+   * Visits active entities whose AABB intersects `box` without allocating a
+   * result array. The visitor must consume each entity synchronously.
    */
-  public getEntitiesInAABB<T extends Entity>(box: AABB, predicate: (entity: Entity) => entity is T): T[];
-  public getEntitiesInAABB(box: AABB, predicate?: (entity: Entity) => boolean): Entity[];
-  public getEntitiesInAABB(box: AABB, predicate?: (entity: Entity) => boolean): Entity[] {
+  public forEachEntitiesInAABB(
+    box: AABB,
+    visitor: (entity: Entity) => void,
+    predicate?: (entity: Entity) => boolean,
+  ): void {
     const minCX = Math.floor(box.minX / 16);
     const maxCX = Math.floor(box.maxX / 16);
     const minCZ = Math.floor(box.minZ / 16);
     const maxCZ = Math.floor(box.maxZ / 16);
-    const out: Entity[] = [];
     for (let cx = minCX; cx <= maxCX; cx++) {
       for (let cz = minCZ; cz <= maxCZ; cz++) {
         const bucket = this.byChunk.get(chunkKey(cx, cz));
-        if (bucket === undefined) {
-          continue;
-        }
+        if (bucket === undefined) continue;
         for (const id of bucket) {
           const entity = this.entities.get(id);
-          if (entity === undefined) {
-            continue;
-          }
-          if (!box.intersects(entity.getAABB())) {
-            continue;
-          }
-          if (predicate !== undefined && !predicate(entity)) {
-            continue;
-          }
-          out.push(entity);
+          if (entity === undefined || !box.intersects(entity.getAABB())) continue;
+          if (predicate !== undefined && !predicate(entity)) continue;
+          visitor(entity);
         }
       }
     }
+  }
+
+  /**
+   * Returns active entities whose AABB intersects `box`. This compatibility
+   * API intentionally returns an owned array for callers that retain results.
+   */
+  public getEntitiesInAABB<T extends Entity>(box: AABB, predicate: (entity: Entity) => entity is T): T[];
+  public getEntitiesInAABB(box: AABB, predicate?: (entity: Entity) => boolean): Entity[];
+  public getEntitiesInAABB(box: AABB, predicate?: (entity: Entity) => boolean): Entity[] {
+    const out: Entity[] = [];
+    this.forEachEntitiesInAABB(box, (entity) => out.push(entity), predicate);
     return out;
   }
 

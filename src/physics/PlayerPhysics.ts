@@ -4,7 +4,7 @@ import { CHUNK_SIZE_Y } from '../world/chunkConstants';
 import type { Player } from '../player/Player';
 import { AABB } from './AABB';
 import type { BlockBehaviourRegistry } from '../world/BlockBehaviour';
-import { getBlockBounds } from '../world/BlockBehaviour';
+import { forEachBlockBounds, getBlockBounds } from '../world/BlockBehaviour';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';import { CREATIVE_FLIGHT_ACCELERATION, CREATIVE_FLIGHT_DRAG_PER_SECOND, CREATIVE_FLIGHT_VERTICAL_SPEED } from '../player/PlayerConstants';import { isLavaInAABB,isWaterInAABB } from '../entities/living/HazardDetection';import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 
 /**
@@ -44,6 +44,8 @@ const COLLISION_AXIS_ORDER: readonly ('x' | 'y' | 'z')[] = ['y', 'x', 'z'];
  */
 export interface PlayerMovementResult{readonly previousX?:number;readonly previousY:number;readonly previousZ?:number;readonly currentX?:number;readonly currentY:number;readonly currentZ?:number;readonly wasGrounded:boolean;readonly grounded:boolean;readonly climbing:boolean;readonly inWater?:boolean;readonly inLava?:boolean;readonly enteredWaterThisTick?:boolean;readonly splashVolume?:number;}
 export class PlayerPhysics {
+  private readonly fullCubeCollisionScratch = new AABB(0, 0, 0, 1, 1, 1);
+
   public constructor(
     
     private readonly blockRegistry: BlockRegistry,
@@ -254,22 +256,29 @@ export class PlayerPhysics {
         for (let bz = blockRange.minZ; bz <= blockRange.maxZ; bz++) {
           if (by < 0 || by >= CHUNK_SIZE_Y) continue;
 
-          const bounds = getBlockBounds(this.blockRegistry, this.behaviourRegistry, this.blockUpdateWorld, bx, by, bz, 'collision');
-          for (const blockBox of bounds) {
-            if (!this.overlapsOnOtherAxes(box, blockBox, axis)) {
-              continue;
-            }
+          forEachBlockBounds(
+            this.blockRegistry,
+            this.behaviourRegistry,
+            this.blockUpdateWorld,
+            bx,
+            by,
+            bz,
+            'collision',
+            this.fullCubeCollisionScratch,
+            (blockBox) => {
+              if (!this.overlapsOnOtherAxes(box, blockBox, axis)) return;
 
-            const limited = this.limitDistance(box, blockBox, axis, movingPositive);
+              const limited = this.limitDistance(box, blockBox, axis, movingPositive);
 
-            // Clamp to zero rather than letting a pre-existing overlap (e.g.
-            // floating-point skin contact) push the box backward.
-            if (movingPositive) {
-              allowedDistance = Math.min(allowedDistance, Math.max(0, limited));
-            } else {
-              allowedDistance = Math.max(allowedDistance, Math.min(0, limited));
-            }
-          }
+              // Clamp to zero rather than letting a pre-existing overlap (e.g.
+              // floating-point skin contact) push the box backward.
+              if (movingPositive) {
+                allowedDistance = Math.min(allowedDistance, Math.max(0, limited));
+              } else {
+                allowedDistance = Math.max(allowedDistance, Math.min(0, limited));
+              }
+            },
+          );
         }
       }
     }
