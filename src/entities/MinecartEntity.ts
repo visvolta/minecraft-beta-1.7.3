@@ -2,7 +2,7 @@ import { Entity } from './core/Entity';
 import { EntityTypeIds } from './core/EntityType';
 import type { EntityTickContext, EntityWorldContext } from './core/EntityContext';
 import { DroppedItemEntity } from './items/DroppedItemEntity';
-import { nbt, type NbtCompound, type NbtTag } from '../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../nbt/Nbt';
 import {
   alignVelocityToRail,
   applyPoweredRailEffect,

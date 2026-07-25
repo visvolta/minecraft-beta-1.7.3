@@ -1,6 +1,6 @@
 import type { AABB } from '../../physics/AABB';
 import type { Chunk } from '../../world/Chunk';
-import type { NbtCompound } from '../../persistence/nbt/Nbt';
+import type { NbtCompound } from '../../nbt/Nbt';
 import { EntityIdAllocator, chunkKey, chunkCoordsOf } from './EntityId';
 import { EntityPhysics } from './EntityPhysics';
 import type { EntityTypeRegistry } from './EntityType';

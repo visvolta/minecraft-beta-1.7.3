@@ -1,7 +1,7 @@
 import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Vector3 } from 'three';
 import { ArrowRenderAssets } from './ArrowRenderAssets';
 import { wrapDegrees } from '../living/LivingAnimationMath';
-import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import { EntityTypeIds } from '../core/EntityType';
 import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
 import type { Entity } from '../core/Entity';

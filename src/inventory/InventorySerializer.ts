@@ -1,6 +1,6 @@
 import { ARMOUR_SLOTS, type ArmourSlot } from '../items/ArmourMaterial';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
-import type { SerializedItemStack, SerializedPlayerEquipment } from '../persistence/metadata/WorldMetadata';
+import type { SerializedItemStack, SerializedPlayerEquipment } from '../world/WorldMetadata';
 import { Inventory } from './Inventory';
 import { ItemStack } from './ItemStack';
 

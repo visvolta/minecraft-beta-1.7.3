@@ -1,13 +1,13 @@
 import type { Chunk } from '../world/Chunk.ts';
-import { ChunkSerializer } from '../persistence/nbt/ChunkSerializer.ts';
-import { encodeNbt, decodeNbt } from '../persistence/nbt/NbtCodec.ts';
-import type { NbtTag, NbtCompound } from '../persistence/nbt/Nbt.ts';
-import { encodeWorldMetadata, decodeWorldMetadata, type WorldMetadata } from '../persistence/metadata/WorldMetadata.ts';
+import { ChunkSerializer } from '../nbt/ChunkSerializer.ts';
+import { encodeNbt, decodeNbt } from '../nbt/NbtCodec.ts';
+import type { NbtTag, NbtCompound } from '../nbt/Nbt.ts';
+import { encodeWorldMetadata, decodeWorldMetadata, type WorldMetadata } from '../world/WorldMetadata.ts';
 import { compressDeflate, decompressDeflate } from './codec/Compression.ts';
 import { buildChunkRecord, decodeChunkRecord, encodeChunkRecord } from './codec/ChunkRecord.ts';
 import { RecordCorruptionError } from './codec/PersistenceError.ts';
 import type { StorageBackend, WorldSummary } from './backend/StorageBackend.ts';
-import { PrioritySerialExecutor } from './exec/PrioritySerialExecutor.ts';
+import { PrioritySerialExecutor, type ExecutorDiagnostics } from './exec/PrioritySerialExecutor.ts';
 import { BoundedExecutor } from './exec/BoundedExecutor.ts';
 
 /**
@@ -76,6 +76,27 @@ export interface WorldPersistenceStats {
   read: { active: number; pending: number; closed: boolean };
 }
 
+export interface PersistenceErrorInfo {
+  message: string;
+  timeMs: number;
+}
+
+/** Aggregated service diagnostics for watchdogs / error screens / risk snapshot. */
+export interface ServiceDiagnostics {
+  worldId: string | null;
+  opened: boolean;
+  closing: boolean;
+  closed: boolean;
+  writeLane: ExecutorDiagnostics;
+  readLane: { active: number; pending: number; closed: boolean };
+  /** Chunks with an accepted-but-not-settled save (by chunk key count). */
+  inFlightChunks: number;
+  pendingBackgroundSaves: number;
+  pendingUnloads: number;
+  metadataWriteInFlight: boolean;
+  lastError: PersistenceErrorInfo | null;
+}
+
 interface UnloadState {
   canceled: boolean;
   promise: Promise<void>;
@@ -87,6 +108,12 @@ export class WorldPersistenceService {
   private readonly readExec: BoundedExecutor;
   private readonly clock: () => number;
   private readonly unloads = new Map<string, UnloadState>();
+  /** chunk key -> number of accepted-but-not-settled saves (avoids re-selecting in-flight chunks). */
+  private readonly inFlightChunks = new Map<string, number>();
+  private pendingBackgroundSaves = 0;
+  private metadataWriteInFlight = false;
+  private lastError: PersistenceErrorInfo | null = null;
+  private changeListener: (() => void) | null = null;
   private worldId: string | null = null;
   private metadata: WorldMetadata | null = null;
   private opened = false;
@@ -107,6 +134,31 @@ export class WorldPersistenceService {
 
   public setSimulationTickProvider(provider: () => number): void {
     this.simulationTickProvider = provider;
+  }
+
+  /** Event-driven state change notification (correction 8). The engine subscribes. */
+  public setChangeListener(listener: (() => void) | null): void {
+    this.changeListener = listener;
+  }
+
+  private notifyChange(): void {
+    this.changeListener?.();
+  }
+
+  /** Clears the recorded last error (e.g. after a successful forced save / resume). */
+  public clearLastError(): void {
+    if (this.lastError !== null) {
+      this.lastError = null;
+      this.notifyChange();
+    }
+  }
+
+  public getLastError(): PersistenceErrorInfo | null {
+    return this.lastError;
+  }
+
+  private recordError(error: unknown): void {
+    this.lastError = { message: error instanceof Error ? error.message : String(error), timeMs: this.clock() };
   }
 
   public getWorldId(): string | null {
@@ -185,10 +237,24 @@ export class WorldPersistenceService {
     if (guardError !== undefined) return Promise.reject(guardError);
     const worldId = this.worldId!;
     this.metadata = metadata;
-    return this.writeExec.enqueue(async () => {
+    this.metadataWriteInFlight = true;
+    this.notifyChange();
+    const task = this.writeExec.enqueue(async () => {
       const bytes = encodeWorldMetadata(metadata);
       await this.backend.writeRecord(worldId, METADATA_KEY, bytes);
     }, priority);
+    return task.then(
+      () => {
+        this.metadataWriteInFlight = false;
+        this.notifyChange();
+      },
+      (error) => {
+        this.metadataWriteInFlight = false;
+        this.recordError(error);
+        this.notifyChange();
+        throw error;
+      },
+    );
   }
 
   // --- chunk reads ---
@@ -213,21 +279,61 @@ export class WorldPersistenceService {
 
   /**
    * Save one chunk on the serialized write lane at the given priority. Resolves
-   * once the chunk record is durably written; marks the chunk clean only for the
-   * written revision. Background saves are rejected once the world is closing.
+   * once the chunk record is durably written; marks the chunk clean only if its
+   * revision still equals the captured revision (correction 6 invariant).
+   * Background saves are rejected once the world is closing. Tracks in-flight
+   * state so autosave never re-selects a chunk already being saved.
    */
   public saveChunk(chunk: Chunk, priority: number = WRITE_PRIORITY_BACKGROUND): Promise<void> {
     const guardError = this.writeGuardError(priority);
     if (guardError !== undefined) return Promise.reject(guardError);
     const worldId = this.worldId!;
-    return this.writeExec.enqueue(async () => {
+    const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+    const isBackground = priority < WRITE_PRIORITY_FORCED;
+    this.inFlightChunks.set(key, (this.inFlightChunks.get(key) ?? 0) + 1);
+    if (isBackground) this.pendingBackgroundSaves++;
+    this.notifyChange();
+    const task = this.writeExec.enqueue(async () => {
       const snapshotRevision = chunk.getPersistenceRevision();
       const recordBytes = await this.encodeChunkRecord(chunk, snapshotRevision);
       await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes);
+      // Captured-revision invariant: clean only if still at the captured revision.
       if (chunk.getPersistenceRevision() === snapshotRevision) {
         chunk.markPersistenceClean(snapshotRevision);
       }
     }, priority);
+    return task.then(
+      () => this.finishChunkSave(key, isBackground, null),
+      (error) => {
+        this.finishChunkSave(key, isBackground, error);
+        throw error;
+      },
+    );
+  }
+
+  private finishChunkSave(key: string, isBackground: boolean, error: unknown): void {
+    const count = (this.inFlightChunks.get(key) ?? 1) - 1;
+    if (count <= 0) this.inFlightChunks.delete(key);
+    else this.inFlightChunks.set(key, count);
+    if (isBackground) this.pendingBackgroundSaves = Math.max(0, this.pendingBackgroundSaves - 1);
+    if (error !== null) this.recordError(error);
+    this.notifyChange();
+  }
+
+  public getDiagnostics(): ServiceDiagnostics {
+    return {
+      worldId: this.worldId,
+      opened: this.opened,
+      closing: this.closing,
+      closed: this.closed,
+      writeLane: this.writeExec.getDiagnostics(),
+      readLane: { active: this.readExec.activeCount, pending: this.readExec.pendingCount, closed: this.readExec.isClosed },
+      inFlightChunks: this.inFlightChunks.size,
+      pendingBackgroundSaves: this.pendingBackgroundSaves,
+      pendingUnloads: this.unloads.size,
+      metadataWriteInFlight: this.metadataWriteInFlight,
+      lastError: this.lastError,
+    };
   }
 
   /** Delete a stored chunk record (write lane). */
@@ -255,7 +361,9 @@ export class WorldPersistenceService {
     for (const chunk of chunks) {
       if (enqueued >= maxChunks) break;
       if (!chunk.isPersistenceDirty()) continue;
-      if (this.unloads.has(chunkKey(chunk.chunkX, chunk.chunkZ))) continue;
+      const key = chunkKey(chunk.chunkX, chunk.chunkZ);
+      if (this.unloads.has(key)) continue;
+      if ((this.inFlightChunks.get(key) ?? 0) > 0) continue; // already being saved
       this.saveChunk(chunk, priority).catch(() => undefined);
       enqueued++;
     }
@@ -296,13 +404,17 @@ export class WorldPersistenceService {
     state.promise = task.then(
       () => {
         this.unloads.delete(key);
+        this.notifyChange();
       },
       (error) => {
         this.unloads.delete(key);
+        this.recordError(error);
+        this.notifyChange();
         throw error;
       },
     );
     this.unloads.set(key, state);
+    this.notifyChange();
     return state.promise;
   }
 
@@ -359,11 +471,14 @@ export class WorldPersistenceService {
     const guardError = this.openGuardError();
     if (guardError !== undefined) throw guardError;
     this.closing = true;
+    this.notifyChange();
     for (const chunk of dirtyChunks) {
       if (!chunk.isPersistenceDirty()) continue;
       this.saveChunk(chunk, WRITE_PRIORITY_FORCED).catch(() => undefined);
     }
+    // Rejects if any covered write failed; only reached on full success below.
     await this.writeExec.flushBarrier();
+    this.clearLastError();
   }
 
   /** Resolves once every write accepted so far has settled; rejects on any covered failure. */

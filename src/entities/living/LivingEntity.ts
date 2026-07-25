@@ -1,6 +1,6 @@
 import { Entity } from '../core/Entity';
 import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
-import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import { Pathfinder } from '../nav/Pathfinder';
 import { Navigation } from '../nav/Navigation';
 import { AiController } from '../ai/AiController';

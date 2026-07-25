@@ -1,6 +1,6 @@
 import type { EntityWorldContext } from '../core/EntityContext';
 import { EntityTypeIds } from '../core/EntityType';
-import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import { QuadrupedEntity } from './QuadrupedEntity';
 import { SheepModel } from './SheepModel';
 import type { QuadrupedModel } from './QuadrupedModel';

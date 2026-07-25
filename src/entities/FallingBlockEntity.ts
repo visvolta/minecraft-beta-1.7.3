@@ -3,7 +3,7 @@ import { Entity } from './core/Entity';
 import { EntityTypeIds } from './core/EntityType';
 import type { EntityTickContext, EntityWorldContext } from './core/EntityContext';
 import { AABB } from '../physics/AABB';
-import { nbt, type NbtCompound, type NbtTag } from '../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../nbt/Nbt';
 import type { BlockId } from '../blocks/BlockId';
 import { BlockIds } from '../blocks/BlockId';
 import { resolveBlockTexture } from '../blocks/resolveBlockTexture';

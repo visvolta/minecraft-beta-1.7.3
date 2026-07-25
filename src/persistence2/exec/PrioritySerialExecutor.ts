@@ -48,8 +48,20 @@ interface QueueEntry {
   run: () => Promise<void>;
 }
 
+export interface ExecutorDiagnostics {
+  /** Sequence numbers assigned (accepted) so far. */
+  accepted: number;
+  /** Number of accepted operations that have settled (success or failure). */
+  completed: number;
+  active: number;
+  pending: number;
+  queuedByPriority: Record<number, number>;
+  closed: boolean;
+}
+
 export class PrioritySerialExecutor {
   private nextSeq = 0;
+  private completedCount = 0;
   private readonly queue: QueueEntry[] = [];
   /** seq -> completion record (resolves to a Settlement; never rejects). */
   private readonly completions = new Map<number, Promise<Settlement>>();
@@ -72,6 +84,21 @@ export class PrioritySerialExecutor {
     return this.closed;
   }
 
+  public getDiagnostics(): ExecutorDiagnostics {
+    const queuedByPriority: Record<number, number> = {};
+    for (const entry of this.queue) {
+      queuedByPriority[entry.priority] = (queuedByPriority[entry.priority] ?? 0) + 1;
+    }
+    return {
+      accepted: this.nextSeq,
+      completed: this.completedCount,
+      active: this.activeCount,
+      pending: this.queue.length,
+      queuedByPriority,
+      closed: this.closed,
+    };
+  }
+
   public enqueue<T>(task: () => Promise<T>, priority: number): Promise<T> {
     if (this.closed) {
       return Promise.reject(new Error('PrioritySerialExecutor is closed; new writes are rejected'));
@@ -92,11 +119,13 @@ export class PrioritySerialExecutor {
         // does not need them (they succeeded), and a concurrent barrier that
         // already collected this completion holds its own reference.
         this.completions.delete(seq);
+        this.completedCount++;
         caller.resolve(value);
       } catch (error) {
         // Failed completions are retained until a barrier covers them, so the
         // barrier can surface the failure instead of reporting a false success.
         settleCompletion({ ok: false, error });
+        this.completedCount++;
         caller.reject(error);
       }
     };

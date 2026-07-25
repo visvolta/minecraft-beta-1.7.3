@@ -3,10 +3,12 @@
  * not wired into production gameplay).
  */
 
-export { WorldPersistenceService, WRITE_PRIORITY_BACKGROUND, WRITE_PRIORITY_FORCED } from './WorldPersistenceService.ts';
+export { WorldPersistenceService, WRITE_PRIORITY_BACKGROUND, WRITE_PRIORITY_FORCED } from './WorldPersistenceService';
 export type {
   WorldPersistenceServiceOptions,
   WorldPersistenceStats,
+  ServiceDiagnostics,
+  PersistenceErrorInfo,
   PersistenceEntityHooks,
 } from './WorldPersistenceService.ts';
 
@@ -18,6 +20,7 @@ export { IdbStorageBackend, DEFAULT_IDB_DB_NAME, IDB_DB_VERSION } from './backen
 export type { IdbStorageBackendOptions } from './backend/IdbStorageBackend.ts';
 
 export { PrioritySerialExecutor } from './exec/PrioritySerialExecutor.ts';
+export type { ExecutorDiagnostics } from './exec/PrioritySerialExecutor.ts';
 export { BoundedExecutor } from './exec/BoundedExecutor.ts';
 
 export { compressDeflate, decompressDeflate } from './codec/Compression.ts';

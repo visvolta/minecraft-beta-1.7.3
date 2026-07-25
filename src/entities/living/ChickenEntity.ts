@@ -1,6 +1,6 @@
 import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
 import { EntityTypeIds } from '../core/EntityType';
-import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import { AnimalEntity, BABY_SCALE } from './AnimalEntity';
 import { ChickenModel } from './ChickenModel';
 import { WanderTask } from '../ai/tasks/WanderTask';

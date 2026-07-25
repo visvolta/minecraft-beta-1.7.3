@@ -1,6 +1,6 @@
 import type * as THREE from 'three';
 import { AABB } from '../../physics/AABB';
-import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import { chunkCoordsOf, generateEntityUuid } from './EntityId';
 import type { EntityTickContext, EntityWorldContext } from './EntityContext';
 

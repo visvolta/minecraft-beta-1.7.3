@@ -1,7 +1,7 @@
 import { AABB } from '../physics/AABB';
 import { Entity } from '../entities/core/Entity';
 import type { EntityTickContext } from '../entities/core/EntityContext';
-import type { NbtCompound, NbtTag } from '../persistence/nbt/Nbt';
+import type { NbtCompound, NbtTag } from '../nbt/Nbt';
 import { DamageSource, type DamageAttacker } from '../entities/damage/DamageSource';
 import { GameMode, isCreativeMode, isSurvivalMode } from './GameMode';
 import type { PlayerEquipment } from '../inventory/PlayerEquipment';

@@ -5,19 +5,17 @@ import type { EntityTextureAssets } from '../assets/EntityTextureAssets';
 import type { ArmourTextureAssets } from '../assets/ArmourTextureAssets';
 import { Engine } from '../engine/Engine';
 import type { PlayerSkinManager } from '../player/PlayerSkinManager';
-// Legacy storage is kept ONLY for isolated app settings (approved temporarily).
-import { IndexedDbWorldStorage } from '../persistence/storage/IndexedDbWorldStorage';
-import type { WorldStorage } from '../persistence/storage/WorldStorage';
-// New persistence system owns all world data (list/create/load/delete/rename/save).
+// New persistence system owns all world data (list/create/load/delete/rename/save)
+// and the application-owned backend that also stores app settings.
 import { IdbStorageBackend } from '../persistence2/backend/IdbStorageBackend';
 import type { WorldSummary } from '../persistence2/backend/StorageBackend';
 import { WorldPersistenceService, WRITE_PRIORITY_FORCED } from '../persistence2/WorldPersistenceService';
 import { RecordCorruptionError } from '../persistence2/codec/PersistenceError';
 // Kept primitives.
-import { createDefaultMetadata, type WorldMetadata } from '../persistence/metadata/WorldMetadata';
-import { parseWorldSeed } from '../persistence/world/SeedParser';
+import { createDefaultMetadata, type WorldMetadata } from '../world/WorldMetadata';
+import { parseWorldSeed } from '../world/SeedParser';
 // Pure helper (temporary import until the legacy index module is removed in Stage 4).
-import { uniqueWorldId } from '../persistence/world/WorldIndex';
+import { uniqueWorldId } from '../persistence2/worldId';
 import { findBetaSpawn, getSafePlayerY } from '../world/generation/WorldSpawnFinder';
 import { CHUNK_SIZE_X } from '../world/chunkConstants';
 import type { LoadingProgress } from './LoadingProgress';
@@ -30,6 +28,8 @@ import { ConfirmDeleteScreen } from '../ui/menu/ConfirmDeleteScreen';
 import { RenameWorldScreen } from '../ui/menu/RenameWorldScreen';
 import { ErrorScreen } from '../ui/menu/ErrorScreen';
 import { PersistenceErrorScreen } from '../ui/menu/PersistenceErrorScreen';
+import { SaveExitController, type SaveExitState, type SaveExitDiagnostics } from './SaveExitController';
+import { DirtyWarningController } from './DirtyWarningController';
 import { PauseMenuScreen } from '../ui/menu/PauseMenuScreen';
 import { VideoSettingsScreen } from '../ui/menu/VideoSettingsScreen';
 import { ControlsScreen } from '../ui/menu/ControlsScreen';
@@ -61,13 +61,15 @@ export class ApplicationController {
   private state: ApplicationState = 'boot';
   private screen: Screen | null = null;
   private engine: Engine | null = null;
+  private saveExitController: SaveExitController | null = null;
+  private readonly dirtyWarning = new DirtyWarningController();
   private settings: GameSettings = DEFAULT_GAME_SETTINGS;
   private readonly audio = new AudioManager();
   private optionsParent: 'main' | 'pause' = 'main';
   private pauseEscapeArmed = true;
   private activeLoadToken = 0;
   private loadInProgress = false;
-  private saveExitInFlight = false;
+
   private spawnPreparation: SpawnPreparationState | null = null;
   private readonly resize = (): void => applyGuiScaleCssVariables();
   private readonly audioActivation = (): void => { void this.audio.activate(); };
@@ -86,9 +88,7 @@ export class ApplicationController {
     }
   };
   private readonly keyup = (event: KeyboardEvent): void => { if (this.settings.controls.bindings.pause.includes(event.code)) this.pauseEscapeArmed = true; };
-  /** Legacy storage retained ONLY for isolated app settings. */
-  private readonly storagePromise: Promise<WorldStorage>;
-  /** Application-owned world backend (new system); opened in start(), closed in dispose(). */
+  /** Application-owned backend (new system); opened in start(), closed in dispose(). Stores worlds and app settings. */
   private backend: IdbStorageBackend | null = null;
 
   public constructor(
@@ -98,15 +98,22 @@ export class ApplicationController {
     private readonly entityTextures: EntityTextureAssets,
     private readonly armourTextures: ArmourTextureAssets,
     private readonly skinManager: PlayerSkinManager,
-  ) {
-    this.storagePromise = IndexedDbWorldStorage.open();
-  }
+  ) {}
 
   public async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
-    const settingsStorage = await this.storagePromise;
-    this.settings = await loadGameSettings(settingsStorage);
+    // Open the application-owned backend first; worlds and app settings use it.
+    try {
+      const backend = new IdbStorageBackend();
+      await backend.open();
+      this.backend = backend;
+      this.settings = await loadGameSettings(backend);
+    } catch (error) {
+      console.error('[ApplicationController] Failed to open world storage backend:', error);
+      this.backend = null; // showWorldSelect will surface a storage error
+      this.settings = DEFAULT_GAME_SETTINGS;
+    }
     setGlobalGuiScaleSetting(this.settings.video.guiScale);
     this.audio.applySettings(this.settings);
     this.installAudioActivation();
@@ -114,15 +121,6 @@ export class ApplicationController {
     window.addEventListener('resize', this.resize);
     window.addEventListener('keydown', this.keydown);
     window.addEventListener('keyup', this.keyup);
-    // Open the application-owned world backend before the world list queries it.
-    try {
-      const backend = new IdbStorageBackend();
-      await backend.open();
-      this.backend = backend;
-    } catch (error) {
-      console.error('[ApplicationController] Failed to open world storage backend:', error);
-      this.backend = null; // showWorldSelect will surface a storage error
-    }
     await this.showMainMenu();
   }
 
@@ -144,8 +142,6 @@ export class ApplicationController {
       await this.backend.close();
       this.backend = null;
     }
-    const settingsStorage = await this.storagePromise;
-    await settingsStorage.close?.();
   }
 
   public getState(): ApplicationState { return this.state; }
@@ -246,6 +242,7 @@ export class ApplicationController {
       this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error));
       this.setScreen(null, 'in_game');
       this.engine.start();
+      this.attachSessionControllers();
       // PUBLISH to the visible index only after initialization + spawn persistence
       // succeeded (amendment 2).
       await backend.upsertWorld(this.summaryFromMetadata(metadata));
@@ -297,6 +294,7 @@ export class ApplicationController {
       this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error));
       this.setScreen(null, 'in_game');
       this.engine.start();
+      this.attachSessionControllers();
       service = null; // ownership transferred to the engine
       // Refresh last-played in the index.
       await backend.upsertWorld(this.summaryFromMetadata({ ...metadata, lastPlayedMs: Date.now() }));
@@ -331,29 +329,112 @@ export class ApplicationController {
     this.engine.setPaused(false);
   }
 
-  private async saveQuitToTitle(): Promise<void> {
+  /** Attach the Save-and-Quit controller + dirty-warning subscription to the active session. */
+  private attachSessionControllers(): void {
     if (this.engine === null) return;
-    if (this.saveExitInFlight) return;
-    this.saveExitInFlight = true;
-    try {
-      this.screen?.dispose();
-      const loading = new LoadingScreen();
-      this.setScreen(loading, 'world_loading');
-      loading.update({ stage: 'finalizing', completed: 0, total: undefined, primaryMessage: 'Saving world', secondaryMessage: 'Please wait' });
-      // Stage 2 Save-and-Quit bridge (amendment 1): freeze gameplay, save dirty
-      // chunks, save final metadata, await the barrier, close the service (never
-      // the shared backend), dispose the engine. No legacy save pipeline.
-      await this.engine.saveAndQuit();
-      this.engine = null;
-      this.audio.endWorldSession();
-      await this.showMainMenu();
-    } catch (error) {
-      console.error('[ApplicationController] Save and Quit failed:', error);
-      if (this.engine !== null) this.engine.setPaused(true);
-      this.showError('Save failed', error instanceof Error ? error.message : String(error));
-    } finally {
-      this.saveExitInFlight = false;
+    this.dirtyWarning.attach(this.engine);
+    this.saveExitController = new SaveExitController(this.engine, {
+      onStateChange: (state, diag) => this.onSaveExitStateChange(state, diag),
+      onCompleted: () => void this.onSaveExitCompleted(),
+    });
+  }
+
+  private async saveQuitToTitle(): Promise<void> {
+    if (this.engine === null || this.saveExitController === null) return;
+    if (!this.saveExitController.isSettled) return; // no overlap/re-entrancy
+    this.showSavingScreen();
+    // The controller owns the operation + watchdogs; UI reacts via onStateChange.
+    this.saveExitController.start();
+  }
+
+  private showSavingScreen(): void {
+    this.screen?.dispose();
+    const loading = new LoadingScreen();
+    this.setScreen(loading, 'world_loading');
+    loading.update({ stage: 'finalizing', completed: 0, total: undefined, primaryMessage: 'Saving world', secondaryMessage: 'Please wait' });
+  }
+
+  private onSaveExitStateChange(state: SaveExitState, diag: SaveExitDiagnostics): void {
+    if (state === 'quiescing' || state === 'saving') {
+      if (this.state !== 'world_loading') this.showSavingScreen();
+    } else if (state === 'waiting_after_timeout') {
+      this.showSaveTimeoutScreen(diag);
+    } else if (state === 'failed') {
+      this.showSaveFailedScreen(diag);
+    } else if (state === 'idle') {
+      // Returned to the world after a failed attempt: gameplay resumed, paused.
+      void this.showPauseMenu();
     }
+  }
+
+  private async onSaveExitCompleted(): Promise<void> {
+    // Fully successful save + service close: tear down the session and go to title.
+    this.dirtyWarning.detach();
+    this.saveExitController = null;
+    this.engine = null; // engine already stopped by the controller
+    this.audio.endWorldSession();
+    await this.showMainMenu();
+  }
+
+  private retrySaveAndQuit(): void {
+    if (this.saveExitController === null) return;
+    this.showSavingScreen();
+    this.saveExitController.start(); // failed -> quiescing (Retry); guarded to settled-only
+  }
+
+  private returnToWorld(): void {
+    if (this.saveExitController === null) return;
+    this.saveExitController.returnToWorld(); // failed -> idle; onSaveExitStateChange shows the pause menu
+  }
+
+  private continueWaiting(): void {
+    // The operation is still running; return to the saving screen.
+    this.showSavingScreen();
+  }
+
+  private showSaveFailedScreen(diag: SaveExitDiagnostics): void {
+    this.setScreen(new PersistenceErrorScreen(
+      'Save Failed',
+      'The world could not be saved. Nothing was reported as saved. The world is still open.',
+      this.formatSaveDiagnostics(diag),
+      [
+        { label: 'Retry Save & Quit', onClick: () => this.retrySaveAndQuit() },
+        { label: 'Return to World', onClick: () => this.returnToWorld() },
+      ],
+    ), 'error');
+  }
+
+  private showSaveTimeoutScreen(diag: SaveExitDiagnostics): void {
+    this.setScreen(new PersistenceErrorScreen(
+      'Save Is Taking A While',
+      'The save is still running and has not finished. The result is not yet known. Do not close the page.',
+      this.formatSaveDiagnostics(diag),
+      [
+        { label: 'Continue Waiting', onClick: () => this.continueWaiting() },
+        { label: 'Reload App', onClick: () => window.location.reload() },
+      ],
+    ), 'error');
+  }
+
+  private formatSaveDiagnostics(diag: SaveExitDiagnostics): string {
+    const e = diag.engine;
+    return [
+      `State: ${diag.state}`,
+      `Stalled stage: ${diag.stalledStage ?? '(none)'}`,
+      `Elapsed: ${diag.elapsedMs}ms`,
+      `Escalated: ${diag.escalated}`,
+      `Error: ${diag.error ?? '(none)'}`,
+      `World: ${e.service.worldId ?? '(none)'}`,
+      `Dirty chunks: ${e.dirtyChunks}`,
+      `Write lane: accepted=${e.service.writeLane.accepted} completed=${e.service.writeLane.completed} active=${e.service.writeLane.active} pending=${e.service.writeLane.pending}`,
+      `Queued by priority: ${JSON.stringify(e.service.writeLane.queuedByPriority)}`,
+      `Pending reads: ${e.pendingReads}`,
+      `Pending unloads: ${e.pendingUnloads} (service: ${e.service.pendingUnloads})`,
+      `Metadata write in flight: ${e.service.metadataWriteInFlight}`,
+      `Quiescing: ${e.quiescing}  Save active: ${e.saveExitActive}  Autosave paused: ${e.autosavePaused}`,
+      `Last persistence error: ${e.service.lastError?.message ?? '(none)'}`,
+      `Autosave last failure: ${e.autosaveStats.lastFailure ?? '(none)'}`,
+    ].join('\n');
   }
 
   private async updateSettings(settings: GameSettings): Promise<void> {
@@ -362,7 +443,9 @@ export class ApplicationController {
     window.dispatchEvent(new Event('resize'));
     this.audio.applySettings(settings);
     this.engine?.applySettings(settings);
-    await saveGameSettings(await this.storagePromise, settings);
+    if (this.backend !== null) {
+      await saveGameSettings(this.backend, settings);
+    }
   }
 
   private installAudioActivation(): void {
@@ -456,6 +539,8 @@ export class ApplicationController {
   /** Fail-loud handler invoked by the Engine when a mid-stream chunk read is corrupt. */
   private async handlePersistenceError(error: RecordCorruptionError): Promise<void> {
     console.error('[ApplicationController] Persistence corruption detected; halting world session:', error);
+    this.dirtyWarning.detach();
+    this.saveExitController = null;
     const engine = this.engine;
     this.engine = null;
     if (engine !== null) {
@@ -466,7 +551,22 @@ export class ApplicationController {
   }
 
   private showPersistenceError(error: RecordCorruptionError): void {
-    this.setScreen(new PersistenceErrorScreen(error, { returnToWorldList: () => void this.showWorldSelect() }), 'error');
+    const lines = [
+      `Record kind: ${error.kind}`,
+      `Validation stage: ${error.stage}`,
+      error.worldId !== undefined ? `World: ${error.worldId}` : null,
+      error.chunkX !== undefined && error.chunkZ !== undefined ? `Chunk: ${error.chunkX}, ${error.chunkZ}` : null,
+      `Detail: ${error.message}`,
+    ].filter((line): line is string => line !== null);
+    this.setScreen(new PersistenceErrorScreen(
+      'World Data Corrupted',
+      'A stored record failed validation and was preserved unchanged. Loading was stopped to protect your data.',
+      lines.join('\n'),
+      [
+        { label: 'World List', onClick: () => void this.showWorldSelect() },
+        { label: 'Reload App', onClick: () => window.location.reload() },
+      ],
+    ), 'error');
   }
 
   private showError(title: string, message: string): void {
@@ -551,8 +651,10 @@ export class ApplicationController {
 
   private async unloadWorld(): Promise<void> {
     this.cancelSpawnPreparation();
+    this.dirtyWarning.detach();
+    this.saveExitController = null;
     if (this.engine === null) return;
-    // Save-and-quit bridge: freeze, save, close the service (not the backend), stop.
+    // Application disposal: save, close the service (not the backend), stop the engine.
     await this.engine.saveAndQuit();
     this.engine = null;
     this.audio.endWorldSession();

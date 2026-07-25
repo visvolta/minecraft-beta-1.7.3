@@ -48,6 +48,13 @@ export class ChunkStreamer {
   private disposed = false;
   /** Set when a corrupt record halts the world; stops further chunk dispatch. */
   private halted = false;
+  /** Set during Save-and-Quit quiesce: stop accepting work; detach in-flight read results. */
+  private quiescing = false;
+  /** Accepted read settlements, tracked to settlement so a detached read can never reject unobserved. */
+  private readonly activeReads = new Map<string, Promise<void>>();
+  /** Accepted unload settlements; the ChunkStreamer is the single owner of unload settlement (correction 2). */
+  private readonly activeUnloads = new Map<string, Promise<void>>();
+  private unloadFailure: unknown = null;
 
   public constructor(
     chunkManager: ChunkManager,
@@ -87,7 +94,7 @@ export class ChunkStreamer {
     downstreamMeshQueue: number,
     downstreamUploadQueue: number,
   ): void {
-    if (this.disposed || this.halted) return;
+    if (this.disposed || this.halted || this.quiescing) return;
     const chunkX = Math.floor(cameraWorldX / CHUNK_SIZE_X);
     const chunkZ = Math.floor(cameraWorldZ / CHUNK_SIZE_Z);
 
@@ -139,6 +146,56 @@ export class ChunkStreamer {
     this.desiredChunks.clear();
     this.loadingChunks.clear();
     this.generationQueue.dispose();
+  }
+
+  /** Stop accepting new streaming work (reads/unloads) during quiesce. */
+  public stopAccepting(): void {
+    this.quiescing = true;
+  }
+
+  /** Resume streaming after returning to gameplay from a failed Save-and-Quit. */
+  public resume(): void {
+    this.quiescing = false;
+    this.unloadFailure = null;
+  }
+
+  public get pendingReadCount(): number {
+    return this.activeReads.size;
+  }
+
+  public get pendingUnloadCount(): number {
+    return this.activeUnloads.size;
+  }
+
+  /**
+   * Cancel pending reads (correction 3). Reads already dispatched to the read
+   * lane may not be physically cancellable; their results are detached from
+   * gameplay (ignored) but their promises are still tracked to settlement so
+   * none can reject unobserved. Idempotent; never integrates a chunk afterwards.
+   */
+  public cancelPendingReads(): void {
+    this.quiescing = true;
+    // Reads not yet dispatched will not be (update/dispatchLoad guard on quiescing).
+    // In-flight reads complete but their results are ignored (dispatchLoad checks quiescing).
+  }
+
+  /** Resolves once every accepted read has settled (detached results included). */
+  public settleAcceptedReads(): Promise<void> {
+    return Promise.all([...this.activeReads.values()]).then(() => undefined);
+  }
+
+  /**
+   * The single authoritative owner of unload settlement (correction 2). Resolves
+   * once every accepted unload has finished its serialized persistence work;
+   * rejects if any unload failed (so the final save is aborted, not papered over).
+   */
+  public async settleAcceptedUnloads(): Promise<void> {
+    await Promise.all([...this.activeUnloads.values()]);
+    if (this.unloadFailure !== null) {
+      const error = this.unloadFailure;
+      this.unloadFailure = null;
+      throw error;
+    }
   }
 
   private streamAround(
@@ -202,40 +259,45 @@ export class ChunkStreamer {
           this.markNeighboursDirty(x, z);
         } else {
           // State-transition unload: save the final revision once and remove the
-          // chunk only after the write succeeds (no save-until-clean loop).
-          this.persistence.requestUnload(chunk).then(() => {
+          // chunk only after the write succeeds (no save-until-clean loop). The
+          // ChunkStreamer tracks the unload to settlement (single owner, correction 2).
+          const unloadKey = this.key(x, z);
+          const tracked = this.persistence.requestUnload(chunk).then(() => {
             if (this.disposed) return;
-            if (!this.desiredChunks.has(this.key(x, z))) {
+            if (!this.quiescing && !this.desiredChunks.has(unloadKey)) {
               this.chunkRenderer.removeChunkMesh(x, z);
               this.chunkManager.removeChunk(x, z);
               this.markNeighboursDirty(x, z);
             }
           }).catch((error) => {
-            // Unload save failed: keep the chunk loaded; it is retried on the next
-            // streaming update. (Failures are still surfaced by a forced-save barrier.)
-            console.warn(`[ChunkStreamer] unload save failed for ${this.key(x, z)}:`, error);
+            // Record the failure so settleAcceptedUnloads can abort the final save
+            // (correction 4). The chunk stays loaded (dirty) and is covered by the
+            // forced save if it is still wanted.
+            this.unloadFailure = error;
+            console.warn(`[ChunkStreamer] unload save failed for ${unloadKey}:`, error);
+          }).finally(() => {
+            this.activeUnloads.delete(unloadKey);
           });
+          this.activeUnloads.set(unloadKey, tracked);
         }
       }
     }
   }
 
   private dispatchLoad(x: number, z: number, priority: number, critical: boolean): void {
-    if (this.disposed || this.halted) return;
+    if (this.disposed || this.halted || this.quiescing) return;
     const k = this.key(x, z);
     this.loadingChunks.add(k);
 
-    this.persistence.loadChunk(x, z).then(chunk => {
-      if (this.disposed) return;
-      if (!this.desiredChunks.has(k)) {
-        this.loadingChunks.delete(k);
-        return;
-      }
+    const readPromise = this.persistence.loadChunk(x, z).then(chunk => {
+      // Detach after quiesce: never integrate or generate a chunk during/after
+      // Save-and-Quit quiesce (correction 3).
+      if (this.disposed || this.quiescing) return;
+      if (!this.desiredChunks.has(k)) return;
 
       if (chunk === undefined) {
         // Miss, fallback to generation
         this.generationQueue.enqueue(x, z, priority, critical);
-        this.loadingChunks.delete(k);
       } else {
         // Hit, integrate chunk
         const managed = this.chunkManager.getOrCreateChunk(x, z);
@@ -254,11 +316,12 @@ export class ChunkStreamer {
         }
         this.lightEngine.reconcileChunkBorders(managed);
         this.markNeighboursDirty(managed.chunkX, managed.chunkZ);
-        this.loadingChunks.delete(k);
         this.onChunkLoaded?.(managed);
       }
     }).catch((error) => {
-      this.loadingChunks.delete(k);
+      // During/after quiesce, detached read errors are observed (no unhandled
+      // rejection) but not acted upon.
+      if (this.disposed || this.quiescing) return;
       if (error instanceof RecordCorruptionError) {
         // Fail loud: a present-but-invalid record halts the world. Never treat it
         // as missing, never regenerate over it, never fall back to legacy.
@@ -269,7 +332,11 @@ export class ChunkStreamer {
         // next streaming update.
         console.warn(`[ChunkStreamer] chunk read failed for ${k}:`, error);
       }
+    }).finally(() => {
+      this.loadingChunks.delete(k);
+      this.activeReads.delete(k);
     });
+    this.activeReads.set(k, readPromise);
   }
 
   private markNeighboursDirty(chunkX: number, chunkZ: number): void {

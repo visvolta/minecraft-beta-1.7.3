@@ -1,4 +1,4 @@
-import type { NbtCompound } from '../../persistence/nbt/Nbt';
+import type { NbtCompound } from '../../nbt/Nbt';
 import type { Entity } from './Entity';
 import type { EntityWorldContext } from './EntityContext';
 

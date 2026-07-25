@@ -1,7 +1,7 @@
 import { LivingEntity } from './LivingEntity';
 import { BlockIds } from '../../blocks/BlockId';
 import type { EntityTickContext } from '../core/EntityContext';
-import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import { MateTask } from '../ai/tasks/MateTask';
 import { TemptTask } from '../ai/tasks/TemptTask';
 

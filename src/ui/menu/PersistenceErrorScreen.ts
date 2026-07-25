@@ -1,69 +1,61 @@
 import { applyDirtBackground, guiWidth, GuiButton, Screen } from './MenuWidgets';
-import type { RecordCorruptionError } from '../../persistence2/codec/PersistenceError';
 
 /**
- * Fail-loud persistence-corruption screen (Stage 2). Shown when a stored record
- * exists but fails validation (header/version/checksum/length/decompression/
- * schema/coordinate). The corrupt record is preserved unchanged — there are
- * deliberately NO repair / delete / regenerate / continue-anyway actions, only
- * safe ones: copy diagnostics, return to the world list, reload the application.
+ * Persistence error/diagnostic screen (Stage 3). Used for fail-loud corruption
+ * AND for Save-and-Quit failure/timeout. The caller configures the title,
+ * summary, copyable diagnostic block and the safe actions appropriate to the
+ * situation:
+ *   - failed save: Retry Save-and-Quit / Return to World / Copy Diagnostics
+ *   - timed out (operation unsettled): Continue Waiting / Reload (unknown result) / Copy Diagnostics
+ *   - corruption at load: Return to World List / Reload / Copy Diagnostics
+ * There are deliberately NO repair / delete / regenerate / continue-anyway /
+ * navigate-to-title-as-if-saved actions.
  */
-export interface PersistenceErrorActions {
-  readonly returnToWorldList: () => void;
+export interface PersistenceErrorAction {
+  label: string;
+  onClick: () => void;
 }
 
 export class PersistenceErrorScreen extends Screen {
+  private readonly buttons: GuiButton[] = [];
   private readonly diagnostic: string;
-  private readonly copyBtn: GuiButton;
-  private readonly listBtn: GuiButton;
-  private readonly reloadBtn: GuiButton;
 
-  public constructor(error: RecordCorruptionError, actions: PersistenceErrorActions) {
+  public constructor(title: string, summary: string, diagnosticBlock: string, actions: PersistenceErrorAction[]) {
     super();
     applyDirtBackground(this.root);
+    this.diagnostic = diagnosticBlock;
 
-    const lines = [
-      'A stored world record failed validation.',
-      'The record has been preserved unchanged (not deleted, overwritten or regenerated).',
-      '',
-      `Record kind: ${error.kind}`,
-      `Validation stage: ${error.stage}`,
-      error.worldId !== undefined ? `World: ${error.worldId}` : null,
-      error.chunkX !== undefined && error.chunkZ !== undefined ? `Chunk: ${error.chunkX}, ${error.chunkZ}` : null,
-      '',
-      `Detail: ${error.message}`,
-    ].filter((line): line is string => line !== null);
-    this.diagnostic = lines.join('\n');
+    const titleEl = document.createElement('div');
+    titleEl.textContent = title;
+    titleEl.style.cssText = 'position:absolute;left:0;right:0;top:26px;text-align:center;font:18px Minecraft, monospace;color:white';
 
-    const title = document.createElement('div');
-    title.textContent = 'World Data Corrupted';
-    title.style.cssText = 'position:absolute;left:0;right:0;top:30px;text-align:center;font:18px Minecraft, monospace;color:white';
-
-    const subtitle = document.createElement('div');
-    subtitle.textContent = 'Loading was stopped to protect your data. Safe actions only.';
-    subtitle.style.cssText = 'position:absolute;left:0;right:0;top:58px;text-align:center;font:12px Minecraft, monospace;color:#aaa';
+    const summaryEl = document.createElement('div');
+    summaryEl.textContent = summary;
+    summaryEl.style.cssText = 'position:absolute;left:8%;right:8%;top:56px;text-align:center;font:12px Minecraft, monospace;color:#ffd0d0';
 
     const box = document.createElement('textarea');
-    box.value = this.diagnostic;
+    box.value = diagnosticBlock;
     box.readOnly = true;
     box.spellcheck = false;
-    box.style.cssText = 'position:absolute;left:10%;right:10%;top:86px;height:170px;background:#000;color:#ff9090;font:12px Minecraft, monospace;border:1px solid #555;padding:6px;resize:none';
+    box.style.cssText = 'position:absolute;left:8%;right:8%;top:96px;height:170px;background:#000;color:#ff9090;font:12px Minecraft, monospace;border:1px solid #555;padding:6px;resize:none';
 
-    this.copyBtn = new GuiButton('Copy Diagnostics', () => void this.copyDiagnostics(), 150, 20);
-    this.listBtn = new GuiButton('World List', actions.returnToWorldList, 150, 20);
-    this.reloadBtn = new GuiButton('Reload App', () => window.location.reload(), 150, 20);
+    this.root.append(titleEl, summaryEl, box);
 
-    this.root.append(title, subtitle, box, this.copyBtn.element, this.listBtn.element, this.reloadBtn.element);
+    const copyBtn = new GuiButton('Copy Diagnostics', () => void this.copyDiagnostics(copyBtn), 150, 20);
+    this.buttons.push(copyBtn);
+    for (const action of actions) {
+      this.buttons.push(new GuiButton(action.label, action.onClick, 150, 20));
+    }
+    for (const button of this.buttons) this.root.append(button.element);
     this.layout();
   }
 
-  private async copyDiagnostics(): Promise<void> {
+  private async copyDiagnostics(button: GuiButton): Promise<void> {
     try {
       await navigator.clipboard.writeText(this.diagnostic);
-      this.copyBtn.element.textContent = 'Copied!';
+      button.element.textContent = 'Copied!';
     } catch {
-      // Clipboard unavailable; the diagnostic box is selectable for manual copy.
-      this.copyBtn.element.textContent = 'Select & copy above';
+      button.element.textContent = 'Select & copy above';
     }
   }
 
@@ -73,9 +65,15 @@ export class PersistenceErrorScreen extends Screen {
 
   private layout(): void {
     const w = guiWidth();
-    const y = 272;
-    this.copyBtn.centerAt(w / 2 - 160, y);
-    this.listBtn.centerAt(w / 2, y);
-    this.reloadBtn.centerAt(w / 2 + 160, y);
+    const y = 282;
+    const gap = 8;
+    const total = this.buttons.length;
+    const buttonWidth = 150;
+    const rowWidth = total * buttonWidth + (total - 1) * gap;
+    let x = w / 2 - rowWidth / 2;
+    for (const button of this.buttons) {
+      button.setPosition(x, y);
+      x += buttonWidth + gap;
+    }
   }
 }

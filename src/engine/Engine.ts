@@ -126,9 +126,10 @@ import { PerformanceProfiler } from '../debug/PerformanceProfiler';
 import { WorkerValidationHarness } from '../debug/WorkerValidationHarness';
 import { BlockTestGrid } from '../debug/BlockTestGrid';
 import type { IUpdatable } from './IUpdatable';
-import { WorldPersistenceService, WRITE_PRIORITY_BACKGROUND, WRITE_PRIORITY_FORCED } from '../persistence2/WorldPersistenceService';
+import { WorldPersistenceService, WRITE_PRIORITY_BACKGROUND, WRITE_PRIORITY_FORCED, type ServiceDiagnostics } from '../persistence2/WorldPersistenceService';
 import type { RecordCorruptionError } from '../persistence2/codec/PersistenceError';
-import { GENERATOR_VERSION, SAVE_VERSION, type WorldMetadata } from '../persistence/metadata/WorldMetadata';
+import type { PersistenceRiskSnapshot } from '../persistence2/PersistenceRisk';
+import { GENERATOR_VERSION, SAVE_VERSION, type WorldMetadata } from '../world/WorldMetadata';
 import { PlayerModel } from '../player/PlayerModel';
 import { PlayerAnimator } from '../player/PlayerAnimator';
 import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
@@ -159,7 +160,8 @@ import {
   THIRD_PERSON_HELD_BLOCK_SCALE,
   FIRST_PERSON_CAMERA_OFFSET_Y
 } from '../player/PlayerConstants';
-import { getActiveSaveTrace, getSaveTraceHistory, measureSaveAsync, measureSaveSync, recordSaveEvent } from '../persistence/debug/SavePipelineTrace';
+import { getActiveSaveTrace, getSaveTraceHistory, measureSaveSync, recordSaveEvent } from '../persistence2/debug/SavePipelineTrace';
+import type { Chunk } from '../world/Chunk';
 
 interface EntityLightingUniforms {
   uSkylightSubtracted: { value: number };
@@ -176,6 +178,17 @@ const MAX_DELTA_SECONDS = 0.1;
 const METADATA_AUTOSAVE_MS = 30_000;
 const CHUNK_SAVE_PUMP_INTERVAL_MS = 500;
 const CHUNK_SAVE_PUMP_MAX_CHUNKS = 2;
+
+/** Autosave diagnostics (correction 7). */
+interface AutosaveStats {
+  lastPumpMs: number;
+  lastSelected: number;
+  lastSkippedInFlight: number;
+  lastDirtyCount: number;
+  lastSuccessMs: number;
+  lastFailureMs: number;
+  lastFailure: string | null;
+}
 const DEBUG_GEOMETRY_MEMORY_SAMPLE_MS = 250;
 
 export class Engine {
@@ -282,6 +295,15 @@ export class Engine {
   private lastMetadataAutosaveMs = 0;
   private lastChunkSavePumpMs = 0;
   private deathSavePending=false;
+  /** Save-and-Quit quiesce state: gameplay mutations/streaming/autosave/unloads disabled. */
+  private quiescing = false;
+  /** True while a Save-and-Quit attempt is active (settled or not). */
+  private saveExitActive = false;
+  /** Autosave is paused after a background write failure until explicitly resumed (correction 7). */
+  private autosavePaused = false;
+  private lastMetadataJson = '';
+  private readonly autosaveStats: AutosaveStats = { lastPumpMs: 0, lastSelected: 0, lastSkippedInFlight: 0, lastDirtyCount: 0, lastSuccessMs: 0, lastFailureMs: 0, lastFailure: null };
+  private readonly persistenceRiskListeners = new Set<(snapshot: PersistenceRiskSnapshot) => void>();
   private readonly playerModel: PlayerModel;
   private readonly playerAnimator: PlayerAnimator;
   private readonly armourGeometryCache: ArmourGeometryCache;
@@ -417,6 +439,12 @@ export class Engine {
       loadChunkEntities: (tags) => this.entityManager.loadChunkEntities(tags),
       hasParkedEntities: (cx, cz) => this.entityManager.hasParkedEntities(cx, cz),
     });
+    // Event-driven persistence-risk propagation (correction 8): the service
+    // notifies on every persistence state change; the engine owns autosave-failure
+    // recovery (correction 7) and re-publishes an aggregated risk snapshot to
+    // subscribers (e.g. the DirtyWarningController).
+    this.persistence.setChangeListener(() => this.onPersistenceStateChanged());
+    this.lastMetadataJson = JSON.stringify(metadata);
 
     this.playerModelUniforms = this.playerModel.material.userData.dynamicLightingUniforms as EntityLightingUniforms | undefined;
 
@@ -913,45 +941,148 @@ export class Engine {
 
   public get isPaused(): boolean { return this.simulationPaused; }
 
+  // --- Save-and-Quit lifecycle operations (orchestrated by SaveExitController) ---
+
   /**
-   * Freeze/quiesce gameplay before the final save (amendment 1): pause simulation
-   * and stop chunk streaming, autosave and unload scheduling. Pausing stops the
-   * tick loop (which drives streaming/autosave); the forced save's closing state
-   * then rejects new background writes/unloads, and in-flight writes are covered
-   * by the barrier.
+   * Step 1-2 of the shutdown ordering (correction 5): freeze gameplay and
+   * streaming, and cancel pending reads. Pausing stops simulation ticks, the
+   * autosave pump and streaming; stopAccepting halts new unload scheduling;
+   * cancelPendingReads detaches in-flight read results. Idempotent.
    */
-  private quiesceForSave(): void {
+  public freezeForSave(): void {
+    if (this.quiescing) return;
+    this.quiescing = true;
     this.setPaused(true);
+    this.chunkStreamer.stopAccepting();
+    this.chunkStreamer.cancelPendingReads();
+  }
+
+  /** Step 3a: settle accepted reads (correction 3) — never close while a detached read can reject unobserved. */
+  public settleAcceptedReads(): Promise<void> {
+    return this.chunkStreamer.settleAcceptedReads();
+  }
+
+  /** Step 3b: settle accepted unloads. The ChunkStreamer is the single owner (correction 2); rejects if an unload failed. */
+  public settleAcceptedUnloads(): Promise<void> {
+    return this.chunkStreamer.settleAcceptedUnloads();
+  }
+
+  /** Step 4: capture the immutable metadata snapshot from the frozen state (correction 5). */
+  public captureMetadataSnapshot(): WorldMetadata {
+    return this.snapshotMetadata();
+  }
+
+  /** Step 4: capture the stable set of currently-loaded dirty chunks (mutations are frozen). */
+  public dirtyChunkSnapshot(): Chunk[] {
+    const dirty: Chunk[] = [];
+    for (const chunk of this.chunkManager) if (chunk.isPersistenceDirty()) dirty.push(chunk);
+    return dirty;
+  }
+
+  /** The persistence service (used by the SaveExitController for saves/barrier/close). */
+  public getPersistence(): WorldPersistenceService {
+    return this.persistence;
+  }
+
+  public setSaveExitActive(active: boolean): void {
+    this.saveExitActive = active;
+    this.emitPersistenceRisk();
   }
 
   /**
-   * Save-and-Quit bridge (Stage 2): freeze gameplay, capture metadata, save dirty
-   * chunks (forced), save final metadata, await the barrier, close the world
-   * service (NEVER the shared backend), then dispose the engine. The application
-   * returns to the world list afterwards. Stage 3 replaces this with the full
-   * application-level forced-save orchestration + watchdog.
+   * Return to gameplay after a FAILED Save-and-Quit (failed -> idle). Clears the
+   * quiesce state, resumes streaming, and resumes autosave (correction 7).
+   */
+  public resumeFromFailedSave(): void {
+    this.quiescing = false;
+    this.saveExitActive = false;
+    this.autosavePaused = false;
+    this.persistence.clearLastError();
+    this.chunkStreamer.resume();
+    this.setPaused(true); // remain paused at the pause menu; the user resumes explicitly
+    this.emitPersistenceRisk();
+  }
+
+  /** Aggregated persistence-risk snapshot for the beforeunload warning (correction 8). */
+  public getPersistenceRiskSnapshot(): PersistenceRiskSnapshot {
+    const diag = this.persistence.getDiagnostics();
+    const dirtyChunks = this.countDirtyChunks();
+    const metadataChanged = this.metadataDirty() || diag.metadataWriteInFlight;
+    const unresolvedFailure = diag.lastError !== null || this.autosavePaused;
+    const snapshot: PersistenceRiskSnapshot = {
+      dirtyChunks,
+      inFlightWrites: diag.writeLane.active + diag.writeLane.pending,
+      metadataChanged,
+      pendingUnloads: diag.pendingUnloads + this.chunkStreamer.pendingUnloadCount,
+      finalSaveActive: this.saveExitActive,
+      unresolvedFailure,
+      atRisk: dirtyChunks > 0 || (diag.writeLane.active + diag.writeLane.pending) > 0 || metadataChanged || (diag.pendingUnloads + this.chunkStreamer.pendingUnloadCount) > 0 || this.saveExitActive || unresolvedFailure,
+    };
+    return snapshot;
+  }
+
+  /** Subscribe to persistence-risk changes; returns an unsubscribe function (correction 8). */
+  public subscribePersistenceRisk(listener: (snapshot: PersistenceRiskSnapshot) => void): () => void {
+    this.persistenceRiskListeners.add(listener);
+    return () => { this.persistenceRiskListeners.delete(listener); };
+  }
+
+  private emitPersistenceRisk(): void {
+    if (this.persistenceRiskListeners.size === 0) return;
+    const snapshot = this.getPersistenceRiskSnapshot();
+    for (const listener of this.persistenceRiskListeners) listener(snapshot);
+  }
+
+  /** snapshotMetadata guarded for use before the player/world is fully ready. */
+  private snapshotMetadataSafe(): WorldMetadata {
+    try {
+      return this.snapshotMetadata();
+    } catch {
+      return this.persistence.getMetadata() ?? this.snapshotMetadata();
+    }
+  }
+
+  /** Aggregated diagnostics for watchdogs / error screens. */
+  public getPersistenceDiagnostics(): {
+    service: ServiceDiagnostics;
+    dirtyChunks: number;
+    pendingReads: number;
+    pendingUnloads: number;
+    quiescing: boolean;
+    saveExitActive: boolean;
+    autosavePaused: boolean;
+    autosaveStats: AutosaveStats;
+  } {
+    return {
+      service: this.persistence.getDiagnostics(),
+      dirtyChunks: this.countDirtyChunks(),
+      pendingReads: this.chunkStreamer.pendingReadCount,
+      pendingUnloads: this.chunkStreamer.pendingUnloadCount,
+      quiescing: this.quiescing,
+      saveExitActive: this.saveExitActive,
+      autosavePaused: this.autosavePaused,
+      autosaveStats: { ...this.autosaveStats },
+    };
+  }
+
+  /**
+   * Convenience full save-and-quit (used by application disposal). The
+   * user-initiated Save-and-Quit goes through SaveExitController, which wraps
+   * these same operations with diagnostic watchdogs and the state machine.
    */
   public async saveAndQuit(): Promise<void> {
     recordSaveEvent('save.engine.save_and_quit_begin', { paused: this.simulationPaused, dirtyChunkCount: this.countDirtyChunks() });
-    // 1. Freeze/quiesce BEFORE capturing metadata or saving.
-    this.quiesceForSave();
-    // 2. Capture metadata from the frozen state.
-    const metadata = this.snapshotMetadata();
-    // 3. Save dirty chunks at forced priority; the barrier covers every write
-    //    accepted before it (forced + any earlier background/unload writes).
-    await measureSaveAsync('save.engine.forced_save_chunks', { dirtyChunkCount: this.countDirtyChunks() }, async () => {
-      await this.persistence.forcedSave(this.chunkManager);
-    });
-    // 4. Save the final metadata (forced priority is allowed while closing).
-    await measureSaveAsync('save.engine.write_final_metadata', undefined, async () => {
-      await this.persistence.saveMetadata(metadata, WRITE_PRIORITY_FORCED);
-    });
-    // 5. Await the barrier so the metadata write is durably settled.
+    this.freezeForSave();
+    await this.settleAcceptedReads();
+    await this.settleAcceptedUnloads();
+    const metadata = this.captureMetadataSnapshot();
+    const dirtyChunks = this.dirtyChunkSnapshot();
+    for (const chunk of dirtyChunks) this.persistence.saveChunk(chunk, WRITE_PRIORITY_FORCED).catch(() => undefined);
+    await this.persistence.flushBarrier();
+    await this.persistence.saveMetadata(metadata, WRITE_PRIORITY_FORCED);
     await this.persistence.flushBarrier();
     recordSaveEvent('save.engine.save_and_quit_persisted', { dirtyChunkCount: this.countDirtyChunks() });
-    // 6. Close the world service (the application-owned backend stays open).
     await this.persistence.close();
-    // 7. Dispose the engine.
     this.stop();
     recordSaveEvent('save.engine.save_and_quit_complete', { running: this.running });
   }
@@ -1341,22 +1472,56 @@ export class Engine {
   private saveMetadata(force: boolean): Promise<void> {
     const priority = force ? WRITE_PRIORITY_FORCED : WRITE_PRIORITY_BACKGROUND;
     const snapshot = this.snapshotMetadata();
+    this.lastMetadataJson = JSON.stringify(snapshot);
     return this.persistence.saveMetadata(snapshot, priority).catch((error) => {
       console.warn('[Engine] metadata save failed:', error);
     });
   }
 
+  /** True when the current session metadata differs from the last saved snapshot. */
+  private metadataDirty(): boolean {
+    return this.lastMetadataJson !== JSON.stringify(this.snapshotMetadataSafe());
+  }
+
+  /**
+   * Service state-change handler: owns autosave-failure recovery (correction 7)
+   * and re-publishes the aggregated persistence-risk snapshot (correction 8).
+   */
+  private onPersistenceStateChanged(): void {
+    const diag = this.persistence.getDiagnostics();
+    if (diag.lastError !== null && !this.autosavePaused && !this.saveExitActive) {
+      // Pause further background persistence on failure; preserve dirty state and
+      // record the error. Resumed by resumeFromFailedSave / a successful forced save.
+      this.autosavePaused = true;
+      this.autosaveStats.lastFailure = diag.lastError.message;
+      this.autosaveStats.lastFailureMs = diag.lastError.timeMs;
+      console.warn('[Engine] background persistence failed; pausing autosave until recovery:', diag.lastError.message);
+    }
+    this.emitPersistenceRisk();
+  }
+
   /**
    * Bounded background autosave, triggered externally by the tick loop (the
-   * service has no timers). Skips pumping while the world is closing/closed or
-   * when the write lane already has pending work, so background writes do not
-   * pile up unboundedly.
+   * service has no timers). Skip policy (corrections 3 & 7): skip while quiescing,
+   * during an active Save-and-Quit, while autosave is paused after a failure,
+   * while the write lane already has queued background work, or when nothing is
+   * dirty. At most one bounded batch is accepted per pump; in-flight chunks are
+   * never re-selected.
    */
   private pumpChunkSaves(): void {
-    const stats = this.persistence.getStats();
-    if (stats.closing || stats.closed) return;
-    if (stats.write.pending >= CHUNK_SAVE_PUMP_MAX_CHUNKS) return;
-    void this.persistence.saveSomeDirty(this.chunkManager, CHUNK_SAVE_PUMP_MAX_CHUNKS).catch((error) => {
+    this.autosaveStats.lastPumpMs = performance.now();
+    const diag = this.persistence.getDiagnostics();
+    const dirtyCount = this.countDirtyChunks();
+    this.autosaveStats.lastDirtyCount = dirtyCount;
+    this.autosaveStats.lastSkippedInFlight = diag.inFlightChunks;
+    if (this.quiescing || this.saveExitActive || this.autosavePaused) { this.autosaveStats.lastSelected = 0; return; }
+    if (diag.closing || diag.closed) { this.autosaveStats.lastSelected = 0; return; }
+    if (diag.pendingBackgroundSaves > 0) { this.autosaveStats.lastSelected = 0; return; }
+    if (dirtyCount === 0) { this.autosaveStats.lastSelected = 0; return; }
+    void this.persistence.saveSomeDirty(this.chunkManager, CHUNK_SAVE_PUMP_MAX_CHUNKS).then((count) => {
+      this.autosaveStats.lastSelected = count;
+      if (count > 0) this.autosaveStats.lastSuccessMs = performance.now();
+    }).catch((error) => {
       console.warn('[Engine] autosave pump failed:', error);
     });
   }

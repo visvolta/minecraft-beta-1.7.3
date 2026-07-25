@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Entity } from '../core/Entity';
 import { EntityTypeIds } from '../core/EntityType';
 import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
-import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import { BlockIds } from '../../blocks/BlockId';
 import type { Drop } from './BlockDropResolver';
 import { classifyItemRender, isBlock3dCategory, isFlatItemCategory, isToolCategory } from '../../inventory/ItemRenderClassifier';

@@ -4,7 +4,7 @@ import type { FuelRegistry } from './FuelRegistry';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import { BlockIds } from '../blocks/BlockId';
 import { ItemStack } from '../inventory/ItemStack';
-import type { SerializedItemStack } from '../persistence/metadata/WorldMetadata';
+import type { SerializedItemStack } from '../world/WorldMetadata';
 
 export interface SerializedFurnace {
   readonly x: number;

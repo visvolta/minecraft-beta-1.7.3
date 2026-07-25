@@ -1,4 +1,4 @@
-import { nbt, type NbtCompound, type NbtTag } from '../../persistence/nbt/Nbt';
+import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import type { Player } from '../../player/Player';
 import { Difficulty } from '../../world/Difficulty';
 import { hasLineOfSight } from '../../world/LineOfSight';
