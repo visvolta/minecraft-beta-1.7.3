@@ -35,9 +35,25 @@ export class LightEngine {
   private readonly chunkManager: ChunkManager;
   private readonly blockRegistry: BlockRegistry;
 
+  // BFS queue metrics for profiling
+  private propagationCallsCount = 0;
+  private totalBfsQueueSize = 0;
+  private maxBfsQueueSize = 0;
+
   public constructor(chunkManager: ChunkManager, blockRegistry: BlockRegistry) {
     this.chunkManager = chunkManager;
     this.blockRegistry = blockRegistry;
+  }
+
+  /** Returns and resets accumulated BFS queue metrics for profiling. */
+  public drainBfsMetrics(): { propagationCalls: number; averageBfsQueueSize: number; maximumBfsQueueSize: number } {
+    const calls = this.propagationCallsCount;
+    const avg = calls > 0 ? this.totalBfsQueueSize / calls : 0;
+    const max = this.maxBfsQueueSize;
+    this.propagationCallsCount = 0;
+    this.totalBfsQueueSize = 0;
+    this.maxBfsQueueSize = 0;
+    return { propagationCalls: calls, averageBfsQueueSize: avg, maximumBfsQueueSize: max };
   }
 
   // ==========================================
@@ -182,6 +198,9 @@ export class LightEngine {
   // ==========================================
 
   public propagateSkylightQueue(queue: QueueNode[]): void {
+    this.propagationCallsCount++;
+    if (queue.length > this.maxBfsQueueSize) this.maxBfsQueueSize = queue.length;
+    this.totalBfsQueueSize += queue.length;
     let head = 0;
     while (head < queue.length) {
       const node = queue[head++]!;
@@ -210,6 +229,9 @@ export class LightEngine {
   }
 
   public propagateBlocklightQueue(queue: QueueNode[]): void {
+    this.propagationCallsCount++;
+    if (queue.length > this.maxBfsQueueSize) this.maxBfsQueueSize = queue.length;
+    this.totalBfsQueueSize += queue.length;
     let head = 0;
     while (head < queue.length) {
       const node = queue[head++]!;

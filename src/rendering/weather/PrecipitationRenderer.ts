@@ -150,7 +150,9 @@ export class PrecipitationRenderer {
   private lastCameraCellZ = Number.NaN;
   private lastRenderRadius = Number.NaN;
   private lastRainOn = false;
-  private readonly sampledWeatherRevisions = new Map<string, number>();
+  /** Tracks unique sampled chunk coordinates + their weather revision for staleness checks. */
+  private readonly sampledWeatherChunks: { chunkX: number; chunkZ: number; revision: number }[] = [];
+  private readonly sampledWeatherKeySet = new Set<number>();
 
   private columns: ColumnInfo[] = [];
   private rainingColumns: ColumnInfo[] = [];
@@ -342,7 +344,8 @@ export class PrecipitationRenderer {
     const R = this.getRenderRadius();
     const eyeBlockY = Math.floor(cameraY);
     const columns: ColumnInfo[] = [];
-    this.sampledWeatherRevisions.clear();
+    this.sampledWeatherChunks.length = 0;
+    this.sampledWeatherKeySet.clear();
 
     const climates = this.climateSampler.sampleRegion(
       cameraCellX - R,
@@ -394,12 +397,9 @@ export class PrecipitationRenderer {
   }
 
   private needsHeightmapResample(): boolean {
-    for (const [key, revision] of this.sampledWeatherRevisions) {
-      const comma = key.indexOf(',');
-      const chunkX = Number(key.slice(0, comma));
-      const chunkZ = Number(key.slice(comma + 1));
-      const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-      if (chunk === undefined || chunk.getWeatherRevision() !== revision) {
+    for (const entry of this.sampledWeatherChunks) {
+      const chunk = this.chunkManager.getChunk(entry.chunkX, entry.chunkZ);
+      if (chunk === undefined || chunk.getWeatherRevision() !== entry.revision) {
         return true;
       }
     }
@@ -420,7 +420,11 @@ export class PrecipitationRenderer {
     const chunkZ = Math.floor(worldZ / CHUNK_SIZE_Z);
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
     if (chunk === undefined) return CHUNK_SIZE_Y;
-    this.sampledWeatherRevisions.set(`${chunkX},${chunkZ}`, chunk.getWeatherRevision());
+    const key = chunkX * 73856093 ^ chunkZ * 19349663;
+    if (!this.sampledWeatherKeySet.has(key)) {
+      this.sampledWeatherKeySet.add(key);
+      this.sampledWeatherChunks.push({ chunkX, chunkZ, revision: chunk.getWeatherRevision() });
+    }
     const localX = ((worldX % CHUNK_SIZE_X) + CHUNK_SIZE_X) % CHUNK_SIZE_X;
     const localZ = ((worldZ % CHUNK_SIZE_Z) + CHUNK_SIZE_Z) % CHUNK_SIZE_Z;
 
@@ -482,16 +486,22 @@ export class PrecipitationRenderer {
     const cornerX = dx === 0 ? worldX : worldX + 1;
     const cornerZ = dz === 0 ? worldZ : worldZ + 1;
 
-    // Accessor for getBetaFluidCornerHeight — samples 4 blocks around corner
-    const isSameFluid = (a: number, b: number): boolean => {
-      const waterA = a === BlockIds.WaterFlowing || a === BlockIds.WaterStill;
-      const waterB = b === BlockIds.WaterFlowing || b === BlockIds.WaterStill;
-      const lavaA = a === BlockIds.LavaFlowing || a === BlockIds.LavaStill;
-      const lavaB = b === BlockIds.LavaFlowing || b === BlockIds.LavaStill;
-      return (waterA && waterB) || (lavaA && lavaB);
-    };
+    return getBetaFluidCornerHeight(
+      this.fluidCornerAccessor,
+      cornerX,
+      blockY,
+      cornerZ,
+      fluidBlockId,
+    );
+  }
 
-    const getBlock = (x: number, y: number, z: number): number => {
+  /** Reusable accessor object for getBetaFluidCornerHeight — allocated once, not per call. */
+  private readonly columnRand = new SmallXorRandom(1);
+  private readonly rainBuffers = new BuildBuffers();
+  private readonly snowBuffers = new BuildBuffers();
+
+  private readonly fluidCornerAccessor = {
+    getBlock: (x: number, y: number, z: number): number => {
       if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
       const cx = Math.floor(x / CHUNK_SIZE_X);
       const cz = Math.floor(z / CHUNK_SIZE_Z);
@@ -500,9 +510,8 @@ export class PrecipitationRenderer {
       const lx = ((x % CHUNK_SIZE_X) + CHUNK_SIZE_X) % CHUNK_SIZE_X;
       const lz = ((z % CHUNK_SIZE_Z) + CHUNK_SIZE_Z) % CHUNK_SIZE_Z;
       return ch.getBlock(lx, y, lz);
-    };
-
-    const getMetadata = (x: number, y: number, z: number): number => {
+    },
+    getMetadata: (x: number, y: number, z: number): number => {
       if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
       const cx = Math.floor(x / CHUNK_SIZE_X);
       const cz = Math.floor(z / CHUNK_SIZE_Z);
@@ -511,26 +520,19 @@ export class PrecipitationRenderer {
       const lx = ((x % CHUNK_SIZE_X) + CHUNK_SIZE_X) % CHUNK_SIZE_X;
       const lz = ((z % CHUNK_SIZE_Z) + CHUNK_SIZE_Z) % CHUNK_SIZE_Z;
       return ch.getBlockMetadata(lx, y, lz);
-    };
-
-    const isSolidForFluidHeight = (id: number): boolean => {
+    },
+    isSameFluid: (a: number, b: number): boolean => {
+      const waterA = a === BlockIds.WaterFlowing || a === BlockIds.WaterStill;
+      const waterB = b === BlockIds.WaterFlowing || b === BlockIds.WaterStill;
+      const lavaA = a === BlockIds.LavaFlowing || a === BlockIds.LavaStill;
+      const lavaB = b === BlockIds.LavaFlowing || b === BlockIds.LavaStill;
+      return (waterA && waterB) || (lavaA && lavaB);
+    },
+    isSolidForFluidHeight: (id: number): boolean => {
       const def = this.blockRegistry.getById(id);
       return def !== undefined && def.solid && def.renderType !== 'leaves';
-    };
-
-    return getBetaFluidCornerHeight(
-      {
-        getBlock,
-        getMetadata,
-        isSameFluid,
-        isSolidForFluidHeight,
-      },
-      cornerX,
-      blockY,
-      cornerZ,
-      fluidBlockId,
-    );
-  }
+    },
+  };
 
   // ---------------------------------------------------------------------------
   // Geometry
@@ -545,8 +547,10 @@ export class PrecipitationRenderer {
     const buildStart = performance.now();
     // Two orthogonal quads per column, one per material. Emit separate
     // arrays for rain vs snow so we can bind different textures.
-    const rain: BuildBuffers = new BuildBuffers();
-    const snow: BuildBuffers = new BuildBuffers();
+    this.rainBuffers.reset();
+    this.snowBuffers.reset();
+    const rain: BuildBuffers = this.rainBuffers;
+    const snow: BuildBuffers = this.snowBuffers;
 
     const eyeBlockY = Math.floor(cameraY);
     const R = this.getRenderRadius();
@@ -559,8 +563,8 @@ export class PrecipitationRenderer {
       const buffers = col.kind === 'rain' ? rain : snow;
 
       // Beta seeds a per-column offset into UV space.
-      const seedRand = new SmallXorRandom(col.columnSeed);
-      const uOffset = seedRand.nextFloat();
+      this.columnRand.reseed(col.columnSeed);
+      const uOffset = this.columnRand.nextFloat();
 
       // Column-local relative positions: the mesh root sits at origin
       // (in world space we don't translate the root; per-vertex world
@@ -677,6 +681,9 @@ class SmallXorRandom {
   public constructor(seed: number) {
     this.state = (seed | 0) || 1;
   }
+  public reseed(seed: number): void {
+    this.state = (seed | 0) || 1;
+  }
   public nextFloat(): number {
     let x = this.state;
     x ^= x << 13;
@@ -693,6 +700,14 @@ class BuildBuffers {
   public colors: number[] = [];
   public indices: number[] = [];
   private baseIndex = 0;
+
+  public reset(): void {
+    this.positions.length = 0;
+    this.uvs.length = 0;
+    this.colors.length = 0;
+    this.indices.length = 0;
+    this.baseIndex = 0;
+  }
 
   public addQuad(
     x0: number, y0: number, z0: number, u0: number, v0: number,

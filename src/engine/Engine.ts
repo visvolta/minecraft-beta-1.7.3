@@ -910,6 +910,7 @@ export class Engine {
     }
     document.body.appendChild(this.renderer.domElement);
     this.debugOverlay.mount();
+    this.performanceProfiler.enabled = true;
     this.input.start();
     this.renderer.start();
     this.running = true;
@@ -1217,7 +1218,7 @@ export class Engine {
       const active = this.skinManager.toggleDebugMode();
       this.playerModel.updateSkin(this.skinManager);
       this.firstPersonArmRenderer.updateSkin(this.skinManager);
-      console.log(`[SkinManager] Toggled UV-debug skin diagnostic mode. Active: ${active}`);
+      if (import.meta.env.DEV) console.log(`[SkinManager] Toggled UV-debug skin diagnostic mode. Active: ${active}`);
     }
     if (this.input.isDebugKeyJustPressed('F4')) { this.rawLightDebugMode = !this.rawLightDebugMode; if (this.rawLightDebugMode) { this.ambientOcclusionDebugMode = false; this.chunkRenderer.setAmbientOcclusionDebugMode(false); } this.chunkRenderer.setRawLightDebugMode(this.rawLightDebugMode); }
     if (this.input.isDebugKeyJustPressed('F7')) { this.ambientOcclusionDebugMode = !this.ambientOcclusionDebugMode; if (this.ambientOcclusionDebugMode) { this.rawLightDebugMode = false; this.chunkRenderer.setRawLightDebugMode(false); } this.chunkRenderer.setAmbientOcclusionDebugMode(this.ambientOcclusionDebugMode); }
@@ -1296,7 +1297,9 @@ export class Engine {
     }
     this.playerArmourRenderer.sync();
 
+    const weatherSimStart = performance.now();
     this.weatherController.update(deltaSeconds);
+    const weatherSimEnd = performance.now();
     const weatherState = this.weatherController.getState();
     const previewFade = previewWeatherFade(weatherState.getRainStrength(weatherState.partialTick), weatherState.getThunderStrength(weatherState.partialTick));
     this.skyRenderer.update(camera, this.worldTime, previewFade);
@@ -1319,6 +1322,7 @@ export class Engine {
     const meshingStats = this.chunkRenderer.getMeshingStats();
     this.performanceProfiler.setQueues(generationStats.queued, meshingStats.queued + meshingStats.pendingUploads, generationStats.activeWorkers + meshingStats.activeWorkers, generationStats.oldestCriticalAgeMs);
     this.performanceProfiler.setWorkerCounters(generationStats.completed, generationStats.stale, generationStats.errors);
+    this.performanceProfiler.recordChunkCounts(this.chunkManager.size, this.chunkRenderer.getVisibleMeshCount(), this.chunkManager.countDirtyChunks());
 
     if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.interactionController.update(deltaSeconds);
 
@@ -1354,11 +1358,30 @@ export class Engine {
     }
 
     this.chunkRenderer.update(this.performanceProfiler.getSnapshot().frameTimeMs, camera.position.x, camera.position.z);
+    const precipStart = performance.now();
     this.precipitationRenderer.update(camera.position.x, camera.position.y, camera.position.z, deltaSeconds, atmos, this.worldTime);
+    const precipEnd = performance.now();
+    const splashStart = performance.now();
     this.rainSplashRenderer.update(camera, deltaSeconds, atmos, this.precipitationRenderer);
+    const splashEnd = performance.now();
     this.lightningManager.setAudioHook((x, y, z, distance) => this.audioManager.play({ type: 'weather.thunder', x, y, z, distance }));
     this.lightningManager.update(deltaSeconds, weatherState, camera.position.x, camera.position.y, camera.position.z);
     this.lightningRenderer.update(this.lightningManager.getState());
+    this.performanceProfiler.recordWeatherTimings({
+      simulationMs: weatherSimEnd - weatherSimStart,
+      splashMs: splashEnd - splashStart,
+      heightmapResampleMs: 0,
+      geometryRebuildMs: precipEnd - precipStart,
+      drawMs: 0,
+      transparentRenderingMs: 0,
+    });
+    const lightingMetrics = this.lightEngine.drainBfsMetrics();
+    this.performanceProfiler.recordLightingTimings({
+      propagationMs: 0,
+      averageBfsQueueSize: lightingMetrics.averageBfsQueueSize,
+      maximumBfsQueueSize: lightingMetrics.maximumBfsQueueSize,
+      propagationCalls: lightingMetrics.propagationCalls,
+    });
 
     const fogState = this.fogController.compute({ eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z, rawLightDebugMode: this.rawLightDebugMode, ambientOcclusionDebugMode: this.ambientOcclusionDebugMode, overworldColorHex: atmos.horizon.hex, overworldDensityMultiplier: atmos.fogDensityMultiplier });
     this.renderer.setFogState(fogState);

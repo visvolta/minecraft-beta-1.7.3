@@ -47,7 +47,7 @@ import type { SkyColorState } from './SkyColorController';
  * (Beta plains sky ≈ #78AFFF, noon fog ≈ #C0D8FF, sunrise horizon warm)
  * the premultiplied edge pixels display ~250/255 darker than an ideal
  * alpha blend — producing a visible dark halo around Sun/Moon during the
- * day. Audit at scripts/verifySkyStage16.ts's `sun.png alpha audit` block.
+ * day.
  *
  * The Stage 16E fix keeps true alpha using Three.js's own transparent
  * queue:

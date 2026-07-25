@@ -3,6 +3,7 @@ import type { ChunkManager } from './ChunkManager';
 import type { Chunk } from './Chunk';
 import type { WorldGenerator } from './WorldGenerator';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from './chunkConstants';
+import { chunkKey } from './chunkKey';
 import type { LightEngine } from './generation/lighting/LightEngine';
 import { ChunkGenerationQueue, type ChunkGenerationStats } from './streaming/ChunkGenerationQueue';
 import type { WorldPersistenceService } from '../persistence2/WorldPersistenceService';
@@ -76,8 +77,8 @@ export class ChunkStreamer {
 
   public dispatchCriticalLoad(chunkX: number, chunkZ: number): void {
     if (this.disposed) return;
-    if (!this.chunkManager.hasChunk(chunkX, chunkZ) && !this.loadingChunks.has(this.key(chunkX, chunkZ))) {
-      this.desiredChunks.add(this.key(chunkX, chunkZ));
+    if (!this.chunkManager.hasChunk(chunkX, chunkZ) && !this.loadingChunks.has(chunkKey(chunkX, chunkZ))) {
+      this.desiredChunks.add(chunkKey(chunkX, chunkZ));
       this.dispatchLoad(chunkX, chunkZ, -1000000, true);
     }
   }
@@ -219,9 +220,9 @@ export class ChunkStreamer {
         const cameraBoost = Math.max(0, nx * cameraDir.x + nz * cameraDir.z) * 120;
         const movementBoost = moveDir === null ? 0 : Math.max(0, nx * moveDir.x + nz * moveDir.z) * 180;
         const priority = distanceSq * 1000 - (critical ? 5000 : 0) - cameraBoost - movementBoost;
-        this.desiredChunks.add(this.key(x, z));
+        this.desiredChunks.add(chunkKey(x, z));
 
-        if (!this.chunkManager.hasChunk(x, z) && !this.loadingChunks.has(this.key(x, z))) {
+        if (!this.chunkManager.hasChunk(x, z) && !this.loadingChunks.has(chunkKey(x, z))) {
           toRequest.push({ x, z, priority, critical });
         }
       }
@@ -261,7 +262,7 @@ export class ChunkStreamer {
           // State-transition unload: save the final revision once and remove the
           // chunk only after the write succeeds (no save-until-clean loop). The
           // ChunkStreamer tracks the unload to settlement (single owner, correction 2).
-          const unloadKey = this.key(x, z);
+          const unloadKey = chunkKey(x, z);
           const tracked = this.persistence.requestUnload(chunk).then(() => {
             if (this.disposed) return;
             if (!this.quiescing && !this.desiredChunks.has(unloadKey)) {
@@ -286,7 +287,7 @@ export class ChunkStreamer {
 
   private dispatchLoad(x: number, z: number, priority: number, critical: boolean): void {
     if (this.disposed || this.halted || this.quiescing) return;
-    const k = this.key(x, z);
+    const k = chunkKey(x, z);
     this.loadingChunks.add(k);
 
     const readPromise = this.persistence.loadChunk(x, z).then(chunk => {
@@ -346,7 +347,4 @@ export class ChunkStreamer {
     }
   }
 
-  private key(chunkX: number, chunkZ: number): string {
-    return `${chunkX},${chunkZ}`;
-  }
 }

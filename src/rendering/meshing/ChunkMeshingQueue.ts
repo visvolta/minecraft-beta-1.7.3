@@ -50,9 +50,7 @@ export interface ChunkMeshGeometrySet {
   readonly translucent: THREE.BufferGeometry;
 }
 
-function key(chunkX: number, chunkZ: number): string {
-  return `${chunkX},${chunkZ}`;
-}
+import { chunkKey } from '../../world/chunkKey';
 
 function geometryFromBuffers(buffers: MeshAttributeBuffers): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
@@ -130,7 +128,7 @@ export class ChunkMeshingQueue {
   }
 
   public enqueue(chunk: Chunk, priority: number): void {
-    const mapKey = key(chunk.chunkX, chunk.chunkZ);
+    const mapKey = chunkKey(chunk.chunkX, chunk.chunkZ);
     const revision = chunk.getRevision();
     if (this.uploadedRevisions.get(mapKey) === revision) return;
     if (this.pendingUploadKeys.has(this.revisionKey(chunk.chunkX, chunk.chunkZ, revision))) return;
@@ -160,11 +158,11 @@ export class ChunkMeshingQueue {
   }
 
   public cancel(chunkX: number, chunkZ: number): void {
-    this.pending.delete(key(chunkX, chunkZ));
+    this.pending.delete(chunkKey(chunkX, chunkZ));
   }
 
   public markUploaded(chunkX: number, chunkZ: number, revision: number): void {
-    this.uploadedRevisions.set(key(chunkX, chunkZ), revision);
+    this.uploadedRevisions.set(chunkKey(chunkX, chunkZ), revision);
     this.pendingUploadKeys.delete(this.revisionKey(chunkX, chunkZ, revision));
   }
 
@@ -176,7 +174,7 @@ export class ChunkMeshingQueue {
     readonly dispatchCount: number;
     readonly staleCount: number;
   } {
-    const mapKey = key(chunkX, chunkZ);
+    const mapKey = chunkKey(chunkX, chunkZ);
     let activeJobId: number | null = null;
     for (const [jobId, active] of this.active) {
       if (active.chunkX === chunkX && active.chunkZ === chunkZ) activeJobId = jobId;
@@ -252,7 +250,7 @@ export class ChunkMeshingQueue {
         const active = this.active.get(message.jobId);
         this.active.delete(message.jobId);
         if (active !== undefined) {
-          this.pending.set(key(active.chunkX, active.chunkZ), {
+          this.pending.set(chunkKey(active.chunkX, active.chunkZ), {
             chunkX: active.chunkX,
             chunkZ: active.chunkZ,
             priority: active.priority,
@@ -266,7 +264,7 @@ export class ChunkMeshingQueue {
       this.errors += 1;
       for (const [jobId, active] of this.active) {
         if (active.worker !== worker) continue;
-        this.pending.set(key(active.chunkX, active.chunkZ), {
+        this.pending.set(chunkKey(active.chunkX, active.chunkZ), {
           chunkX: active.chunkX,
           chunkZ: active.chunkZ,
           priority: active.priority,
@@ -305,7 +303,7 @@ export class ChunkMeshingQueue {
         enqueuedAtMs: next.enqueuedAtMs,
         worker,
       });
-      const mapKey = key(chunk.chunkX, chunk.chunkZ);
+      const mapKey = chunkKey(chunk.chunkX, chunk.chunkZ);
       this.dispatchCounts.set(mapKey, (this.dispatchCounts.get(mapKey) ?? 0) + 1);
       const transfers: Transferable[] = [];
       for (const snapshot of job.chunks) {
@@ -378,12 +376,12 @@ export class ChunkMeshingQueue {
 
   private recordStale(chunkX: number, chunkZ: number): void {
     this.stale += 1;
-    const mapKey = key(chunkX, chunkZ);
+    const mapKey = chunkKey(chunkX, chunkZ);
     this.staleCounts.set(mapKey, (this.staleCounts.get(mapKey) ?? 0) + 1);
   }
 
   private onChunkRemoved(chunkX: number, chunkZ: number): void {
-    const mapKey = key(chunkX, chunkZ);
+    const mapKey = chunkKey(chunkX, chunkZ);
     this.pending.delete(mapKey);
     this.removePendingUploadsForChunk(chunkX, chunkZ);
     this.pendingUploadKeys.forEach((revisionKey) => {

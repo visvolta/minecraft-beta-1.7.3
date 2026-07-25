@@ -1,6 +1,7 @@
 import type { BlockId } from '../../../blocks/BlockId';
 import { BlockIds } from '../../../blocks/BlockId';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../../chunkConstants';
+import { chunkKey } from '../../chunkKey';
 import { BetaTerrainGenerator } from '../BetaTerrainGenerator';
 import { SurfaceGenerator } from '../SurfaceGenerator';
 import { BetaCaveGenerator } from '../caves/BetaCaveGenerator';
@@ -82,12 +83,12 @@ export class ScratchTreeWorld implements TreeWorldAccessor {
    * called once before any tree generation for this target chunk.
    */
   public seedTargetChunk(chunkX: number, chunkZ: number, blocks: Uint8Array): void {
-    this.chunkBlocks.set(this.chunkKey(chunkX, chunkZ), blocks);
+    this.chunkBlocks.set(chunkKey(chunkX, chunkZ), blocks);
   }
 
   /** Returns the (possibly tree-modified) scratch buffer for a chunk, if it was ever touched. */
   public getScratchBlocks(chunkX: number, chunkZ: number): Uint8Array | undefined {
-    return this.chunkBlocks.get(this.chunkKey(chunkX, chunkZ));
+    return this.chunkBlocks.get(chunkKey(chunkX, chunkZ));
   }
 
   public getBlock(worldX: number, worldY: number, worldZ: number): BlockId {
@@ -119,7 +120,7 @@ export class ScratchTreeWorld implements TreeWorldAccessor {
 
     // Invalidate that chunk's cached heightmap; recomputed lazily on
     // next getHeight() call for that chunk.
-    this.chunkHeightmaps.delete(this.chunkKey(chunkX, chunkZ));
+    this.chunkHeightmaps.delete(chunkKey(chunkX, chunkZ));
   }
 
   public getHeight(worldX: number, worldZ: number): number {
@@ -128,7 +129,7 @@ export class ScratchTreeWorld implements TreeWorldAccessor {
     const localX = worldX - chunkX * CHUNK_SIZE_X;
     const localZ = worldZ - chunkZ * CHUNK_SIZE_Z;
 
-    const key = this.chunkKey(chunkX, chunkZ);
+    const key = chunkKey(chunkX, chunkZ);
     let heightmap = this.chunkHeightmaps.get(key);
 
     if (heightmap === undefined) {
@@ -140,7 +141,7 @@ export class ScratchTreeWorld implements TreeWorldAccessor {
   }
 
   private ensureChunk(chunkX: number, chunkZ: number): Uint8Array {
-    const key = this.chunkKey(chunkX, chunkZ);
+    const key = chunkKey(chunkX, chunkZ);
     let blocks = this.chunkBlocks.get(key);
 
     if (blocks === undefined) {
@@ -189,7 +190,4 @@ export class ScratchTreeWorld implements TreeWorldAccessor {
     return map;
   }
 
-  private chunkKey(chunkX: number, chunkZ: number): string {
-    return `${chunkX},${chunkZ}`;
-  }
 }

@@ -38,9 +38,7 @@ export interface CompletedChunkGeneration {
   readonly durationMs: number;
 }
 
-function key(chunkX: number, chunkZ: number): string {
-  return `${chunkX},${chunkZ}`;
-}
+import { chunkKey } from '../chunkKey';
 
 /**
  * Owns desired chunk generation jobs. Worker buffers are worker-owned;
@@ -94,7 +92,7 @@ export class ChunkGenerationQueue {
   }
 
   public enqueue(chunkX: number, chunkZ: number, priority: number, critical: boolean): void {
-    const mapKey = key(chunkX, chunkZ);
+    const mapKey = chunkKey(chunkX, chunkZ);
     if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
       return;
     }
@@ -146,10 +144,10 @@ export class ChunkGenerationQueue {
         break;
       }
       if (!allowNonCriticalDispatch && !next.critical) {
-        this.pending.set(key(next.chunkX, next.chunkZ), next);
+        this.pending.set(chunkKey(next.chunkX, next.chunkZ), next);
         break;
       }
-      if (!desired.has(key(next.chunkX, next.chunkZ))) {
+      if (!desired.has(chunkKey(next.chunkX, next.chunkZ))) {
         this.stale += 1;
         continue;
       }
@@ -191,7 +189,7 @@ export class ChunkGenerationQueue {
         const active = this.active.get(message.jobId);
         this.active.delete(message.jobId);
         if (active !== undefined) {
-          this.pending.set(key(active.chunkX, active.chunkZ), {
+          this.pending.set(chunkKey(active.chunkX, active.chunkZ), {
             chunkX: active.chunkX,
             chunkZ: active.chunkZ,
             priority: active.priority,
@@ -206,7 +204,7 @@ export class ChunkGenerationQueue {
       this.errors += 1;
       for (const [jobId, active] of this.active) {
         if (active.worker !== worker) continue;
-        this.pending.set(key(active.chunkX, active.chunkZ), {
+        this.pending.set(chunkKey(active.chunkX, active.chunkZ), {
           chunkX: active.chunkX,
           chunkZ: active.chunkZ,
           priority: active.priority,
@@ -232,7 +230,7 @@ export class ChunkGenerationQueue {
         return;
       }
       if (!allowNonCriticalDispatch && !next.critical) {
-        this.pending.set(key(next.chunkX, next.chunkZ), next);
+        this.pending.set(chunkKey(next.chunkX, next.chunkZ), next);
         return;
       }
       const worker = this.idleWorkers.pop()!;
@@ -265,7 +263,7 @@ export class ChunkGenerationQueue {
         this.idleWorkers.push(active.worker);
       }
 
-      const mapKey = key(result.chunkX, result.chunkZ);
+      const mapKey = chunkKey(result.chunkX, result.chunkZ);
       if (active === undefined || !desired.has(mapKey) || this.chunkManager.hasChunk(result.chunkX, result.chunkZ)) {
         this.stale += 1;
         continue;

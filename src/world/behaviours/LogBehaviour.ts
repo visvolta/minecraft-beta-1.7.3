@@ -12,26 +12,11 @@
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
 import { BlockIds } from '../../blocks/BlockId';
 import { isLeafBlock, hasLeafDecayFlag, setLeafDecayFlag } from '../../blocks/leafUtils';
+import { checkChunksExist } from '../../blocks/behaviours/checkChunksExist';
 import { CHUNK_SIZE_Y } from '../chunkConstants';
 
 const LOG_MARK_RADIUS = 4;
 const LOG_CHECK_RADIUS = 5;
-
-function checkChunksExist(world: BlockBehaviourContext['world'], x1: number, y1: number, z1: number, x2: number, y2: number, z2: number): boolean {
-  const minChunkX = Math.floor(Math.min(x1, x2) / 16);
-  const maxChunkX = Math.floor(Math.max(x1, x2) / 16);
-  const minChunkZ = Math.floor(Math.min(z1, z2) / 16);
-  const maxChunkZ = Math.floor(Math.max(z1, z2) / 16);
-  for (let cx = minChunkX; cx <= maxChunkX; cx++) {
-    for (let cz = minChunkZ; cz <= maxChunkZ; cz++) {
-      if (!world.isLoaded(cx * 16, cz * 16)) {
-        return false;
-      }
-    }
-  }
-  if (Math.max(y1, y2) < 0 || Math.min(y1, y2) >= CHUNK_SIZE_Y) return false;
-  return true;
-}
 
 export class LogBehaviour implements BlockBehaviour {
   private metrics = {

@@ -27,6 +27,7 @@ import {
   setLeafDecayFlag,
   getSaplingMetadataForLeafSpecies,
 } from '../../blocks/leafUtils';
+import { checkChunksExist } from '../../blocks/behaviours/checkChunksExist';
 import { CHUNK_SIZE_Y } from '../chunkConstants';
 
 interface LeafMetrics {
@@ -60,29 +61,7 @@ const DIRS: ReadonlyArray<readonly [number, number, number]> = [
   [0, 0, -1],
 ];
 
-function checkChunksExist(world: BlockBehaviourContext['world'], x1: number, y1: number, z1: number, x2: number, y2: number, z2: number): boolean {
-  // Beta: checks if chunks exist for the given block box. We approximate by checking X/Z chunk range.
-  // Y is ignored for chunk existence but clamp to world height for safety.
-  const minChunkX = Math.floor(Math.min(x1, x2) / 16);
-  const maxChunkX = Math.floor(Math.max(x1, x2) / 16);
-  const minChunkZ = Math.floor(Math.min(z1, z2) / 16);
-  const maxChunkZ = Math.floor(Math.max(z1, z2) / 16);
-  for (let cx = minChunkX; cx <= maxChunkX; cx++) {
-    for (let cz = minChunkZ; cz <= maxChunkZ; cz++) {
-      // Use world.isLoaded which checks ChunkManager.hasChunk
-      const sampleX = cx * 16;
-      const sampleZ = cz * 16;
-      if (!world.isLoaded(sampleX, sampleZ)) {
-        return false;
-      }
-    }
-  }
-  // Also check Y bounds: if box entirely outside world, treat as not loaded? Beta would have height check? We'll allow.
-  if (Math.max(y1, y2) < 0 || Math.min(y1, y2) >= CHUNK_SIZE_Y) {
-    return false;
-  }
-  return true;
-}
+
 
 export class LeafBehaviour implements BlockBehaviour {
   public readonly randomTicks = true;

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Chunk } from '../world/Chunk';
 import type { ChunkManager } from '../world/ChunkManager';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from '../world/chunkConstants';
+import { chunkKey } from '../world/chunkKey';
 import { ChunkMesher } from './ChunkMesher';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { TextureAtlas } from '../assets/TextureAtlas';
@@ -348,6 +349,7 @@ export class ChunkRenderer {
   private skylightSubtracted = 0;
   private sunBrightnessFactor = 1;
   private meshUploadsThisFrame = 0;
+  private lastDirtyScanMs = 0;
 
   public constructor(
     scene: THREE.Scene,
@@ -506,6 +508,7 @@ export class ChunkRenderer {
     this.updateFireAnimationUniforms();
 
     if (this.meshQueue.isWorkerEnabled()) {
+      const scanStart = performance.now();
       for (const chunk of this.chunkManager) {
         if (!chunk.isDirty()) continue;
         const cameraChunkX = Math.floor(cameraWorldX / CHUNK_SIZE_X);
@@ -515,6 +518,7 @@ export class ChunkRenderer {
         const priority = dx * dx + dz * dz;
         this.meshQueue.enqueue(chunk, priority);
       }
+      this.lastDirtyScanMs = performance.now() - scanStart;
       this.meshQueue.process();
       const healthyFrame = recentFrameTimeMs <= 18;
       const maxUploads = healthyFrame ? 2 : 1;
@@ -528,12 +532,14 @@ export class ChunkRenderer {
     let rebuilt = 0;
     const budget = MESH_REBUILD_BUDGET;
 
+    const scanStart = performance.now();
     for (const chunk of this.chunkManager) {
       if (!chunk.isDirty()) continue;
       this.rebuildChunk(chunk);
       rebuilt += 1;
       if (rebuilt >= budget) break;
     }
+    this.lastDirtyScanMs = performance.now() - scanStart;
   }
 
   public setRawLightDebugMode(enabled: boolean): void {
@@ -565,7 +571,7 @@ export class ChunkRenderer {
   }
 
   public removeChunkMesh(chunkX: number, chunkZ: number): void {
-    const key = this.key(chunkX, chunkZ);
+    const key = chunkKey(chunkX, chunkZ);
     const groups: Array<[Map<string, THREE.Mesh>, THREE.Group]> = [
       [this.terrainMeshes, this.terrainGroup],
       [this.waterMeshes, this.waterGroup],
@@ -652,6 +658,10 @@ export class ChunkRenderer {
     return this.meshUploadsThisFrame;
   }
 
+  public getLastDirtyScanMs(): number {
+    return this.lastDirtyScanMs;
+  }
+
   public getPassMeshCounts(): {
     terrain: number;
     cutout: number;
@@ -721,7 +731,7 @@ export class ChunkRenderer {
       return;
     }
 
-    const key = this.key(result.chunkX, result.chunkZ);
+    const key = chunkKey(result.chunkX, result.chunkZ);
     if (RUNTIME_GEOMETRY_VALIDATION_ENABLED && !this.validateGeometrySet(result)) {
       result.terrain.dispose();
       result.water.dispose();
@@ -806,7 +816,7 @@ export class ChunkRenderer {
   }
 
   private rebuildChunk(chunk: Chunk): void {
-    const key = this.key(chunk.chunkX, chunk.chunkZ);
+    const key = chunkKey(chunk.chunkX, chunk.chunkZ);
     const mask = computeChunkPassMask(chunk.getBlockDataView(), this.blockRegistry);
 
     const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? this.mesher.build(chunk) : createEmptyGeometry();
@@ -1030,7 +1040,4 @@ export class ChunkRenderer {
     meshes.set(key, mesh);
   }
 
-  private key(chunkX: number, chunkZ: number): string {
-    return `${chunkX},${chunkZ}`;
-  }
 }

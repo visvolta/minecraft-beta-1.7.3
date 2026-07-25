@@ -75,9 +75,7 @@ export function generateEntityUuid(): string {
 }
 
 /** Encodes a chunk coordinate pair as a stable bucket key. */
-export function chunkKey(chunkX: number, chunkZ: number): string {
-  return `${chunkX},${chunkZ}`;
-}
+export { chunkKey } from '../../world/chunkKey';
 
 /** Derives the owning chunk coordinates for a world-space X/Z position. */
 export function chunkCoordsOf(worldX: number, worldZ: number): { chunkX: number; chunkZ: number } {

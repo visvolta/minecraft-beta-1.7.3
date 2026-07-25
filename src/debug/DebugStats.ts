@@ -7,10 +7,18 @@
  */
 export interface DebugStats {
   readonly fps: number;
+  readonly averageFps: number;
+  readonly onePercentLowFps: number;
   readonly frameTimeMs: number;
+  readonly averageFrameTimeMs: number;
   readonly worstFrameTimeMs: number;
+  readonly p95FrameTimeMs: number;
+  readonly p99FrameTimeMs: number;
   readonly updateTimeMs: number;
   readonly renderTimeMs: number;
+  readonly jsHeapUsedMb: number;
+  readonly jsHeapTotalMb: number;
+  readonly dirtyChunkScanMs: number;
 
   readonly playerX: number;
   readonly playerY: number;
@@ -54,8 +62,18 @@ export interface DebugStats {
   readonly occlusionCpuMs: number;
   readonly dirtyChunkQueueSize: number;
   readonly chunkGenerationQueueSize: number;
+  readonly generationQueueAvg: number;
+  readonly generationQueueMax: number;
   readonly oldestCriticalGenerationAgeMs: number;
   readonly chunkMeshingQueueSize: number;
+  readonly meshingQueueAvg: number;
+  readonly meshingQueueMax: number;
+  readonly lightingQueueCurrent: number;
+  readonly lightingQueueAvg: number;
+  readonly lightingQueueMax: number;
+  readonly persistenceQueueCurrent: number;
+  readonly persistenceQueueAvg: number;
+  readonly persistenceQueueMax: number;
   readonly activeWorkerCount: number;
   readonly completedWorkerJobs: number;
   readonly staleWorkerJobs: number;
@@ -117,6 +135,29 @@ export interface DebugStats {
   readonly splashActive: number;
   readonly lightningActive: number;
   readonly lightningFlash: number;
+
+  /** Stage 4: weather sub-system timings. */
+  readonly weatherSimulationMs: number;
+  readonly weatherSplashMs: number;
+  readonly weatherHeightmapResampleMs: number;
+  readonly weatherGeometryRebuildMs: number;
+  readonly weatherDrawMs: number;
+  readonly weatherTransparentRenderingMs: number;
+
+  /** Stage 4: lighting sub-system timings. */
+  readonly lightingPropagationMs: number;
+  readonly lightingAvgBfsQueueSize: number;
+  readonly lightingMaxBfsQueueSize: number;
+  readonly lightingPropagationCalls: number;
+
+  /** Stage 4: mesh upload sub-system timings. */
+  readonly meshUploadGpuMs: number;
+  readonly meshUploadSceneInsertMs: number;
+  readonly meshUploadTotalMs: number;
+
+  /** Stage 4: per-system generation/meshing timing. */
+  readonly generationTimeMs: number;
+  readonly meshingTimeMs: number;
 
   /** Stage 18B: weather-driven skylight-subtraction addend (0..15). */
   readonly weatherSkylightPenalty: number;

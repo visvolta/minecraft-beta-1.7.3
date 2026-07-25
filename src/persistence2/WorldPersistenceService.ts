@@ -47,9 +47,7 @@ export const WRITE_PRIORITY_FORCED = 1;
 
 const METADATA_KEY = 'metadata';
 
-function chunkKey(chunkX: number, chunkZ: number): string {
-  return `${chunkX},${chunkZ}`;
-}
+import { chunkKey } from '../world/chunkKey';
 
 /** Optional bridge to entity (de)serialization; unset when there are no entities. */
 export interface PersistenceEntityHooks {

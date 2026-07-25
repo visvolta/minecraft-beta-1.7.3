@@ -3,8 +3,7 @@ import { WEATHER_STRENGTH_DELTA_PER_TICK } from './BetaWeatherMath';
 /**
  * Weather simulation data & Beta-accurate strength interpolation.
  *
- * Ported from Beta 1.7.3 mc-dev `World.updateWeather()` (see
- * scripts/verifySkyStage16.ts for parity assertions):
+ * Ported from Beta 1.7.3 mc-dev `World.updateWeather()`:
  *
  *   - Two independent boolean flags `raining` / `thundering`, each
  *     driven by its own countdown timer.

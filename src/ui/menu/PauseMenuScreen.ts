@@ -11,7 +11,7 @@ export class PauseMenuScreen extends Screen {
     this.resume=new GuiButton('Back to Game',actions.resume,200,20);
     this.options=new GuiButton('Options...',actions.options,200,20);
     this.quit=new GuiButton('Save and Quit to Title',() => {
-      console.info('[SavePipelineTrace] save.ui.pause_menu_click', { label: 'Save and Quit to Title' });
+      if (import.meta.env.DEV) console.info('[SavePipelineTrace] save.ui.pause_menu_click', { label: 'Save and Quit to Title' });
       actions.saveQuit();
     },200,20);
     this.root.append(title,this.resume.element,this.options.element,this.quit.element); this.layout();
