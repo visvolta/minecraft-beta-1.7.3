@@ -136,7 +136,7 @@ function tick(scheduler: WorldTickScheduler, count: number): void {
   chunk.setBlock(0, 11, 0, BlockIds.WaterFlowing);
   chunk.setBlockMetadata(0, 11, 0, 8);
   const atlas = { getUvRect: () => ({ u0: 0, v0: 0, u1: 1, v1: 1 }) } as never;
-  const geometry = new ChunkMesher(chunks, registry, atlas).buildFluids(chunk);
+  const geometry = new ChunkMesher(chunks, registry, atlas).buildWater(chunk);
   const position = geometry.getAttribute('position');
   const normal = geometry.getAttribute('normal');
   const uv = geometry.getAttribute('uv');

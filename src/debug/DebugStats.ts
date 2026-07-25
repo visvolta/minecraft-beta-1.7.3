@@ -149,15 +149,40 @@ export interface DebugStats {
   readonly lightingAvgBfsQueueSize: number;
   readonly lightingMaxBfsQueueSize: number;
   readonly lightingPropagationCalls: number;
+  readonly lightingNodesProcessed: number;
+  readonly lightingInitializationMs: number;
+  readonly lightingBorderReconcileMs: number;
+  readonly lightingLocalRelightMs: number;
 
   /** Stage 4: mesh upload sub-system timings. */
   readonly meshUploadGpuMs: number;
   readonly meshUploadSceneInsertMs: number;
   readonly meshUploadTotalMs: number;
 
-  /** Stage 4: per-system generation/meshing timing. */
+  /** Stage 4 / 2B: per-system generation/meshing timing and transfer metrics. */
   readonly generationTimeMs: number;
+  readonly generationWorkerMs: number;
+  readonly generationIntegrationMs: number;
+  readonly generationBytesReceived: number;
+  readonly generationTransferLatencyMs: number;
   readonly meshingTimeMs: number;
+  readonly meshingJobBuildMs: number;
+  readonly meshingDispatchMs: number;
+  readonly meshingResultDrainMs: number;
+  readonly meshingWorkerMs: number;
+  readonly meshingBytesCopied: number;
+  readonly meshingBytesTransferred: number;
+  readonly meshingBytesReturned: number;
+  readonly meshingTransferLatencyMs: number;
+
+  /** Stage 2B: profiler overhead and long-frame instrumentation. */
+  readonly profilerEnabled: boolean;
+  readonly profilerSelfMs: number;
+  readonly profilerDebugCollectMs: number;
+  readonly profilerDebugRenderMs: number;
+  readonly profilerTotalOverheadMs: number;
+  readonly longFrameCount: number;
+  readonly longFrameThresholdMs: number;
 
   /** Stage 18B: weather-driven skylight-subtraction addend (0..15). */
   readonly weatherSkylightPenalty: number;

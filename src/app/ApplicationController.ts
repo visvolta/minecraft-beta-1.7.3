@@ -18,6 +18,7 @@ import { parseWorldSeed } from '../world/SeedParser';
 import { uniqueWorldId } from '../persistence2/worldId';
 import { findBetaSpawn, getSafePlayerY } from '../world/generation/WorldSpawnFinder';
 import { CHUNK_SIZE_X } from '../world/chunkConstants';
+import { chunkKey } from '../world/chunkKey';
 import type { LoadingProgress } from './LoadingProgress';
 import { MainMenuScreen } from '../ui/menu/MainMenuScreen';
 import { WorldSelectScreen } from '../ui/menu/WorldSelectScreen';
@@ -41,6 +42,13 @@ import { GameMode } from '../player/GameMode';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { Chunk } from '../world/Chunk';
 import { applyGuiScaleCssVariables, setGlobalGuiScaleSetting } from '../ui/GuiScale';
+import {
+  beginLoadPerformanceSession,
+  finishLoadPerformanceSession,
+  recordLoadGenerationRequest,
+  recordLoadPerformanceMark,
+  type LoadPerformanceStatus,
+} from '../debug/LoadPerformanceMetrics';
 
 export type ApplicationState = 'boot' | 'main_menu' | 'world_select' | 'world_create' | 'world_loading' | 'in_game' | 'pause_menu' | 'options' | 'video_settings' | 'controls' | 'confirm_delete' | 'error';
 
@@ -198,10 +206,13 @@ export class ApplicationController {
     let service: WorldPersistenceService | null = null;
     let worldId: string | null = null;
     let published = false;
+    const loadPerfToken = beginLoadPerformanceSession('create', result.name);
+    let loadPerfStatus: LoadPerformanceStatus = 'failed';
     try {
       const displayName = result.name.trim();
       if (displayName.length === 0) throw new Error('World name cannot be empty.');
       update({ stage: 'metadata', completed: 0, total: undefined, primaryMessage: 'Creating world', secondaryMessage: displayName });
+      recordLoadPerformanceMark(loadPerfToken, 'metadata-start');
       // Derive a unique id from existing NEW-format worlds only.
       const existing = await backend.listWorlds();
       worldId = uniqueWorldId(displayName, existing.map((w) => w.worldId));
@@ -229,24 +240,30 @@ export class ApplicationController {
       service = new WorldPersistenceService({ backend });
       await service.open(worldId);
       await service.saveMetadata(metadata, WRITE_PRIORITY_FORCED);
+      recordLoadPerformanceMark(loadPerfToken, 'metadata-saved');
       this.assertLoadActive(token);
-      await this.prepareSpawn(metadata.seed, update, token);
+      const preparedSpawnChunks = await this.prepareSpawn(metadata.seed, update, token, loadPerfToken, true);
       this.assertLoadActive(token);
       // Required spawn persistence: generate and durably save the spawn area so
       // the world is initialized before it becomes selectable (amendment 2).
       update({ stage: 'terrain', completed: 0, total: undefined, primaryMessage: 'Saving spawn area', secondaryMessage: '' });
-      await this.persistSpawnArea(service, generator, spawn);
+      recordLoadPerformanceMark(loadPerfToken, 'spawn-persist-start');
+      await this.persistSpawnArea(service, generator, spawn, loadPerfToken, preparedSpawnChunks);
+      recordLoadPerformanceMark(loadPerfToken, 'spawn-persist-complete');
       this.assertLoadActive(token);
       update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
       this.audio.beginWorldSession(result.gameMode === GameMode.Creative ? 'creative' : 'survival');
       this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error));
       this.setScreen(null, 'in_game');
       this.engine.start();
+      recordLoadPerformanceMark(loadPerfToken, 'engine-started');
       this.attachSessionControllers();
       // PUBLISH to the visible index only after initialization + spawn persistence
       // succeeded (amendment 2).
       await backend.upsertWorld(this.summaryFromMetadata(metadata));
+      recordLoadPerformanceMark(loadPerfToken, 'world-published');
       published = true;
+      loadPerfStatus = 'completed';
       service = null; // ownership transferred to the engine; do not clean up on success
     } catch (error) {
       // Failed creation must not leave a selectable partial world: clean up any
@@ -256,11 +273,13 @@ export class ApplicationController {
       }
       if (service !== null) { try { await service.close(); } catch { /* best effort */ } }
       this.engine = null;
+      if (error instanceof SpawnPreparationCancelled) loadPerfStatus = 'cancelled';
       if (!(error instanceof SpawnPreparationCancelled)) {
         console.error('[ApplicationController] Create world failed:', error);
         this.showError('Create world failed', error instanceof Error ? error.message : String(error));
       }
     } finally {
+      finishLoadPerformanceSession(loadPerfToken, loadPerfStatus);
       this.finishLoadOperation(token);
     }
   }
@@ -279,29 +298,37 @@ export class ApplicationController {
     this.setScreen(loading, 'world_loading');
     const update = (progress: LoadingProgress): void => loading.update(progress);
     let service: WorldPersistenceService | null = null;
+    const loadPerfToken = beginLoadPerformanceSession('load', worldId);
+    let loadPerfStatus: LoadPerformanceStatus = 'failed';
     try {
       update({ stage: 'metadata', completed: 0, total: undefined, primaryMessage: 'Loading world', secondaryMessage: worldId });
+      recordLoadPerformanceMark(loadPerfToken, 'metadata-start');
       service = new WorldPersistenceService({ backend });
       await service.open(worldId);
       // loadMetadata fails loud (RecordCorruptionError) on corrupt metadata.
       const metadata = await service.loadMetadata();
+      recordLoadPerformanceMark(loadPerfToken, 'metadata-loaded');
       if (metadata === undefined) throw new Error('World metadata not found (the world may be missing or was never fully created).');
       this.assertLoadActive(token);
-      await this.prepareSpawn(metadata.seed, update, token);
+      await this.prepareSpawn(metadata.seed, update, token, loadPerfToken);
       this.assertLoadActive(token);
       update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
       this.audio.beginWorldSession(metadata.gameMode === GameMode.Creative ? 'creative' : 'survival');
       this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error));
       this.setScreen(null, 'in_game');
       this.engine.start();
+      recordLoadPerformanceMark(loadPerfToken, 'engine-started');
       this.attachSessionControllers();
       service = null; // ownership transferred to the engine
       // Refresh last-played in the index.
       await backend.upsertWorld(this.summaryFromMetadata({ ...metadata, lastPlayedMs: Date.now() }));
+      recordLoadPerformanceMark(loadPerfToken, 'world-index-updated');
+      loadPerfStatus = 'completed';
     } catch (error) {
       if (service !== null) { try { await service.close(); } catch { /* best effort */ } }
       this.engine = null;
       if (error instanceof SpawnPreparationCancelled) {
+        loadPerfStatus = 'cancelled';
         // cancelled; no error screen
       } else if (error instanceof RecordCorruptionError) {
         console.error('[ApplicationController] Load world failed (corruption):', error);
@@ -311,6 +338,7 @@ export class ApplicationController {
         this.showError('Loading failed', error instanceof Error ? error.message : String(error));
       }
     } finally {
+      finishLoadPerformanceSession(loadPerfToken, loadPerfStatus);
       this.finishLoadOperation(token);
     }
   }
@@ -508,13 +536,25 @@ export class ApplicationController {
   }
 
   /** Generate and durably save the spawn area so a new world is initialized before publishing. */
-  private async persistSpawnArea(service: WorldPersistenceService, generator: BetaWorldGenerator, spawn: { x: number; y: number; z: number }): Promise<void> {
+  private async persistSpawnArea(
+    service: WorldPersistenceService,
+    generator: BetaWorldGenerator,
+    spawn: { x: number; y: number; z: number },
+    loadPerfToken: number | null = null,
+    preparedChunks: ReadonlyMap<string, Chunk> = new Map(),
+  ): Promise<void> {
     const spawnChunkX = Math.floor(spawn.x / CHUNK_SIZE_X);
     const spawnChunkZ = Math.floor(spawn.z / CHUNK_SIZE_X);
     for (let dz = -CREATION_SPAWN_PERSIST_RADIUS; dz <= CREATION_SPAWN_PERSIST_RADIUS; dz++) {
       for (let dx = -CREATION_SPAWN_PERSIST_RADIUS; dx <= CREATION_SPAWN_PERSIST_RADIUS; dx++) {
-        const chunk = new Chunk(spawnChunkX + dx, spawnChunkZ + dz);
-        generator.populate(chunk);
+        const chunkX = spawnChunkX + dx;
+        const chunkZ = spawnChunkZ + dz;
+        let chunk = preparedChunks.get(chunkKey(chunkX, chunkZ));
+        if (chunk === undefined) {
+          chunk = new Chunk(chunkX, chunkZ);
+          recordLoadGenerationRequest(loadPerfToken, 'persistSpawnArea', chunk.chunkX, chunk.chunkZ);
+          generator.populate(chunk);
+        }
         await service.saveChunk(chunk, WRITE_PRIORITY_FORCED);
       }
     }
@@ -606,7 +646,13 @@ export class ApplicationController {
     }
   }
 
-  private async prepareSpawn(seed: string, update: (progress: LoadingProgress) => void, token: number): Promise<void> {
+  private async prepareSpawn(
+    seed: string,
+    update: (progress: LoadingProgress) => void,
+    token: number,
+    loadPerfToken: number | null = null,
+    retainChunks = false,
+  ): Promise<Map<string, Chunk>> {
     this.cancelSpawnPreparation();
     this.activeLoadToken = token;
     const state: SpawnPreparationState = { token, aborted: false, timeoutId: null };
@@ -614,6 +660,7 @@ export class ApplicationController {
     const generator = new BetaWorldGenerator(BigInt(seed));
     const radius = 4;
     const coords: Array<readonly [number, number]> = [];
+    const preparedChunks = new Map<string, Chunk>();
     const maxDurationMs = 120_000;
     const startMs = performance.now();
     for (let z = -radius; z <= radius; z++) for (let x = -radius; x <= radius; x++) coords.push([x, z]);
@@ -623,10 +670,14 @@ export class ApplicationController {
         if (performance.now() - startMs > maxDurationMs) throw new Error(`Preparing spawn area timed out after ${maxDurationMs / 1000}s.`);
         const [x, z] = coords[i]!;
         update({ stage: 'terrain', completed: i, total: coords.length, primaryMessage: 'Preparing spawn area', secondaryMessage: `Chunk ${i + 1}/${coords.length}` });
-        generator.populate(new Chunk(x, z));
+        recordLoadGenerationRequest(loadPerfToken, 'prepareSpawn', x, z);
+        const chunk = new Chunk(x, z);
+        generator.populate(chunk);
+        if (retainChunks) preparedChunks.set(chunkKey(x, z), chunk);
         if (i % 4 === 0) await this.spawnPreparationDelay(state, 0);
       }
       update({ stage: 'terrain', completed: coords.length, total: coords.length, primaryMessage: 'Preparing spawn area', secondaryMessage: 'Complete' });
+      return preparedChunks;
     } finally {
       if (this.spawnPreparation === state) {
         if (state.timeoutId !== null) window.clearTimeout(state.timeoutId);

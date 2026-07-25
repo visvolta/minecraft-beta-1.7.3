@@ -1,20 +1,30 @@
-import { worldToChunkLocal } from '../../worldToChunkCoords';
 import type { ChunkManager } from '../../ChunkManager';
 import type { BlockRegistry } from '../../../blocks/BlockRegistry';
 import type { Chunk } from '../../Chunk';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../../chunkConstants';
 
-interface QueueNode {
-  x: number;
-  y: number;
-  z: number;
-}
-
-interface RemoveNode {
-  x: number;
-  y: number;
-  z: number;
-  val: number;
+export interface LightEngineMetrics {
+  readonly propagationCalls: number;
+  readonly averageBfsQueueSize: number;
+  readonly maximumBfsQueueSize: number;
+  readonly nodesProcessed: number;
+  readonly propagationMs: number;
+  readonly initializationMs: number;
+  readonly borderReconcileMs: number;
+  readonly localRelightMs: number;
+  readonly blockReads: number;
+  readonly lightReads: number;
+  readonly lightWrites: number;
+  readonly opacityQueries: number;
+  readonly emissionQueries: number;
+  readonly coordinateConversions: number;
+  readonly chunkLookups: number;
+  readonly missingChunkLookups: number;
+  readonly boundaryTraversals: number;
+  readonly queuePushes: number;
+  readonly removeQueuePushes: number;
+  readonly queueNodeAllocations: number;
+  readonly remeshFanOutChunks: number;
 }
 
 const NEIGHBORS = [
@@ -39,6 +49,24 @@ export class LightEngine {
   private propagationCallsCount = 0;
   private totalBfsQueueSize = 0;
   private maxBfsQueueSize = 0;
+  private nodesProcessed = 0;
+  private propagationTimeMs = 0;
+  private initializationTimeMs = 0;
+  private borderReconcileTimeMs = 0;
+  private localRelightTimeMs = 0;
+  private blockReads = 0;
+  private lightReads = 0;
+  private lightWrites = 0;
+  private opacityQueries = 0;
+  private emissionQueries = 0;
+  private coordinateConversions = 0;
+  private chunkLookups = 0;
+  private missingChunkLookups = 0;
+  private boundaryTraversals = 0;
+  private queuePushes = 0;
+  private removeQueuePushes = 0;
+  private queueNodeAllocations = 0;
+  private readonly remeshFanOutChunkKeys = new Set<string>();
 
   public constructor(chunkManager: ChunkManager, blockRegistry: BlockRegistry) {
     this.chunkManager = chunkManager;
@@ -46,14 +74,60 @@ export class LightEngine {
   }
 
   /** Returns and resets accumulated BFS queue metrics for profiling. */
-  public drainBfsMetrics(): { propagationCalls: number; averageBfsQueueSize: number; maximumBfsQueueSize: number } {
+  public drainBfsMetrics(): LightEngineMetrics {
     const calls = this.propagationCallsCount;
     const avg = calls > 0 ? this.totalBfsQueueSize / calls : 0;
     const max = this.maxBfsQueueSize;
+    const nodes = this.nodesProcessed;
+    const propagationMs = this.propagationTimeMs;
+    const initializationMs = this.initializationTimeMs;
+    const borderReconcileMs = this.borderReconcileTimeMs;
+    const localRelightMs = this.localRelightTimeMs;
+    const metrics: LightEngineMetrics = {
+      propagationCalls: calls,
+      averageBfsQueueSize: avg,
+      maximumBfsQueueSize: max,
+      nodesProcessed: nodes,
+      propagationMs,
+      initializationMs,
+      borderReconcileMs,
+      localRelightMs,
+      blockReads: this.blockReads,
+      lightReads: this.lightReads,
+      lightWrites: this.lightWrites,
+      opacityQueries: this.opacityQueries,
+      emissionQueries: this.emissionQueries,
+      coordinateConversions: this.coordinateConversions,
+      chunkLookups: this.chunkLookups,
+      missingChunkLookups: this.missingChunkLookups,
+      boundaryTraversals: this.boundaryTraversals,
+      queuePushes: this.queuePushes,
+      removeQueuePushes: this.removeQueuePushes,
+      queueNodeAllocations: this.queueNodeAllocations,
+      remeshFanOutChunks: this.remeshFanOutChunkKeys.size,
+    };
     this.propagationCallsCount = 0;
     this.totalBfsQueueSize = 0;
     this.maxBfsQueueSize = 0;
-    return { propagationCalls: calls, averageBfsQueueSize: avg, maximumBfsQueueSize: max };
+    this.nodesProcessed = 0;
+    this.propagationTimeMs = 0;
+    this.initializationTimeMs = 0;
+    this.borderReconcileTimeMs = 0;
+    this.localRelightTimeMs = 0;
+    this.blockReads = 0;
+    this.lightReads = 0;
+    this.lightWrites = 0;
+    this.opacityQueries = 0;
+    this.emissionQueries = 0;
+    this.coordinateConversions = 0;
+    this.chunkLookups = 0;
+    this.missingChunkLookups = 0;
+    this.boundaryTraversals = 0;
+    this.queuePushes = 0;
+    this.removeQueuePushes = 0;
+    this.queueNodeAllocations = 0;
+    this.remeshFanOutChunkKeys.clear();
+    return metrics;
   }
 
   // ==========================================
@@ -61,52 +135,100 @@ export class LightEngine {
   // ==========================================
 
   public getBlock(x: number, y: number, z: number): number {
+    this.blockReads++;
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(x, z);
+    this.coordinateConversions++;
+    const chunkX = Math.floor(x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
+    const localX = x - chunkX * CHUNK_SIZE_X;
+    const localZ = z - chunkZ * CHUNK_SIZE_Z;
+    this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    return chunk ? chunk.getBlock(localX, y, localZ) : 0;
+    if (chunk === undefined) { this.missingChunkLookups++; return 0; }
+    return chunk.getBlock(localX, y, localZ);
   }
 
   public getSkylight(x: number, y: number, z: number): number {
+    this.lightReads++;
     if (y < 0) return 0;
     if (y >= CHUNK_SIZE_Y) return 15; // Void above gets full skylight
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(x, z);
+    this.coordinateConversions++;
+    const chunkX = Math.floor(x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
+    const localX = x - chunkX * CHUNK_SIZE_X;
+    const localZ = z - chunkZ * CHUNK_SIZE_Z;
+    this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    return chunk ? chunk.getSkylight(localX, y, localZ) : (y >= 64 ? 15 : 0);
+    if (chunk === undefined) { this.missingChunkLookups++; return y >= 64 ? 15 : 0; }
+    return chunk.getSkylight(localX, y, localZ);
   }
 
   public setSkylight(x: number, y: number, z: number, val: number): void {
     if (y < 0 || y >= CHUNK_SIZE_Y) return;
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(x, z);
+    this.coordinateConversions++;
+    const chunkX = Math.floor(x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
+    const localX = x - chunkX * CHUNK_SIZE_X;
+    const localZ = z - chunkZ * CHUNK_SIZE_Z;
+    this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
     if (chunk) {
+      if (chunk.getSkylight(localX, y, localZ) !== (val & 0x0F)) {
+        this.lightWrites++;
+        this.remeshFanOutChunkKeys.add(`${chunkX},${chunkZ}`);
+      }
       chunk.setSkylight(localX, y, localZ, val);
-      chunk.markDirty();
+    } else {
+      this.missingChunkLookups++;
     }
   }
 
   public getBlocklight(x: number, y: number, z: number): number {
+    this.lightReads++;
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(x, z);
+    this.coordinateConversions++;
+    const chunkX = Math.floor(x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
+    const localX = x - chunkX * CHUNK_SIZE_X;
+    const localZ = z - chunkZ * CHUNK_SIZE_Z;
+    this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
-    return chunk ? chunk.getBlocklight(localX, y, localZ) : 0;
+    if (chunk === undefined) { this.missingChunkLookups++; return 0; }
+    return chunk.getBlocklight(localX, y, localZ);
   }
 
   public setBlocklight(x: number, y: number, z: number, val: number): void {
     if (y < 0 || y >= CHUNK_SIZE_Y) return;
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(x, z);
+    this.coordinateConversions++;
+    const chunkX = Math.floor(x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
+    const localX = x - chunkX * CHUNK_SIZE_X;
+    const localZ = z - chunkZ * CHUNK_SIZE_Z;
+    this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
     if (chunk) {
+      if (chunk.getBlocklight(localX, y, localZ) !== (val & 0x0F)) {
+        this.lightWrites++;
+        this.remeshFanOutChunkKeys.add(`${chunkX},${chunkZ}`);
+      }
       chunk.setBlocklight(localX, y, localZ, val);
-      chunk.markDirty();
+    } else {
+      this.missingChunkLookups++;
     }
   }
 
   public getOpacity(x: number, y: number, z: number): number {
+    this.opacityQueries++;
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
-    const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(x, z);
+    this.coordinateConversions++;
+    const chunkX = Math.floor(x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
+    const localX = x - chunkX * CHUNK_SIZE_X;
+    const localZ = z - chunkZ * CHUNK_SIZE_Z;
+    this.chunkLookups++;
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
     if (!chunk) {
+      this.missingChunkLookups++;
       return y >= 64 ? 0 : 15; // Unloaded chunk: Air above sea level, Solid stone below
     }
 
@@ -124,6 +246,7 @@ export class LightEngine {
   }
 
   public getEmission(x: number, y: number, z: number): number {
+    this.emissionQueries++;
     const blockId = this.getBlock(x, y, z);
     if (blockId === 0) return 0;
 
@@ -142,11 +265,12 @@ export class LightEngine {
    * Feeds boundary blocks into propagation queues for seamless cross-chunk lighting.
    */
   public initializeChunkLighting(chunk: Chunk): void {
+    const metricsStart = performance.now();
     const startX = chunk.chunkX * CHUNK_SIZE_X;
     const startZ = chunk.chunkZ * CHUNK_SIZE_Z;
 
-    const skyPropQueue: QueueNode[] = [];
-    const blockPropQueue: QueueNode[] = [];
+    const skyPropQueue: number[] = [];
+    const blockPropQueue: number[] = [];
 
     // 1. Initial vertical skylight projection based on heightmap
     for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
@@ -161,7 +285,7 @@ export class LightEngine {
         }
         
         // Enqueue the heightmap block itself so it propagates sunlight horizontally
-        skyPropQueue.push({ x: wx, y: height, z: wz });
+        this.pushLightQueue(skyPropQueue, wx, height, wz);
 
         // Below the heightmap, sunlight attenuates vertically by block opacity
         let currentLight = 15;
@@ -173,7 +297,7 @@ export class LightEngine {
 
           // If there is still light, enqueue it so it can spread horizontally into overhangs/caves
           if (currentLight > 0) {
-            skyPropQueue.push({ x: wx, y: y, z: wz });
+            this.pushLightQueue(skyPropQueue, wx, y, wz);
           }
         }
 
@@ -182,7 +306,7 @@ export class LightEngine {
           const emission = this.getEmission(wx, y, wz);
           if (emission > 0) {
             chunk.setBlocklight(lx, y, lz, emission);
-            blockPropQueue.push({ x: wx, y: y, z: wz });
+            this.pushLightQueue(blockPropQueue, wx, y, wz);
           }
         }
       }
@@ -191,22 +315,25 @@ export class LightEngine {
     // 2. Propagate initial skylight and blocklight
     this.propagateSkylightQueue(skyPropQueue);
     this.propagateBlocklightQueue(blockPropQueue);
+    this.initializationTimeMs += performance.now() - metricsStart;
   }
 
   // ==========================================
   // Propagation Routines (Queue-Based)
   // ==========================================
 
-  public propagateSkylightQueue(queue: QueueNode[]): void {
+  public propagateSkylightQueue(queue: number[]): void {
+    const metricsStart = performance.now();
     this.propagationCallsCount++;
-    if (queue.length > this.maxBfsQueueSize) this.maxBfsQueueSize = queue.length;
-    this.totalBfsQueueSize += queue.length;
+    const initialQueueNodes = queue.length / 3;
+    if (initialQueueNodes > this.maxBfsQueueSize) this.maxBfsQueueSize = initialQueueNodes;
+    this.totalBfsQueueSize += initialQueueNodes;
     let head = 0;
     while (head < queue.length) {
-      const node = queue[head++]!;
-      const cx = node.x;
-      const cy = node.y;
-      const cz = node.z;
+      const cx = queue[head++]!;
+      const cy = queue[head++]!;
+      const cz = queue[head++]!;
+      this.nodesProcessed++;
       const currentLight = this.getSkylight(cx, cy, cz);
 
       for (const { dx, dy, dz } of NEIGHBORS) {
@@ -215,6 +342,7 @@ export class LightEngine {
         const nz = cz + dz;
 
         if (ny < 0 || ny >= CHUNK_SIZE_Y) continue;
+        if ((dx !== 0 && Math.floor(nx / CHUNK_SIZE_X) !== Math.floor(cx / CHUNK_SIZE_X)) || (dz !== 0 && Math.floor(nz / CHUNK_SIZE_Z) !== Math.floor(cz / CHUNK_SIZE_Z))) this.boundaryTraversals++;
 
         const opacity = this.getOpacity(nx, ny, nz);
         const expected = currentLight - Math.max(1, opacity);
@@ -222,22 +350,25 @@ export class LightEngine {
 
         if (expected > target) {
           this.setSkylight(nx, ny, nz, expected);
-          queue.push({ x: nx, y: ny, z: nz });
+          this.pushLightQueue(queue, nx, ny, nz);
         }
       }
     }
+    this.propagationTimeMs += performance.now() - metricsStart;
   }
 
-  public propagateBlocklightQueue(queue: QueueNode[]): void {
+  public propagateBlocklightQueue(queue: number[]): void {
+    const metricsStart = performance.now();
     this.propagationCallsCount++;
-    if (queue.length > this.maxBfsQueueSize) this.maxBfsQueueSize = queue.length;
-    this.totalBfsQueueSize += queue.length;
+    const initialQueueNodes = queue.length / 3;
+    if (initialQueueNodes > this.maxBfsQueueSize) this.maxBfsQueueSize = initialQueueNodes;
+    this.totalBfsQueueSize += initialQueueNodes;
     let head = 0;
     while (head < queue.length) {
-      const node = queue[head++]!;
-      const cx = node.x;
-      const cy = node.y;
-      const cz = node.z;
+      const cx = queue[head++]!;
+      const cy = queue[head++]!;
+      const cz = queue[head++]!;
+      this.nodesProcessed++;
       const currentLight = this.getBlocklight(cx, cy, cz);
 
       for (const { dx, dy, dz } of NEIGHBORS) {
@@ -246,6 +377,7 @@ export class LightEngine {
         const nz = cz + dz;
 
         if (ny < 0 || ny >= CHUNK_SIZE_Y) continue;
+        if ((dx !== 0 && Math.floor(nx / CHUNK_SIZE_X) !== Math.floor(cx / CHUNK_SIZE_X)) || (dz !== 0 && Math.floor(nz / CHUNK_SIZE_Z) !== Math.floor(cz / CHUNK_SIZE_Z))) this.boundaryTraversals++;
 
         const opacity = this.getOpacity(nx, ny, nz);
         const expected = currentLight - Math.max(1, opacity);
@@ -253,10 +385,11 @@ export class LightEngine {
 
         if (expected > target) {
           this.setBlocklight(nx, ny, nz, expected);
-          queue.push({ x: nx, y: ny, z: nz });
+          this.pushLightQueue(queue, nx, ny, nz);
         }
       }
     }
+    this.propagationTimeMs += performance.now() - metricsStart;
   }
 
   // ==========================================
@@ -268,9 +401,11 @@ export class LightEngine {
    * Employs both a removal queue and a propagation queue to achieve perfect local updates.
    */
   public handleBlockEdit(wx: number, wy: number, wz: number): void {
+    const metricsStart = performance.now();
     // We update both skylight and blocklight around the edited coordinate
     this.updateLocalLight('sky', wx, wy, wz);
     this.updateLocalLight('block', wx, wy, wz);
+    this.localRelightTimeMs += performance.now() - metricsStart;
   }
 
   private updateLocalLight(type: 'sky' | 'block', wx: number, wy: number, wz: number): void {
@@ -280,8 +415,14 @@ export class LightEngine {
     // Calculate new base value at the coordinate itself
     let newLight = 0;
     if (isSky) {
-      const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(wx, wz);
+      this.coordinateConversions++;
+      const chunkX = Math.floor(wx / CHUNK_SIZE_X);
+      const chunkZ = Math.floor(wz / CHUNK_SIZE_Z);
+      const localX = wx - chunkX * CHUNK_SIZE_X;
+      const localZ = wz - chunkZ * CHUNK_SIZE_Z;
+      this.chunkLookups++;
       const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+      if (chunk === undefined) this.missingChunkLookups++;
       const height = chunk ? chunk.getHeight(localX, localZ) : 128;
       if (wy >= height) {
         newLight = 15;
@@ -313,18 +454,17 @@ export class LightEngine {
 
     if (newLight < oldLight) {
       // Enqueue for removal / darkening
-      const removeQueue: RemoveNode[] = [];
-      const propQueue: QueueNode[] = [];
+      const removeQueue: number[] = [];
+      const propQueue: number[] = [];
 
-      removeQueue.push({ x: wx, y: wy, z: wz, val: oldLight });
+      this.pushRemoveQueue(removeQueue, wx, wy, wz, oldLight);
 
       let head = 0;
       while (head < removeQueue.length) {
-        const node = removeQueue[head++]!;
-        const cx = node.x;
-        const cy = node.y;
-        const cz = node.z;
-        const oldVal = node.val;
+        const cx = removeQueue[head++]!;
+        const cy = removeQueue[head++]!;
+        const cz = removeQueue[head++]!;
+        const oldVal = removeQueue[head++]!;
 
         for (const { dx, dy, dz } of NEIGHBORS) {
           const nx = cx + dx;
@@ -344,10 +484,10 @@ export class LightEngine {
             } else {
               this.setBlocklight(nx, ny, nz, 0);
             }
-            removeQueue.push({ x: nx, y: ny, z: nz, val: neighborLight });
+            this.pushRemoveQueue(removeQueue, nx, ny, nz, neighborLight);
           } else if (neighborLight > 0) {
             // This neighbor is brighter and survived, enqueue it to light back the darkened region
-            propQueue.push({ x: nx, y: ny, z: nz });
+            this.pushLightQueue(propQueue, nx, ny, nz);
           }
         }
       }
@@ -360,7 +500,8 @@ export class LightEngine {
       }
     } else if (newLight > oldLight) {
       // Direct propagation of increased light
-      const propQueue: QueueNode[] = [{ x: wx, y: wy, z: wz }];
+      const propQueue: number[] = [];
+      this.pushLightQueue(propQueue, wx, wy, wz);
       if (isSky) {
         this.propagateSkylightQueue(propQueue);
       } else {
@@ -378,11 +519,12 @@ export class LightEngine {
    * enqueuing boundary blocks from both chunks to propagate light bidirectionally.
    */
   public reconcileChunkBorders(chunk: Chunk): void {
+    const metricsStart = performance.now();
     const startX = chunk.chunkX * CHUNK_SIZE_X;
     const startZ = chunk.chunkZ * CHUNK_SIZE_Z;
 
-    const skyQueue: QueueNode[] = [];
-    const blockQueue: QueueNode[] = [];
+    const skyQueue: number[] = [];
+    const blockQueue: number[] = [];
 
     // 1. Scan our own chunk border blocks
     for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
@@ -395,10 +537,10 @@ export class LightEngine {
 
         for (let y = 0; y < CHUNK_SIZE_Y; y++) {
           const sky = chunk.getSkylight(lx, y, lz);
-          if (sky > 0) skyQueue.push({ x: wx, y: y, z: wz });
+          if (sky > 0) this.pushLightQueue(skyQueue, wx, y, wz);
 
           const block = chunk.getBlocklight(lx, y, lz);
-          if (block > 0) blockQueue.push({ x: wx, y: y, z: wz });
+          if (block > 0) this.pushLightQueue(blockQueue, wx, y, wz);
         }
       }
     }
@@ -430,10 +572,10 @@ export class LightEngine {
             const wz = nStartZ + lz;
             for (let y = 0; y < CHUNK_SIZE_Y; y++) {
               const sky = neighbor.getSkylight(lx, y, lz);
-              if (sky > 0) skyQueue.push({ x: wx, y: y, z: wz });
+              if (sky > 0) this.pushLightQueue(skyQueue, wx, y, wz);
 
               const block = neighbor.getBlocklight(lx, y, lz);
-              if (block > 0) blockQueue.push({ x: wx, y: y, z: wz });
+              if (block > 0) this.pushLightQueue(blockQueue, wx, y, wz);
             }
           }
         }
@@ -442,5 +584,18 @@ export class LightEngine {
 
     this.propagateSkylightQueue(skyQueue);
     this.propagateBlocklightQueue(blockQueue);
+    this.borderReconcileTimeMs += performance.now() - metricsStart;
   }
+
+
+  private pushLightQueue(queue: number[], x: number, y: number, z: number): void {
+    queue.push(x, y, z);
+    this.queuePushes++;
+  }
+
+  private pushRemoveQueue(queue: number[], x: number, y: number, z: number, val: number): void {
+    queue.push(x, y, z, val);
+    this.removeQueuePushes++;
+  }
+
 }

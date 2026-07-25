@@ -9,6 +9,13 @@ import { ChunkGenerationQueue, type ChunkGenerationStats } from './streaming/Chu
 import type { WorldPersistenceService } from '../persistence2/WorldPersistenceService';
 import { RecordCorruptionError } from '../persistence2/codec/PersistenceError';
 
+export interface ChunkIntegrationStats {
+  readonly lastIntegrationMs: number;
+  readonly lastGeneratedIntegrationMs: number;
+  readonly lastReadIntegrationMs: number;
+  readonly integratedChunks: number;
+}
+
 /** Chebyshev radius (square) for loading chunks around the camera. */
 export const CHUNK_LOAD_RADIUS = 6;
 
@@ -56,6 +63,10 @@ export class ChunkStreamer {
   /** Accepted unload settlements; the ChunkStreamer is the single owner of unload settlement (correction 2). */
   private readonly activeUnloads = new Map<string, Promise<void>>();
   private unloadFailure: unknown = null;
+  private lastIntegrationMs = 0;
+  private lastGeneratedIntegrationMs = 0;
+  private lastReadIntegrationMs = 0;
+  private integratedChunks = 0;
 
   public constructor(
     chunkManager: ChunkManager,
@@ -124,6 +135,7 @@ export class ChunkStreamer {
     const allowNonCriticalDispatch =
       downstreamMeshQueue < GENERATION_BACKPRESSURE_MESH_QUEUE &&
       downstreamUploadQueue < GENERATION_BACKPRESSURE_UPLOAD_QUEUE;
+    this.lastGeneratedIntegrationMs = 0;
     const completed = this.generationQueue.process(
       MAX_SYNC_GENERATION_JOBS_PER_FRAME,
       MAX_SYNC_GENERATION_MS_PER_FRAME,
@@ -131,15 +143,29 @@ export class ChunkStreamer {
       allowNonCriticalDispatch,
     );
     for (const { chunk } of completed) {
+      const integrationStart = performance.now();
       this.lightEngine.initializeChunkLighting(chunk);
       this.lightEngine.reconcileChunkBorders(chunk);
       this.markNeighboursDirty(chunk.chunkX, chunk.chunkZ);
       this.onChunkLoaded?.(chunk);
+      const integrationMs = performance.now() - integrationStart;
+      this.lastGeneratedIntegrationMs += integrationMs;
+      this.lastIntegrationMs = integrationMs;
+      this.integratedChunks += 1;
     }
   }
 
   public getGenerationStats(): ChunkGenerationStats {
     return this.generationQueue.getStats();
+  }
+
+  public getIntegrationStats(): ChunkIntegrationStats {
+    return {
+      lastIntegrationMs: this.lastIntegrationMs,
+      lastGeneratedIntegrationMs: this.lastGeneratedIntegrationMs,
+      lastReadIntegrationMs: this.lastReadIntegrationMs,
+      integratedChunks: this.integratedChunks,
+    };
   }
 
   public dispose(): void {
@@ -301,6 +327,7 @@ export class ChunkStreamer {
         this.generationQueue.enqueue(x, z, priority, critical);
       } else {
         // Hit, integrate chunk
+        const integrationStart = performance.now();
         const managed = this.chunkManager.getOrCreateChunk(x, z);
         managed.loadGeneratedBlocks(chunk.copyBlocks());
         managed.loadGeneratedMetadata(chunk.copyMetadata());
@@ -318,6 +345,10 @@ export class ChunkStreamer {
         this.lightEngine.reconcileChunkBorders(managed);
         this.markNeighboursDirty(managed.chunkX, managed.chunkZ);
         this.onChunkLoaded?.(managed);
+        const integrationMs = performance.now() - integrationStart;
+        this.lastReadIntegrationMs = integrationMs;
+        this.lastIntegrationMs = integrationMs;
+        this.integratedChunks += 1;
       }
     }).catch((error) => {
       // During/after quiesce, detached read errors are observed (no unhandled

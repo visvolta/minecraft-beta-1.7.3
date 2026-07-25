@@ -41,6 +41,13 @@ function createEmptyGeometry(): THREE.BufferGeometry {
   return geometry;
 }
 
+function geometryIsEmpty(geometry: THREE.BufferGeometry): boolean {
+  const index = geometry.getIndex();
+  if (index !== null) return index.count === 0;
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
+  return position === undefined || position.count === 0;
+}
+
 export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
   const uniforms = {
     uSkylightSubtracted: { value: 0 },
@@ -350,6 +357,8 @@ export class ChunkRenderer {
   private sunBrightnessFactor = 1;
   private meshUploadsThisFrame = 0;
   private lastDirtyScanMs = 0;
+  private lastSceneInsertionMs = 0;
+  private lastMeshUpdateMs = 0;
 
   public constructor(
     scene: THREE.Scene,
@@ -502,7 +511,9 @@ export class ChunkRenderer {
   }
 
   public update(recentFrameTimeMs = 0, cameraWorldX = 0, cameraWorldZ = 0): void {
+    const updateStart = performance.now();
     this.meshUploadsThisFrame = 0;
+    this.lastSceneInsertionMs = 0;
     this.updateFluidAnimationUniforms();
     this.updateLavaAnimationUniforms();
     this.updateFireAnimationUniforms();
@@ -524,8 +535,11 @@ export class ChunkRenderer {
       const maxUploads = healthyFrame ? 2 : 1;
       const maxUploadMs = healthyFrame ? 4 : 2;
       for (const result of this.meshQueue.takeUpload(maxUploads, maxUploadMs)) {
+        const sceneStart = performance.now();
         this.applyMeshResult(result);
+        this.lastSceneInsertionMs += performance.now() - sceneStart;
       }
+      this.lastMeshUpdateMs = performance.now() - updateStart;
       return;
     }
 
@@ -540,6 +554,8 @@ export class ChunkRenderer {
       if (rebuilt >= budget) break;
     }
     this.lastDirtyScanMs = performance.now() - scanStart;
+    this.lastSceneInsertionMs = this.lastDirtyScanMs;
+    this.lastMeshUpdateMs = performance.now() - updateStart;
   }
 
   public setRawLightDebugMode(enabled: boolean): void {
@@ -662,6 +678,18 @@ export class ChunkRenderer {
     return this.lastDirtyScanMs;
   }
 
+  public getLastSceneInsertionMs(): number {
+    return this.lastSceneInsertionMs;
+  }
+
+  public getLastMeshUpdateMs(): number {
+    return this.lastMeshUpdateMs;
+  }
+
+  public getLastGeometryCreationMs(): number {
+    return this.meshQueue.getStats().geometryCreationMs;
+  }
+
   public getPassMeshCounts(): {
     terrain: number;
     cutout: number;
@@ -744,10 +772,14 @@ export class ChunkRenderer {
 
     this.applyColorModeToGeometry(result.terrain);
     this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, result.terrain);
-    // Depth clones — same geometry data but separate instances for depth pre-pass
-    this.upsertMesh(this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, chunk, key, result.translucent.clone());
-    this.upsertMesh(this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, chunk, key, result.water.clone());
-    this.upsertMesh(this.lavaDepthMeshes, this.lavaDepthGroup, this.lavaDepthMaterial, chunk, key, result.lava.clone());
+    // Depth clones — same geometry data but separate instances for depth pre-pass.
+    // Empty passes are removed instead of retained as zero-geometry meshes.
+    if (geometryIsEmpty(result.translucent)) this.removeMesh(this.translucentDepthMeshes, this.translucentDepthGroup, key);
+    else this.upsertMesh(this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, chunk, key, result.translucent.clone());
+    if (geometryIsEmpty(result.water)) this.removeMesh(this.waterDepthMeshes, this.waterDepthGroup, key);
+    else this.upsertMesh(this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, chunk, key, result.water.clone());
+    if (geometryIsEmpty(result.lava)) this.removeMesh(this.lavaDepthMeshes, this.lavaDepthGroup, key);
+    else this.upsertMesh(this.lavaDepthMeshes, this.lavaDepthGroup, this.lavaDepthMaterial, chunk, key, result.lava.clone());
 
     this.applyColorModeToGeometry(result.water);
     this.upsertMesh(this.waterMeshes, this.waterGroup, this.waterMaterial, chunk, key, result.water);
@@ -827,10 +859,14 @@ export class ChunkRenderer {
     const lavaGeometry = hasChunkPass(mask, ChunkPassMask.Lava) ? this.mesher.buildLava(chunk) : createEmptyGeometry();
     const translucentGeometry = hasChunkPass(mask, ChunkPassMask.Translucent) ? this.mesher.buildTranslucent(chunk) : createEmptyGeometry();
 
-    // Depth pre-pass — clones, colorWrite false, depthWrite true
-    this.upsertMesh(this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, chunk, key, translucentGeometry.clone());
-    this.upsertMesh(this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, chunk, key, waterGeometry.clone());
-    this.upsertMesh(this.lavaDepthMeshes, this.lavaDepthGroup, this.lavaDepthMaterial, chunk, key, lavaGeometry.clone());
+    // Depth pre-pass — clones, colorWrite false, depthWrite true.
+    // Empty passes are removed instead of retained as zero-geometry meshes.
+    if (geometryIsEmpty(translucentGeometry)) this.removeMesh(this.translucentDepthMeshes, this.translucentDepthGroup, key);
+    else this.upsertMesh(this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, chunk, key, translucentGeometry.clone());
+    if (geometryIsEmpty(waterGeometry)) this.removeMesh(this.waterDepthMeshes, this.waterDepthGroup, key);
+    else this.upsertMesh(this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, chunk, key, waterGeometry.clone());
+    if (geometryIsEmpty(lavaGeometry)) this.removeMesh(this.lavaDepthMeshes, this.lavaDepthGroup, key);
+    else this.upsertMesh(this.lavaDepthMeshes, this.lavaDepthGroup, this.lavaDepthMaterial, chunk, key, lavaGeometry.clone());
 
     this.applyColorModeToGeometry(waterGeometry);
     this.upsertMesh(this.waterMeshes, this.waterGroup, this.waterMaterial, chunk, key, waterGeometry);
@@ -1015,6 +1051,18 @@ export class ChunkRenderer {
     this.translucentMaterial.needsUpdate = true;
   }
 
+  private removeMesh(
+    meshes: Map<string, THREE.Mesh>,
+    group: THREE.Group,
+    key: string,
+  ): void {
+    const existing = meshes.get(key);
+    if (existing === undefined) return;
+    group.remove(existing);
+    existing.geometry.dispose();
+    meshes.delete(key);
+  }
+
   private upsertMesh(
     meshes: Map<string, THREE.Mesh>,
     group: THREE.Group,
@@ -1023,6 +1071,12 @@ export class ChunkRenderer {
     key: string,
     geometry: THREE.BufferGeometry,
   ): void {
+    if (geometryIsEmpty(geometry)) {
+      geometry.dispose();
+      this.removeMesh(meshes, group, key);
+      return;
+    }
+
     const existing = meshes.get(key);
     if (existing !== undefined) {
       existing.geometry.dispose();

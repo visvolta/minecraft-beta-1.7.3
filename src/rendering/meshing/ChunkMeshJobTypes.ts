@@ -1,4 +1,3 @@
-import type { BlockId } from '../../blocks/BlockId';
 import type { AtlasUvRect } from '../../assets/TextureAtlas';
 
 export interface ChunkSnapshotPayload {
@@ -15,6 +14,12 @@ export interface AtlasUvPayload {
   readonly rect: AtlasUvRect;
 }
 
+export interface ChunkMeshInitJob {
+  readonly type: 'init';
+  readonly atlasUvs: readonly AtlasUvPayload[];
+  readonly worldSeed: string;
+}
+
 export interface ChunkMeshJob {
   readonly type: 'mesh';
   readonly jobId: number;
@@ -22,11 +27,22 @@ export interface ChunkMeshJob {
   readonly targetChunkZ: number;
   readonly targetRevision: number;
   readonly chunks: readonly ChunkSnapshotPayload[];
-  readonly atlasUvs: readonly AtlasUvPayload[];
-  readonly worldSeed: string;
+  /** Backward-compatible fallback. Production workers receive this once via ChunkMeshInitJob. */
+  readonly atlasUvs?: readonly AtlasUvPayload[];
+  /** Backward-compatible fallback. Production workers receive this once via ChunkMeshInitJob. */
+  readonly worldSeed?: string;
 }
 
-export interface MeshAttributeBuffers {
+export type ChunkMeshWorkerMessage = ChunkMeshInitJob | ChunkMeshJob;
+
+export interface EmptyMeshAttributeBuffers {
+  readonly empty: true;
+  readonly vertexCount: 0;
+  readonly indexCount: 0;
+}
+
+export interface PopulatedMeshAttributeBuffers {
+  readonly empty?: false;
   readonly positions: ArrayBuffer;
   readonly normals: ArrayBuffer;
   readonly uvs: ArrayBuffer;
@@ -44,6 +60,8 @@ export interface MeshAttributeBuffers {
   readonly vertexCount: number;
   readonly indexCount: number;
 }
+
+export type MeshAttributeBuffers = EmptyMeshAttributeBuffers | PopulatedMeshAttributeBuffers;
 
 export interface ChunkMeshResult {
   readonly type: 'meshResult';
@@ -64,9 +82,4 @@ export interface ChunkMeshWorkerError {
   readonly type: 'meshError';
   readonly jobId: number;
   readonly message: string;
-}
-
-export interface WorkerBlockDefinitionPayload {
-  readonly id: BlockId;
-  readonly name: string;
 }

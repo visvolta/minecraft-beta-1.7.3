@@ -18,6 +18,7 @@ interface ActiveJob {
   readonly priority: number;
   readonly critical: boolean;
   readonly enqueuedAtMs: number;
+  readonly sentAtMs: number;
   readonly worker: Worker;
 }
 
@@ -31,6 +32,14 @@ export interface ChunkGenerationStats {
   readonly maxDurationMs: number;
   readonly oldestCriticalAgeMs: number;
   readonly workerCount: number;
+  readonly processMs: number;
+  readonly dispatchMs: number;
+  readonly drainMs: number;
+  readonly syncGenerationMs: number;
+  readonly lastWorkerDurationMs: number;
+  readonly lastTransferBytes: number;
+  readonly totalTransferBytes: number;
+  readonly lastTransferLatencyMs: number;
 }
 
 export interface CompletedChunkGeneration {
@@ -61,6 +70,14 @@ export class ChunkGenerationQueue {
   private errors = 0;
   private totalDuration = 0;
   private maxDuration = 0;
+  private lastProcessMs = 0;
+  private lastDispatchMs = 0;
+  private lastDrainMs = 0;
+  private lastSyncGenerationMs = 0;
+  private lastWorkerDurationMs = 0;
+  private lastTransferBytes = 0;
+  private totalTransferBytes = 0;
+  private lastTransferLatencyMs = 0;
 
   public constructor(chunkManager: ChunkManager, fallbackGenerator: WorldGenerator, worldSeed: bigint) {
     this.chunkManager = chunkManager;
@@ -128,11 +145,20 @@ export class ChunkGenerationQueue {
     desired: ReadonlySet<string>,
     allowNonCriticalDispatch: boolean,
   ): CompletedChunkGeneration[] {
+    const processStart = performance.now();
+    this.lastTransferBytes = 0;
+    this.lastTransferLatencyMs = 0;
+    this.lastSyncGenerationMs = 0;
     const completed: CompletedChunkGeneration[] = [];
+    const drainStart = performance.now();
     this.drainWorkerResults(completed, desired);
+    this.lastDrainMs = performance.now() - drainStart;
 
     if (this.useWorkers) {
+      const dispatchStart = performance.now();
       this.dispatchWorkers(allowNonCriticalDispatch);
+      this.lastDispatchMs = performance.now() - dispatchStart;
+      this.lastProcessMs = performance.now() - processStart;
       return completed;
     }
 
@@ -156,11 +182,14 @@ export class ChunkGenerationQueue {
       this.fallbackGenerator.populate(chunk);
       chunk.setTerrainPopulated(true);
       const duration = performance.now() - t0;
+      this.lastSyncGenerationMs += duration;
       this.recordDuration(duration);
       this.completed += 1;
       completed.push({ chunk, durationMs: duration });
       count += 1;
     }
+    this.lastDispatchMs = 0;
+    this.lastProcessMs = performance.now() - processStart;
     return completed;
   }
 
@@ -175,6 +204,14 @@ export class ChunkGenerationQueue {
       maxDurationMs: this.maxDuration,
       oldestCriticalAgeMs: this.getOldestCriticalAgeMs(),
       workerCount: this.workers.length,
+      processMs: this.lastProcessMs,
+      dispatchMs: this.lastDispatchMs,
+      drainMs: this.lastDrainMs,
+      syncGenerationMs: this.lastSyncGenerationMs,
+      lastWorkerDurationMs: this.lastWorkerDurationMs,
+      lastTransferBytes: this.lastTransferBytes,
+      totalTransferBytes: this.totalTransferBytes,
+      lastTransferLatencyMs: this.lastTransferLatencyMs,
     };
   }
 
@@ -241,6 +278,7 @@ export class ChunkGenerationQueue {
         priority: next.priority,
         critical: next.critical,
         enqueuedAtMs: next.enqueuedAtMs,
+        sentAtMs: performance.now(),
         worker,
       });
       const job: ChunkGenerationJob = {
@@ -264,6 +302,13 @@ export class ChunkGenerationQueue {
       }
 
       const mapKey = chunkKey(result.chunkX, result.chunkZ);
+      if (active !== undefined) {
+        const bytes = result.blocks.byteLength + result.metadata.byteLength;
+        this.lastTransferBytes += bytes;
+        this.totalTransferBytes += bytes;
+        this.lastWorkerDurationMs = result.durationMs;
+        this.lastTransferLatencyMs = Math.max(0, performance.now() - active.sentAtMs - result.durationMs);
+      }
       if (active === undefined || !desired.has(mapKey) || this.chunkManager.hasChunk(result.chunkX, result.chunkZ)) {
         this.stale += 1;
         continue;

@@ -107,8 +107,6 @@ import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
 import { WorldEventQueue } from '../world/events/WorldEventQueue';
-import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
-import { fluidSurfaceHeight, getFluidLevel, isFallingFluid } from '../world/fluid/FluidMetadata';
 import { ChunkStreamer } from '../world/ChunkStreamer';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
@@ -160,7 +158,8 @@ import {
   THIRD_PERSON_HELD_BLOCK_SCALE,
   FIRST_PERSON_CAMERA_OFFSET_Y
 } from '../player/PlayerConstants';
-import { getActiveSaveTrace, getSaveTraceHistory, measureSaveSync, recordSaveEvent } from '../persistence2/debug/SavePipelineTrace';
+import { measureSaveSync, recordSaveEvent } from '../persistence2/debug/SavePipelineTrace';
+import { installEngineDebugHooks } from './EngineDebugHooks';
 import type { Chunk } from '../world/Chunk';
 
 interface EntityLightingUniforms {
@@ -190,6 +189,14 @@ interface AutosaveStats {
   lastFailure: string | null;
 }
 const DEBUG_GEOMETRY_MEMORY_SAMPLE_MS = 250;
+
+function readProfilerEnabledSetting(): boolean {
+  try {
+    return window.localStorage.getItem('minecraft.profiler.enabled') !== 'false';
+  } catch {
+    return true;
+  }
+}
 
 export class Engine {
   private readonly renderer: Renderer;
@@ -284,6 +291,7 @@ export class Engine {
   private readonly debugStatsCollector: DebugStatsCollector;
   private readonly blockTestGrid: BlockTestGrid;
   private readonly performanceProfiler = new PerformanceProfiler();
+  private removeDebugHooks: (() => void) | null = null;
   private nextDebugGeometryMemorySampleMs = 0;
   private rawLightDebugMode = false;
   private ambientOcclusionDebugMode = false;
@@ -839,58 +847,27 @@ export class Engine {
     this.debugStatsCollector = new DebugStatsCollector(this.player, this.chunkManager, this.chunkRenderer, this.renderer, this.skyRenderer, this.cloudRenderer, this.weatherController, this.precipitationRenderer, this.rainSplashRenderer, this.lightningRenderer, this.renderer.renderer, worldSeed, this.worldTime, this.performanceProfiler, this.worldTickScheduler, this.fallingBlockManager, this.worldEventQueue);
 
     const validationHarness = new WorkerValidationHarness(worldSeed, this.atlas);
-    (window as unknown as { __mcDebug?: Record<string, unknown> }).__mcDebug = {
-      saveWorldMetadata: () => this.saveMetadata(true),
-      saveWorld: () => this.saveMetadata(true),
-      getSaveMetrics: () => { const stats = this.persistence.getStats(); return { dirty: this.countDirtyChunks() > 0, saves: stats.write.accepted, failures: 0, lastError: undefined as string | undefined, pendingUnloads: stats.pendingUnloads }; },
-      getActiveSaveTraceId: () => getActiveSaveTrace()?.id ?? null,
-      getSaveTraceHistory: () => getSaveTraceHistory(),
-      inspectWorldMetadata: () => this.persistence.getMetadata(),
-      isWorldDirty: () => this.countDirtyChunks() > 0,
-      validateGenerationWorkers: () => validationHarness.validateGenerationWorker(),
-      validateMeshWorkers: () => validationHarness.validateMeshWorker(),
-      getTargetedEntity: () => this.interactionController.getTargetedEntity(),
-      getEntityMetrics: () => ({ active: this.entityManager.activeCount, parked: this.entityManager.parkedCount, tick: this.entityManager.currentTick }),
-      getTickMetrics: () => this.worldTickScheduler.getMetrics(),
-      getRedstoneMetrics: () => ({ ...this.worldTickScheduler.getMetrics(), powerQueries: this.redstonePowerEngine.getMetrics() }),
-      getFallingBlockMetrics: () => ({ simulationTick: this.fallingBlockManager.getSimulationTick(), interpolationAlpha: this.fallingBlockManager.getInterpolationAlpha(), active: this.fallingBlockManager.getCount(), persisted: this.fallingBlockManager.getPersistedCount(), meshCount: this.fallingBlockManager.getMeshCount(), entities: this.fallingBlockManager.getDebugEntities(), pendingDrops: this.worldEventQueue.getBlockDropCount() }),
-      getFluidMetrics: () => ({ ...this.fluidAnimationSystem.getDebugInfo(), lavaIgnitionAttempts: this.worldEventQueue.getTotalLavaIgnitionAttempts(), worldEventQueueDepth: this.worldEventQueue.getQueueDepth() }),
-      getFireMetrics: () => ({ ...this.fireAnimationSystem.getDebugInfo(), tntIgniteAttempts: this.worldEventQueue.getTotalTntIgniteAttempts(), pendingTntIgnitions: this.worldEventQueue.getTntIgniteAttemptCount() }),
-      getBlockTestGrid: () => ({ grid: this.blockTestGrid.getGridState(), blocks: this.blockTestGrid.getInfo(), totalBlocks: this.blockTestGrid.getInfo().length, origin: this.blockTestGrid.getGridState() ? { x: this.blockTestGrid.getGridState()!.originX, y: this.blockTestGrid.getGridState()!.originY, z: this.blockTestGrid.getGridState()!.originZ } : null }),
-      getWeatherMetrics: () => ({ ...this.precipitationSimulator.getMetrics(), activeSnowfall: this.weatherController.getState().raining, weatherMode: this.weatherController.getState().getEffectiveMode(this.weatherController.getState().partialTick) }),
-      getLeafDecayMetrics: () => {
-        return { pendingItemDrops: this.worldEventQueue.getItemDropCount(), totalItemDrops: this.worldEventQueue.getTotalItemDrops(), discardedItemDrops: this.worldEventQueue.getDiscardedItemDropCount(), queueDepth: this.worldEventQueue.getQueueDepth() };
-      },
-      drainLeafDecayDrops: () => this.worldEventQueue.drainItemDrops(),
-      resetLeafDecayMetrics: () => {},
-      inspectLeafDecayArea: (x: number, y: number, z: number, radius = 4) => {
-        const results: any[] = [];
-        const cx = Math.floor(x); const cy = Math.floor(y); const cz = Math.floor(z);
-        let guardPass = true;
-        const minCX = Math.floor((cx - radius - 1) / 16); const maxCX = Math.floor((cx + radius + 1) / 16);
-        const minCZ = Math.floor((cz - radius - 1) / 16); const maxCZ = Math.floor((cz + radius + 1) / 16);
-        for (let cxx = minCX; cxx <= maxCX; cxx++) for (let czz = minCZ; czz <= maxCZ; czz++) if (!this.chunkManager.hasChunk(cxx, czz)) guardPass = false;
-        for (let dx = -radius; dx <= radius; dx++) for (let dy = -radius; dy <= radius; dy++) for (let dz = -radius; dz <= radius; dz++) {
-          const wx = cx + dx; const wy = cy + dy; const wz = cz + dz;
-          if (wy < 0 || wy >= 128) continue;
-          const bid = this.blockUpdateWorld.getBlock(wx, wy, wz);
-          const isLeaf = bid === 18 || bid === 250 || bid === 253; const isLog = bid === 17 || bid === 251 || bid === 252;
-          if (!isLeaf && !isLog) continue;
-          const meta = this.blockUpdateWorld.getBlockMetadata(wx, wy, wz);
-          const hasFlag = (meta & 8) !== 0; const species = meta & 3;
-          results.push({ x: wx, y: wy, z: wz, blockId: bid, blockName: isLeaf ? 'leaves' : 'log', metadata: meta, hasDecayFlag: hasFlag, species, guardPass });
-        }
-        return { center: { x: cx, y: cy, z: cz }, radius, guardPass, leaves: results.filter((r) => r.blockName === 'leaves'), logs: results.filter((r) => r.blockName === 'log'), all: results };
-      },
-      inspectFluid: (x: number, y: number, z: number) => {
-        const blockId = this.blockUpdateWorld.getBlock(x, y, z); const metadata = this.blockUpdateWorld.getBlockMetadata(x, y, z);
-        const flow = computeFluidFlowVector({ getBlock: (wx, wy, wz) => this.blockUpdateWorld.getBlock(wx, wy, wz), getMetadata: (wx, wy, wz) => this.blockUpdateWorld.getBlockMetadata(wx, wy, wz), isSolid: (id) => blockRegistry.getById(id)?.solid ?? false }, x, y, z, blockId);
-        const isWater = blockId === 8 || blockId === 9; const isLava = blockId === 10 || blockId === 11;
-        const moving = Math.hypot(flow.x, flow.z) > 1e-6;
-        const textureSelector = isWater ? (isFallingFluid(metadata) || moving || blockId === 8 ? 'WaterFlow' : 'WaterStill') : isLava ? (isFallingFluid(metadata) || moving || blockId === 10 ? 'LavaFlow' : 'LavaStill') : 'None';
-        return { blockId, metadata, flowLevel: getFluidLevel(metadata), falling: isFallingFluid(metadata), flow, surfaceHeight: fluidSurfaceHeight(metadata), textureSelector, currentFrames: this.fluidAnimationSystem.getDebugInfo() };
-      },
-    };
+    this.removeDebugHooks = installEngineDebugHooks({
+      persistence: this.persistence,
+      validationHarness,
+      interactionController: this.interactionController,
+      entityManager: this.entityManager,
+      worldTickScheduler: this.worldTickScheduler,
+      redstonePowerEngine: this.redstonePowerEngine,
+      fallingBlockManager: this.fallingBlockManager,
+      worldEventQueue: this.worldEventQueue,
+      blockTestGrid: this.blockTestGrid,
+      weatherController: this.weatherController,
+      precipitationSimulator: this.precipitationSimulator,
+      blockUpdateWorld: this.blockUpdateWorld,
+      chunkManager: this.chunkManager,
+      fluidAnimationSystem: this.fluidAnimationSystem,
+      fireAnimationSystem: this.fireAnimationSystem,
+      blockRegistry,
+      performanceProfiler: this.performanceProfiler,
+      saveMetadata: (force) => this.saveMetadata(force),
+      countDirtyChunks: () => this.countDirtyChunks(),
+    });
 
     this.updateHeldItemMesh();
   }
@@ -910,7 +887,7 @@ export class Engine {
     }
     document.body.appendChild(this.renderer.domElement);
     this.debugOverlay.mount();
-    this.performanceProfiler.enabled = true;
+    this.performanceProfiler.setEnabled(readProfilerEnabledSetting());
     this.input.start();
     this.renderer.start();
     this.running = true;
@@ -1122,6 +1099,8 @@ export class Engine {
     measureSaveSync('save.engine.dispose_game_systems', {
       paused: this.simulationPaused,
     }, () => {
+      this.removeDebugHooks?.();
+      this.removeDebugHooks = null;
       this.interactionController.dispose();
       this.debugOverlay.dispose();
       this.blockHighlight.dispose();
@@ -1319,9 +1298,27 @@ export class Engine {
     const preStreamMeshingStats = this.chunkRenderer.getMeshingStats();
     this.chunkStreamer.update(camera.position.x, camera.position.z, this.cameraController.getYaw(), this.player.velocity.x, this.player.velocity.z, preStreamMeshingStats.queued, preStreamMeshingStats.pendingUploads);
     const generationStats = this.chunkStreamer.getGenerationStats();
+    const integrationStats = this.chunkStreamer.getIntegrationStats();
     const meshingStats = this.chunkRenderer.getMeshingStats();
     this.performanceProfiler.setQueues(generationStats.queued, meshingStats.queued + meshingStats.pendingUploads, generationStats.activeWorkers + meshingStats.activeWorkers, generationStats.oldestCriticalAgeMs);
-    this.performanceProfiler.setWorkerCounters(generationStats.completed, generationStats.stale, generationStats.errors);
+    this.performanceProfiler.setWorkerCounters(generationStats.completed, generationStats.stale, generationStats.errors + meshingStats.errors);
+    this.performanceProfiler.recordGenerationTimings({
+      queueProcessMs: generationStats.processMs,
+      workerDurationMs: generationStats.lastWorkerDurationMs || generationStats.syncGenerationMs,
+      integrationMs: integrationStats.lastGeneratedIntegrationMs + integrationStats.lastReadIntegrationMs,
+      chunksCompleted: generationStats.completed,
+      bytesReceived: generationStats.lastTransferBytes,
+      transferLatencyMs: generationStats.lastTransferLatencyMs,
+    });
+    const persistenceDiag = this.persistence.getDiagnostics();
+    this.performanceProfiler.setPersistenceQueueDepth(
+      persistenceDiag.writeLane.active +
+      persistenceDiag.writeLane.pending +
+      persistenceDiag.readLane.active +
+      persistenceDiag.readLane.pending +
+      persistenceDiag.pendingUnloads +
+      persistenceDiag.inFlightChunks,
+    );
     this.performanceProfiler.recordChunkCounts(this.chunkManager.size, this.chunkRenderer.getVisibleMeshCount(), this.chunkManager.countDirtyChunks());
 
     if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.interactionController.update(deltaSeconds);
@@ -1357,7 +1354,23 @@ export class Engine {
       this.playerModelUniforms.uSkylightSubtracted.value = atmos.effectiveSkylightSubtracted; this.playerModelUniforms.uSunBrightnessFactor.value = atmos.sunBrightnessFactor;
     }
 
-    this.chunkRenderer.update(this.performanceProfiler.getSnapshot().frameTimeMs, camera.position.x, camera.position.z);
+    this.chunkRenderer.update(this.performanceProfiler.getLastFrameTimeMs(), camera.position.x, camera.position.z);
+    const postRenderMeshingStats = this.chunkRenderer.getMeshingStats();
+    const geometryCreationMs = this.chunkRenderer.getLastGeometryCreationMs();
+    const sceneInsertionMs = this.chunkRenderer.getLastSceneInsertionMs();
+    this.performanceProfiler.recordMeshingTimings({
+      jobBuildMs: postRenderMeshingStats.jobBuildMs,
+      dispatchMs: postRenderMeshingStats.dispatchMs,
+      resultDrainMs: postRenderMeshingStats.resultDrainMs,
+      workerDurationMs: postRenderMeshingStats.lastWorkerDurationMs,
+      geometryCreationMs,
+      sceneInsertionMs,
+      bytesCopied: postRenderMeshingStats.bytesCopied,
+      bytesTransferred: postRenderMeshingStats.bytesTransferred,
+      bytesReturned: postRenderMeshingStats.bytesReturned,
+      transferLatencyMs: postRenderMeshingStats.transferLatencyMs,
+    });
+    this.performanceProfiler.recordMeshUploadTimings(geometryCreationMs, sceneInsertionMs, geometryCreationMs + sceneInsertionMs);
     const precipStart = performance.now();
     this.precipitationRenderer.update(camera.position.x, camera.position.y, camera.position.z, deltaSeconds, atmos, this.worldTime);
     const precipEnd = performance.now();
@@ -1376,11 +1389,16 @@ export class Engine {
       transparentRenderingMs: 0,
     });
     const lightingMetrics = this.lightEngine.drainBfsMetrics();
+    this.performanceProfiler.setLightingQueueDepth(lightingMetrics.maximumBfsQueueSize);
     this.performanceProfiler.recordLightingTimings({
-      propagationMs: 0,
+      propagationMs: lightingMetrics.propagationMs,
       averageBfsQueueSize: lightingMetrics.averageBfsQueueSize,
       maximumBfsQueueSize: lightingMetrics.maximumBfsQueueSize,
       propagationCalls: lightingMetrics.propagationCalls,
+      nodesProcessed: lightingMetrics.nodesProcessed,
+      initializationMs: lightingMetrics.initializationMs,
+      borderReconcileMs: lightingMetrics.borderReconcileMs,
+      localRelightMs: lightingMetrics.localRelightMs,
     });
 
     const fogState = this.fogController.compute({ eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z, rawLightDebugMode: this.rawLightDebugMode, ambientOcclusionDebugMode: this.ambientOcclusionDebugMode, overworldColorHex: atmos.horizon.hex, overworldDensityMultiplier: atmos.fogDensityMultiplier });
@@ -1394,7 +1412,16 @@ export class Engine {
     this.minecartRenderSystem.update(entityAlpha);
     this.entityParticles.update(deltaSeconds);
     this.debugStatsCollector.recordFrame(deltaSeconds);
-    if (this.debugOverlay.isVisible()) this.debugOverlay.render(this.debugStatsCollector.collect(false));
+    if (this.debugOverlay.isVisible()) {
+      const debugCollectStart = performance.now();
+      const debugStats = this.debugStatsCollector.collect(false);
+      const debugCollectMs = performance.now() - debugCollectStart;
+      const debugRenderStart = performance.now();
+      this.debugOverlay.render(debugStats);
+      this.performanceProfiler.recordDebugOverlayTimings(debugCollectMs, performance.now() - debugRenderStart);
+    } else {
+      this.performanceProfiler.recordDebugOverlayTimings(0, 0);
+    }
     for (const system of this.updatables) system.update(deltaSeconds);
 
     this.performanceProfiler.recordMeshUpload(this.chunkRenderer.getMeshUploadsThisFrame());
@@ -1418,6 +1445,13 @@ export class Engine {
     if (this.furnaceController.isOpen) this.furnaceController.renderAll();
     if (this.chestController.isOpen) this.chestController.renderAll();
     this.hudRenderer.render();
+    const renderInfo = this.renderer.renderer.info;
+    this.performanceProfiler.recordRenderStats({
+      drawCalls: renderInfo.render.calls,
+      triangles: renderInfo.render.triangles,
+      geometries: renderInfo.memory.geometries,
+      textures: renderInfo.memory.textures,
+    });
     this.performanceProfiler.endRender(); this.performanceProfiler.endFrame();
   };
 

@@ -7,10 +7,11 @@ import type { AtlasUvRect } from '../assets/TextureAtlas';
 import { VegetationColorProvider } from '../world/generation/climate/VegetationColors';
 import { ChunkPassMask, computeChunkPassMask, hasChunkPass } from '../rendering/meshing/ChunkPassMask';
 import type {
-  ChunkMeshJob,
   ChunkMeshResult,
   ChunkMeshWorkerError,
   MeshAttributeBuffers,
+  ChunkMeshWorkerMessage,
+  PopulatedMeshAttributeBuffers,
 } from '../rendering/meshing/ChunkMeshJobTypes';
 
 const registry = new BlockRegistry();
@@ -49,6 +50,9 @@ function attributeBuffer(geometry: THREE.BufferGeometry, name: string): ArrayBuf
 function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
   const index = geometry.getIndex();
   const position = geometry.getAttribute('position');
+  const vertexCount = position?.count ?? 0;
+  const indexCount = index?.count ?? 0;
+  if (vertexCount === 0 || indexCount === 0) return createEmptyMeshAttributeBuffers();
   return {
     positions: attributeBuffer(geometry, 'position'),
     normals: attributeBuffer(geometry, 'normal'),
@@ -63,36 +67,24 @@ function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
     faceBrightness: attributeBuffer(geometry, 'faceBrightness'),
     fluidTextureKinds: attributeBuffer(geometry, 'fluidTextureKind'),
     fluidFrameUvs: attributeBuffer(geometry, 'fluidFrameUv'),
-    indices: index === null ? new Uint32Array().buffer : new Uint32Array(index.array as ArrayLike<number>).buffer,
-    vertexCount: position?.count ?? 0,
-    indexCount: index?.count ?? 0,
+    indices: index === null ? new Uint32Array().buffer : ownArrayBuffer(index.array as ArrayBufferView),
+    vertexCount,
+    indexCount,
   };
 }
 
 function createEmptyMeshAttributeBuffers(): MeshAttributeBuffers {
-  return {
-    positions: new Float32Array().buffer,
-    normals: new Float32Array().buffer,
-    uvs: new Float32Array().buffer,
-    normalColors: new Float32Array().buffer,
-    debugColors: new Float32Array().buffer,
-    aoColors: new Float32Array().buffer,
-    tintColors: new Float32Array().buffer,
-    skyLightLevels: new Float32Array().buffer,
-    blockLightLevels: new Float32Array().buffer,
-    aoFactorScalars: new Float32Array().buffer,
-    faceBrightness: new Float32Array().buffer,
-    fluidTextureKinds: new Float32Array().buffer,
-    fluidFrameUvs: new Float32Array().buffer,
-    indices: new Uint32Array().buffer,
-    vertexCount: 0,
-    indexCount: 0,
-  };
+  return { empty: true, vertexCount: 0, indexCount: 0 };
+}
+
+function isPopulatedMesh(mesh: MeshAttributeBuffers): mesh is PopulatedMeshAttributeBuffers {
+  return mesh.empty !== true;
 }
 
 function transferList(result: ChunkMeshResult): Transferable[] {
   const list: Transferable[] = [];
   for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.fire, result.translucent]) {
+    if (!isPopulatedMesh(mesh)) continue;
     list.push(
       mesh.positions,
       mesh.normals,
@@ -113,13 +105,20 @@ function transferList(result: ChunkMeshResult): Transferable[] {
   return list;
 }
 
+let workerWorldSeed: string | null = null;
+
 const workerSelf = self as unknown as {
-  onmessage: ((event: MessageEvent<ChunkMeshJob>) => void) | null;
+  onmessage: ((event: MessageEvent<ChunkMeshWorkerMessage>) => void) | null;
   postMessage: (message: ChunkMeshResult | ChunkMeshWorkerError, transfer?: Transferable[]) => void;
 };
 
-workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
+workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
   const job = event.data;
+  if (job.type === 'init') {
+    atlas.set(job.atlasUvs);
+    workerWorldSeed = job.worldSeed;
+    return;
+  }
   if (job.type !== 'mesh') return;
 
   try {
@@ -138,8 +137,10 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshJob>): void => {
       throw new Error(`Missing target chunk ${job.targetChunkX},${job.targetChunkZ}`);
     }
 
-    atlas.set(job.atlasUvs);
-    const vegetationColors = new VegetationColorProvider(BigInt(job.worldSeed));
+    if (job.atlasUvs !== undefined) atlas.set(job.atlasUvs);
+    const seed = job.worldSeed ?? workerWorldSeed;
+    if (seed === null) throw new Error('Chunk meshing worker received mesh job before init.');
+    const vegetationColors = new VegetationColorProvider(BigInt(seed));
     const mesher = new ChunkMesher(manager, registry, atlas as never, vegetationColors);
     const mask = computeChunkPassMask(target.getBlockDataView(), registry);
     const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? mesher.build(target) : null;

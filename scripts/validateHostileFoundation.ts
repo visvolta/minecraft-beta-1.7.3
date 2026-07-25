@@ -6,7 +6,7 @@ import { EntityManager } from '../src/entities/core/EntityManager.ts';
 import type { EntityTickContext, EntityWorldContext } from '../src/entities/core/EntityContext.ts';
 import { createDefaultEntityTypeRegistry } from '../src/entities/core/EntityType.ts';
 import { HostileEntity } from '../src/entities/hostile/HostileEntity.ts';
-import type { NbtCompound, NbtTag } from '../src/persistence/nbt/Nbt.ts';
+import type { NbtCompound, NbtTag } from '../src/nbt/Nbt.ts';
 import { Player } from '../src/player/Player.ts';
 import { BlockBehaviourRegistry } from '../src/world/BlockBehaviour.ts';
 import { BlockUpdateWorld } from '../src/world/BlockUpdateWorld.ts';
@@ -18,7 +18,7 @@ import { JavaRandom } from '../src/world/generation/random/JavaRandom.ts';
 import { MeleeAttackTask } from '../src/entities/ai/tasks/MeleeAttackTask.ts';
 import { PursueTargetTask } from '../src/entities/ai/tasks/PursueTargetTask.ts';
 import { PanicTask } from '../src/entities/ai/tasks/PanicTask.ts';
-import { createDefaultMetadata } from '../src/persistence/coordinator/WorldSaveCoordinator.ts';
+import { createDefaultMetadata } from '../src/world/WorldMetadata.ts';
 
 function assert(value: boolean, message: string): void { if (!value) throw new Error(message); }
 

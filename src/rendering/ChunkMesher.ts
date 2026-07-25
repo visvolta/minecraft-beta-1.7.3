@@ -1052,7 +1052,7 @@ export class ChunkMesher {
             this.pushSnowBlock(buffers, x, y, z, uvRect, tint, light);
           } else if (renderType === 'ice') {
             // Beta ice: rendered as translucent (pass 1), same as fluids
-            // Skip here — ice will be handled in buildFluids or a separate translucent pass
+            // Skip here — ice is handled by the separate translucent pass
           }
         }
       }
@@ -1455,17 +1455,6 @@ export class ChunkMesher {
     }
 
     return buffers.toGeometry();
-  }
-
-  /** @deprecated Use buildWater or buildLava instead. */
-  public buildFluids(chunk: Chunk): THREE.BufferGeometry {
-    // Combine both for backward compatibility
-    const waterGeo = this.buildWater(chunk);
-    const lavaGeo = this.buildLava(chunk);
-    // Merge geometries (simple approach - in practice we'd want to merge buffers)
-    // For now return water; lava will be handled separately by ChunkRenderer
-    lavaGeo.dispose();
-    return waterGeo;
   }
 
   private buildFluidBlock(

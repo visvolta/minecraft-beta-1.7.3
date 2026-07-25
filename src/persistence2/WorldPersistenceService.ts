@@ -79,6 +79,16 @@ export interface PersistenceErrorInfo {
   timeMs: number;
 }
 
+export interface PersistencePerformanceStats {
+  readonly lastChunkEncodeMs: number;
+  readonly lastChunkWriteMs: number;
+  readonly lastChunkReadMs: number;
+  readonly lastChunkDecodeMs: number;
+  readonly lastMetadataWriteMs: number;
+  readonly lastMetadataReadMs: number;
+  readonly lastFlushBarrierMs: number;
+}
+
 /** Aggregated service diagnostics for watchdogs / error screens / risk snapshot. */
 export interface ServiceDiagnostics {
   worldId: string | null;
@@ -119,6 +129,15 @@ export class WorldPersistenceService {
   private closed = false;
   private entityHooks: PersistenceEntityHooks | null = null;
   private simulationTickProvider: () => number = () => 0;
+  private performanceStats: PersistencePerformanceStats = {
+    lastChunkEncodeMs: 0,
+    lastChunkWriteMs: 0,
+    lastChunkReadMs: 0,
+    lastChunkDecodeMs: 0,
+    lastMetadataWriteMs: 0,
+    lastMetadataReadMs: 0,
+    lastFlushBarrierMs: 0,
+  };
 
   public constructor(options: WorldPersistenceServiceOptions) {
     this.backend = options.backend;
@@ -171,6 +190,10 @@ export class WorldPersistenceService {
     return this.closed;
   }
 
+  public getPerformanceStats(): PersistencePerformanceStats {
+    return this.performanceStats;
+  }
+
   public getStats(): WorldPersistenceStats {
     return {
       worldId: this.worldId,
@@ -208,7 +231,9 @@ export class WorldPersistenceService {
     if (guardError !== undefined) return Promise.reject(guardError);
     const worldId = this.worldId!;
     return this.readExec.enqueue(async () => {
+      const readStart = performance.now();
       const bytes = await this.backend.readRecord(worldId, METADATA_KEY);
+      this.performanceStats = { ...this.performanceStats, lastMetadataReadMs: performance.now() - readStart };
       if (bytes === undefined) {
         this.metadata = null;
         return undefined;
@@ -238,8 +263,10 @@ export class WorldPersistenceService {
     this.metadataWriteInFlight = true;
     this.notifyChange();
     const task = this.writeExec.enqueue(async () => {
+      const metadataStart = performance.now();
       const bytes = encodeWorldMetadata(metadata);
       await this.backend.writeRecord(worldId, METADATA_KEY, bytes);
+      this.performanceStats = { ...this.performanceStats, lastMetadataWriteMs: performance.now() - metadataStart };
     }, priority);
     return task.then(
       () => {
@@ -267,9 +294,14 @@ export class WorldPersistenceService {
     if (guardError !== undefined) return Promise.reject(guardError);
     const worldId = this.worldId!;
     return this.readExec.enqueue(async () => {
+      const readStart = performance.now();
       const bytes = await this.backend.readChunk(worldId, chunkX, chunkZ);
+      this.performanceStats = { ...this.performanceStats, lastChunkReadMs: performance.now() - readStart };
       if (bytes === undefined) return undefined;
-      return await this.decodeChunkRecord(bytes, chunkX, chunkZ, worldId);
+      const decodeStart = performance.now();
+      const chunk = await this.decodeChunkRecord(bytes, chunkX, chunkZ, worldId);
+      this.performanceStats = { ...this.performanceStats, lastChunkDecodeMs: performance.now() - decodeStart };
+      return chunk;
     });
   }
 
@@ -293,8 +325,12 @@ export class WorldPersistenceService {
     this.notifyChange();
     const task = this.writeExec.enqueue(async () => {
       const snapshotRevision = chunk.getPersistenceRevision();
+      const encodeStart = performance.now();
       const recordBytes = await this.encodeChunkRecord(chunk, snapshotRevision);
+      this.performanceStats = { ...this.performanceStats, lastChunkEncodeMs: performance.now() - encodeStart };
+      const writeStart = performance.now();
       await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes);
+      this.performanceStats = { ...this.performanceStats, lastChunkWriteMs: performance.now() - writeStart };
       // Captured-revision invariant: clean only if still at the captured revision.
       if (chunk.getPersistenceRevision() === snapshotRevision) {
         chunk.markPersistenceClean(snapshotRevision);
@@ -392,9 +428,13 @@ export class WorldPersistenceService {
     const task = this.writeExec.enqueue(async () => {
       if (state.canceled) return;
       const snapshotRevision = chunk.getPersistenceRevision();
+      const encodeStart = performance.now();
       const recordBytes = await this.encodeChunkRecord(chunk, snapshotRevision);
+      this.performanceStats = { ...this.performanceStats, lastChunkEncodeMs: performance.now() - encodeStart };
       if (state.canceled) return;
+      const writeStart = performance.now();
       await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes);
+      this.performanceStats = { ...this.performanceStats, lastChunkWriteMs: performance.now() - writeStart };
       if (chunk.getPersistenceRevision() === snapshotRevision) {
         chunk.markPersistenceClean(snapshotRevision);
       }
@@ -480,8 +520,13 @@ export class WorldPersistenceService {
   }
 
   /** Resolves once every write accepted so far has settled; rejects on any covered failure. */
-  public flushBarrier(): Promise<void> {
-    return this.writeExec.flushBarrier();
+  public async flushBarrier(): Promise<void> {
+    const start = performance.now();
+    try {
+      await this.writeExec.flushBarrier();
+    } finally {
+      this.performanceStats = { ...this.performanceStats, lastFlushBarrierMs: performance.now() - start };
+    }
   }
 
   /**

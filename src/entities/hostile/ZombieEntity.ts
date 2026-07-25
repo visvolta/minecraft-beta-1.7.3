@@ -1,6 +1,6 @@
 import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
 import { EntityTypeIds } from '../core/EntityType';
-import type { NbtCompound, NbtTag } from '../../persistence/nbt/Nbt';
+import type { NbtCompound, NbtTag } from '../../nbt/Nbt';
 import { BipedHostileEntity } from './BipedHostileEntity';
 import { ZombieModel } from './models/ZombieModel';
 import type { Drop } from '../items/BlockDropResolver';

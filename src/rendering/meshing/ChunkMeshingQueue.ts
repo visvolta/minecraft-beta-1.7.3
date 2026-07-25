@@ -7,6 +7,7 @@ import type {
   ChunkMeshJob,
   ChunkMeshResult,
   MeshAttributeBuffers,
+  PopulatedMeshAttributeBuffers,
 } from './ChunkMeshJobTypes';
 
 interface PendingMeshJob {
@@ -22,6 +23,9 @@ interface ActiveMeshJob {
   readonly targetRevision: number;
   readonly priority: number;
   readonly enqueuedAtMs: number;
+  readonly sentAtMs: number;
+  readonly bytesTransferred: number;
+  readonly bytesCopied: number;
   readonly worker: Worker;
 }
 
@@ -36,6 +40,18 @@ export interface ChunkMeshQueueStats {
   readonly maxDurationMs: number;
   readonly uploadTimeMs: number;
   readonly workerCount: number;
+  readonly jobBuildMs: number;
+  readonly dispatchMs: number;
+  readonly resultDrainMs: number;
+  readonly geometryCreationMs: number;
+  readonly lastWorkerDurationMs: number;
+  readonly bytesCopied: number;
+  readonly bytesTransferred: number;
+  readonly bytesReturned: number;
+  readonly totalBytesCopied: number;
+  readonly totalBytesTransferred: number;
+  readonly totalBytesReturned: number;
+  readonly transferLatencyMs: number;
 }
 
 export interface ChunkMeshGeometrySet {
@@ -52,7 +68,32 @@ export interface ChunkMeshGeometrySet {
 
 import { chunkKey } from '../../world/chunkKey';
 
+function emptyGeometryFromBuffers(): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
+  geometry.setAttribute('normalColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('debugColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('aoColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
+  geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+  geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
+  geometry.setAttribute('color', geometry.getAttribute('normalColor'));
+  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(), 1));
+  return geometry;
+}
+
+function isPopulatedMeshAttributeBuffers(buffers: MeshAttributeBuffers): buffers is PopulatedMeshAttributeBuffers {
+  return buffers.empty !== true;
+}
+
 function geometryFromBuffers(buffers: MeshAttributeBuffers): THREE.BufferGeometry {
+  if (!isPopulatedMeshAttributeBuffers(buffers)) return emptyGeometryFromBuffers();
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(buffers.positions), 3));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(buffers.normals), 3));
@@ -93,6 +134,17 @@ export class ChunkMeshingQueue {
   private totalDuration = 0;
   private maxDuration = 0;
   private lastUploadTime = 0;
+  private lastJobBuildMs = 0;
+  private lastDispatchMs = 0;
+  private lastDrainMs = 0;
+  private lastWorkerDurationMs = 0;
+  private lastBytesCopied = 0;
+  private lastBytesTransferred = 0;
+  private lastBytesReturned = 0;
+  private totalBytesCopied = 0;
+  private totalBytesTransferred = 0;
+  private totalBytesReturned = 0;
+  private lastTransferLatencyMs = 0;
 
   public constructor(chunkManager: ChunkManager, atlas: TextureAtlas, private readonly worldSeed: bigint) {
     this.chunkManager = chunkManager;
@@ -236,6 +288,18 @@ export class ChunkMeshingQueue {
       maxDurationMs: this.maxDuration,
       uploadTimeMs: this.lastUploadTime,
       workerCount: this.workers.length,
+      jobBuildMs: this.lastJobBuildMs,
+      dispatchMs: this.lastDispatchMs,
+      resultDrainMs: this.lastDrainMs,
+      geometryCreationMs: this.lastUploadTime,
+      lastWorkerDurationMs: this.lastWorkerDurationMs,
+      bytesCopied: this.lastBytesCopied,
+      bytesTransferred: this.lastBytesTransferred,
+      bytesReturned: this.lastBytesReturned,
+      totalBytesCopied: this.totalBytesCopied,
+      totalBytesTransferred: this.totalBytesTransferred,
+      totalBytesReturned: this.totalBytesReturned,
+      transferLatencyMs: this.lastTransferLatencyMs,
     };
   }
 
@@ -278,11 +342,16 @@ export class ChunkMeshingQueue {
       this.idleWorkers.length = 0;
       this.active.clear();
     };
+    worker.postMessage({ type: 'init', atlasUvs: this.atlas.getAllUvRects().map(([name, rect]) => ({ name, rect })), worldSeed: this.worldSeed.toString() });
     this.workers.push(worker);
     this.idleWorkers.push(worker);
   }
 
   private dispatch(): void {
+    const dispatchStart = performance.now();
+    this.lastJobBuildMs = 0;
+    this.lastBytesCopied = 0;
+    this.lastBytesTransferred = 0;
     while (this.idleWorkers.length > 0) {
       const next = this.takeNextPending();
       if (next === undefined) return;
@@ -294,13 +363,25 @@ export class ChunkMeshingQueue {
       const worker = this.idleWorkers.pop()!;
       const jobId = this.nextJobId++;
       const revision = chunk.getRevision();
+      const jobStart = performance.now();
       const job = this.buildJob(jobId, chunk, revision);
+      const jobBuildMs = performance.now() - jobStart;
+      this.lastJobBuildMs += jobBuildMs;
+      const bytesTransferred = this.snapshotBytes(job);
+      const bytesCopied = bytesTransferred;
+      this.lastBytesCopied += bytesCopied;
+      this.lastBytesTransferred += bytesTransferred;
+      this.totalBytesCopied += bytesCopied;
+      this.totalBytesTransferred += bytesTransferred;
       this.active.set(jobId, {
         chunkX: chunk.chunkX,
         chunkZ: chunk.chunkZ,
         targetRevision: revision,
         priority: next.priority,
         enqueuedAtMs: next.enqueuedAtMs,
+        sentAtMs: performance.now(),
+        bytesTransferred,
+        bytesCopied,
         worker,
       });
       const mapKey = chunkKey(chunk.chunkX, chunk.chunkZ);
@@ -311,14 +392,25 @@ export class ChunkMeshingQueue {
       }
       worker.postMessage(job, transfers);
     }
+    this.lastDispatchMs = performance.now() - dispatchStart;
   }
 
   private drainResults(): void {
+    const drainStart = performance.now();
+    this.lastBytesReturned = 0;
+    this.lastTransferLatencyMs = 0;
     while (this.completedResults.length > 0) {
       const result = this.completedResults.shift()!;
       const active = this.active.get(result.jobId);
       this.active.delete(result.jobId);
-      if (active !== undefined) this.idleWorkers.push(active.worker);
+      if (active !== undefined) {
+        this.idleWorkers.push(active.worker);
+        this.lastWorkerDurationMs = result.durationMs;
+        this.lastTransferLatencyMs = Math.max(0, performance.now() - active.sentAtMs - result.durationMs);
+      }
+      const returnedBytes = this.resultBytes(result);
+      this.lastBytesReturned += returnedBytes;
+      this.totalBytesReturned += returnedBytes;
       const chunk = this.chunkManager.getChunk(result.chunkX, result.chunkZ);
       if (active === undefined || chunk === undefined || chunk.getRevision() !== result.targetRevision) {
         this.recordStale(result.chunkX, result.chunkZ);
@@ -331,6 +423,7 @@ export class ChunkMeshingQueue {
       this.pendingUploads.push(result);
       this.pendingUploadKeys.add(this.revisionKey(result.chunkX, result.chunkZ, result.targetRevision));
     }
+    this.lastDrainMs = performance.now() - drainStart;
   }
 
   private buildJob(jobId: number, target: Chunk, revision: number): ChunkMeshJob {
@@ -359,9 +452,38 @@ export class ChunkMeshingQueue {
       targetChunkZ: target.chunkZ,
       targetRevision: revision,
       chunks,
-      atlasUvs: this.atlas.getAllUvRects().map(([name, rect]) => ({ name, rect })),
-      worldSeed: this.worldSeed.toString(),
     };
+  }
+
+
+  private snapshotBytes(job: ChunkMeshJob): number {
+    let total = 0;
+    for (const snapshot of job.chunks) {
+      total += snapshot.blocks.byteLength + snapshot.metadata.byteLength + snapshot.light.byteLength;
+    }
+    return total;
+  }
+
+  private resultBytes(result: ChunkMeshResult): number {
+    let total = 0;
+    for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.fire, result.translucent]) {
+      if (!isPopulatedMeshAttributeBuffers(mesh)) continue;
+      total += mesh.positions.byteLength;
+      total += mesh.normals.byteLength;
+      total += mesh.uvs.byteLength;
+      total += mesh.normalColors.byteLength;
+      total += mesh.debugColors.byteLength;
+      total += mesh.aoColors.byteLength;
+      total += mesh.tintColors.byteLength;
+      total += mesh.skyLightLevels.byteLength;
+      total += mesh.blockLightLevels.byteLength;
+      total += mesh.aoFactorScalars.byteLength;
+      total += mesh.faceBrightness.byteLength;
+      total += mesh.fluidTextureKinds.byteLength;
+      total += mesh.fluidFrameUvs.byteLength;
+      total += mesh.indices.byteLength;
+    }
+    return total;
   }
 
   private removePendingUploadsForChunk(chunkX: number, chunkZ: number): void {

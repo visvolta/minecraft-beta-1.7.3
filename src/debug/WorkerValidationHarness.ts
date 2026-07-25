@@ -11,7 +11,7 @@ import { LightEngine } from '../world/generation/lighting/LightEngine';
 import { ChunkMesher } from '../rendering/ChunkMesher';
 import type { TextureAtlas } from '../assets/TextureAtlas';
 import type { ChunkGenerationJob, ChunkGenerationResult, ChunkWorkerError } from '../world/streaming/ChunkJobTypes';
-import type { ChunkMeshJob, ChunkMeshResult, ChunkMeshWorkerError, MeshAttributeBuffers } from '../rendering/meshing/ChunkMeshJobTypes';
+import type { ChunkMeshJob, ChunkMeshResult, ChunkMeshWorkerError, MeshAttributeBuffers, PopulatedMeshAttributeBuffers } from '../rendering/meshing/ChunkMeshJobTypes';
 
 const VALIDATION_CHUNKS: ReadonlyArray<readonly [number, number]> = [
   [0, 0], [1, 2], [-3, -1], [4, -5], [8, 8], [-8, 7], [12, -12], [13, -12], [12, -13],
@@ -110,20 +110,26 @@ export class WorkerValidationHarness {
   }
 
   private compareGeometry(expected: THREE.BufferGeometry, actual: MeshAttributeBuffers, label: string): string | null {
+    if (actual.empty === true) {
+      const expectedVertexCount = expected.getAttribute('position')?.count ?? 0;
+      const expectedIndexCount = expected.getIndex()?.count ?? 0;
+      return expectedVertexCount === 0 && expectedIndexCount === 0 ? null : `${label} expected non-empty geometry, worker returned empty`;
+    }
+    const populated: PopulatedMeshAttributeBuffers = actual;
     const checks: Array<[string, Float32Array, Float32Array, number]> = [
-      ['position', expected.getAttribute('position')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.positions), 1e-6],
-      ['normal', expected.getAttribute('normal')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.normals), 1e-6],
-      ['uv', expected.getAttribute('uv')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.uvs), 1e-6],
-      ['normalColor', expected.getAttribute('normalColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.normalColors), 1e-5],
-      ['debugColor', expected.getAttribute('debugColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.debugColors), 1e-5],
-      ['aoColor', expected.getAttribute('aoColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.aoColors), 1e-5],
-      ['tintColor', expected.getAttribute('tintColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.tintColors), 1e-5],
-      ['skyLightLevel', expected.getAttribute('skyLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.skyLightLevels), 0],
-      ['blockLightLevel', expected.getAttribute('blockLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.blockLightLevels), 0],
-      ['aoFactorScalar', expected.getAttribute('aoFactorScalar')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.aoFactorScalars), 1e-5],
-      ['faceBrightness', expected.getAttribute('faceBrightness')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.faceBrightness), 1e-5],
-      ['fluidTextureKind', expected.getAttribute('fluidTextureKind')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.fluidTextureKinds), 0],
-      ['fluidFrameUv', expected.getAttribute('fluidFrameUv')?.array as Float32Array ?? new Float32Array(), new Float32Array(actual.fluidFrameUvs), 1e-6],
+      ['position', expected.getAttribute('position')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.positions), 1e-6],
+      ['normal', expected.getAttribute('normal')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.normals), 1e-6],
+      ['uv', expected.getAttribute('uv')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.uvs), 1e-6],
+      ['normalColor', expected.getAttribute('normalColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.normalColors), 1e-5],
+      ['debugColor', expected.getAttribute('debugColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.debugColors), 1e-5],
+      ['aoColor', expected.getAttribute('aoColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.aoColors), 1e-5],
+      ['tintColor', expected.getAttribute('tintColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.tintColors), 1e-5],
+      ['skyLightLevel', expected.getAttribute('skyLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.skyLightLevels), 0],
+      ['blockLightLevel', expected.getAttribute('blockLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.blockLightLevels), 0],
+      ['aoFactorScalar', expected.getAttribute('aoFactorScalar')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.aoFactorScalars), 1e-5],
+      ['faceBrightness', expected.getAttribute('faceBrightness')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.faceBrightness), 1e-5],
+      ['fluidTextureKind', expected.getAttribute('fluidTextureKind')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.fluidTextureKinds), 0],
+      ['fluidFrameUv', expected.getAttribute('fluidFrameUv')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.fluidFrameUvs), 1e-6],
     ];
     for (const [name, a, b, epsilon] of checks) {
       if (a.length !== b.length) return `${label}.${name} length mismatch ${a.length} !== ${b.length}`;
@@ -137,7 +143,7 @@ export class WorkerValidationHarness {
     if (expectedVertexCount !== actual.vertexCount) return `${label}.vertexCount mismatch ${expectedVertexCount} !== ${actual.vertexCount}`;
     const expectedIndex = expected.getIndex()?.array as ArrayLike<number> | undefined;
     const expectedIndices = expectedIndex === undefined ? new Uint32Array() : new Uint32Array(expectedIndex);
-    const actualIndices = new Uint32Array(actual.indices);
+    const actualIndices = new Uint32Array(populated.indices);
     if (expectedIndices.length !== actualIndices.length) return `${label}.indices length mismatch ${expectedIndices.length} !== ${actualIndices.length}`;
     for (let i = 0; i < expectedIndices.length; i++) {
       if (expectedIndices[i] !== actualIndices[i]) return `${label}.indices[${i}] mismatch: ${expectedIndices[i]} !== ${actualIndices[i]}`;
