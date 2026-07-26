@@ -90,7 +90,11 @@ export const ANIMATION_IDLE_ARM_Z_AMPLITUDE = 0.05;
 export const ANIMATION_IDLE_ARM_X_FREQUENCY = 1.34;
 export const ANIMATION_IDLE_ARM_X_AMPLITUDE = 0.05;
 
-export const ANIMATION_AIRBORNE_ARM_ROTATION = -0.2;
+/**
+ * Unused: Beta applies no airborne arm offset (see ModelBiped). Kept at 0 so
+ * any future caller cannot reintroduce the backward-arm pose by accident.
+ */
+export const ANIMATION_AIRBORNE_ARM_ROTATION = 0;
 export const ANIMATION_AIRBORNE_LEG_ROTATION = -0.2;
 
 // View Bobbing (Camera)

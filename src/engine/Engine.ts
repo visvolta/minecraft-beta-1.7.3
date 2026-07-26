@@ -139,6 +139,7 @@ import { BoatRenderer } from '../rendering/BoatRenderer';
 import { registerBedBehaviour } from '../world/behaviours/BedBehaviour';
 import { SleepController, sleepPoseFor, type WakeReason } from '../player/SleepController';
 import { SleepOverlayRenderer } from '../player/SleepOverlayRenderer';
+import { FishingLineRenderer } from '../rendering/FishingLineRenderer';
 import { BED_FOOT_TO_HEAD } from '../blocks/shapes/BlockShapes';
 import { FirstPersonHeldItemRenderer } from '../rendering/FirstPersonHeldItemRenderer.ts';
 import { FirstPersonMotionController } from '../player/FirstPersonMotionController';
@@ -458,6 +459,7 @@ export class Engine {
     });
     this.minecartRenderSystem = new MinecartRenderSystem(this.entityManager, this.renderer.scene, this.entityTextures);
     this.boatRenderer = new BoatRenderer(this.renderer.scene, this.entityTextures.get('boat'));
+    this.fishingLine = new FishingLineRenderer(this.renderer.scene);
     this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng, (x, y, z) => this.audioManager.play({ type: 'random.explode', x, y, z }));
 
     this.persistence.setEntityHooks({
@@ -1168,6 +1170,7 @@ export class Engine {
       this.playerModel.dispose();
       this.minecartRenderSystem.dispose();
       this.boatRenderer.dispose();
+      this.fishingLine.dispose();
       this.endSleep('teardown');
       this.sleepOverlay.dispose();
       this.entityManager.dispose();
@@ -1285,6 +1288,7 @@ export class Engine {
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
     this.updateAnimatedItemIcons();
     this.updateSleepPresentation();
+    this.updateFishingLine();
     if (this.animatedIconsDirty) {
       this.animatedIconsDirty = false;
       this.refreshOpenContainerIcons();
@@ -1319,11 +1323,16 @@ export class Engine {
       this.firstPersonMotionController.update(camera, this.player, this.firstPersonArmRenderer, 1.0);
       const hasHeldContent = this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
       this.firstPersonArmRenderer.setArmMeshVisible(!hasHeldContent);
-      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds);
+      const holdingItem = this.inventory.getStack(this.selectedSlot) !== null;
+      this.applyHeldItemVisibility(holdingItem);
+      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds, holdingItem);
     } else {
       this.playerModel.setVisible(true); this.playerModel.setFirstPersonMode(false); this.firstPersonArmRenderer.setVisible(false);
       this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
-      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds);
+      // Keep the third-person held item in step with the current slot.
+      const holdingItem = this.inventory.getStack(this.selectedSlot) !== null;
+      this.applyHeldItemVisibility(holdingItem);
+      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds, holdingItem);
     }
     this.playerArmourRenderer.sync();
 
@@ -1677,7 +1686,7 @@ export class Engine {
 
   private updateHeldItemMesh(): void {
     const stack = this.inventory.getStack(this.selectedSlot);
-    if (stack === null) { this.firstPersonHeldBlockMesh.visible = false; this.thirdPersonHeldBlockMesh.visible = false; } else {
+    if (stack === null) { this.applyHeldItemVisibility(false); } else {
       const category = classifyItemRender(stack.identity, this.blockRegistry); const def = this.blockRegistry.getById(stack.identity.id as number);
       if (category === 'unsupported') {
         const newGeo = BlockItemModelBuilder.buildDebugPlaceholder();
@@ -1692,13 +1701,31 @@ export class Engine {
         this.firstPersonHeldBlockMesh.geometry.dispose(); this.firstPersonHeldBlockMesh.geometry = newGeo; this.firstPersonHeldBlockMesh.material = this.heldBlockMaterial;
         this.thirdPersonHeldBlockMesh.geometry.dispose(); this.thirdPersonHeldBlockMesh.geometry = newGeo.clone(); this.thirdPersonHeldBlockMesh.material = this.heldBlockMaterial;
       } else {
-        const uvRect = this.itemAtlas.getUvRect(stack.identity.id as string); const u0 = uvRect?.u0 ?? 0; const v0 = uvRect?.v0 ?? 0; const u1 = uvRect?.u1 ?? 1; const v1 = uvRect?.v1 ?? 1;
+        // Resolve through the icon resolver so numeric ids work, and keep the
+        // held clock/compass on the same animated frame the HUD shows.
+        const iconName = this.hotbarHudRenderer.getSlotContentRenderer()['itemIcons'].resolveTextureName(stack.identity.id);
+        const uvRect = this.itemAtlas.getUvRect(iconName) ?? this.itemAtlas.getUvRect(stack.identity.id as string);
+        const u0 = uvRect?.u0 ?? 0; const v0 = uvRect?.v0 ?? 0; const u1 = uvRect?.u1 ?? 1; const v1 = uvRect?.v1 ?? 1;
         const newGeo = this.createBillboardGeometry(u0, v0, u1, v1, uvRect === undefined);
         this.firstPersonHeldBlockMesh.geometry.dispose(); this.firstPersonHeldBlockMesh.geometry = newGeo; this.firstPersonHeldBlockMesh.material = this.itemHeldMaterial;
         this.thirdPersonHeldBlockMesh.geometry.dispose(); this.thirdPersonHeldBlockMesh.geometry = newGeo.clone(); this.thirdPersonHeldBlockMesh.material = this.itemHeldMaterial;
       }
-      this.firstPersonHeldBlockMesh.visible = false; this.thirdPersonHeldBlockMesh.visible = false;
+      // Visibility is owned by applyHeldItemVisibility(), which follows the
+      // camera mode. Previously both meshes were forced hidden here, so the
+      // third-person player never appeared to hold anything.
+      this.applyHeldItemVisibility(true);
     }
+  }
+
+  /**
+   * Shows the held item on the third-person player model only when the camera
+   * is actually in third person. The first-person copy lives in a separate
+   * overlay scene and is driven by FirstPersonHeldItemRenderer.
+   */
+  private applyHeldItemVisibility(hasItem: boolean): void {
+    const thirdPerson = this.cameraModeController.getMode() !== CameraMode.FIRST_PERSON;
+    this.thirdPersonHeldBlockMesh.visible = hasItem && thirdPerson;
+    this.firstPersonHeldBlockMesh.visible = false;
   }
 
   private createBillboardGeometry(u0: number, v0: number, u1: number, v1: number, isMissing = false): THREE.BufferGeometry {
@@ -1715,6 +1742,7 @@ export class Engine {
   /** Owns the Beta sleep timeline, camera pose and screen fade. */
   private readonly sleepController = new SleepController();
   private readonly sleepOverlay = new SleepOverlayRenderer();
+  private readonly fishingLine: FishingLineRenderer;
 
   /**
    * Beta `EntityPlayer.sleepInBedAt` success path.
@@ -1837,6 +1865,58 @@ export class Engine {
    * the shipped strip instead, so the atlas is only re-uploaded when the frame
    * actually changes.
    */
+  /**
+   * Draws the line from the rod in the player's hand to the bobber, and hides
+   * it the instant the bobber is gone.
+   */
+  private updateFishingLine(): void {
+    const bobber = this.interactionController.getActiveBobber();
+    if (bobber === null) {
+      this.fishingLine.clear();
+      return;
+    }
+    // Beta `RenderFish` anchors the line differently per camera mode.
+    //
+    // Third person uses the body yaw with a fixed hand offset:
+    //   x -= cos(yaw) * 0.35 + sin(yaw) * 0.85
+    //   y -= 0.45
+    //   z -= sin(yaw) * 0.35 - cos(yaw) * 0.85
+    // First person rotates the hand vector (-0.5, 0.03, 0.8) by the view
+    // angles. In first person the rod itself is drawn by the held-item
+    // renderer, so the line starts at the rod tip just below and right of
+    // centre rather than at the player origin.
+    //
+    // The camera yaw is offset 180 degrees from Beta's rotationYaw, so the
+    // Beta formulas are fed the converted angle; using the raw camera yaw
+    // anchors the line out of the player's back.
+    const betaYaw = this.cameraController.getYaw() + Math.PI;
+    const sinYaw = Math.sin(betaYaw);
+    const cosYaw = Math.cos(betaYaw);
+
+    let handX: number;
+    let handY: number;
+    let handZ: number;
+    if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
+      // Beta's rotated hand vector, reduced to the horizontal terms that
+      // matter for a line the player sees from behind its origin.
+      const right = -0.3;
+      const forward = 0.8;
+      handX = this.player.position.x - sinYaw * forward + cosYaw * right;
+      handY = this.player.getEyeY() - 0.18;
+      handZ = this.player.position.z + cosYaw * forward + sinYaw * right;
+    } else {
+      handX = this.player.position.x - cosYaw * 0.35 - sinYaw * 0.85;
+      handY = this.player.getEyeY() - 0.45;
+      handZ = this.player.position.z - sinYaw * 0.35 + cosYaw * 0.85;
+    }
+
+    this.fishingLine.update(
+      { x: handX, y: handY, z: handZ },
+      // Beta draws the line to the bobber's centre, offset a quarter block up.
+      { x: bobber.position.x, y: bobber.position.y + 0.25, z: bobber.position.z },
+    );
+  }
+
   /** Set when a clock/compass frame changed and open UIs need a redraw. */
   private animatedIconsDirty = false;
 

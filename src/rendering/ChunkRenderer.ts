@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RENDER_ORDER } from './RenderOrder';
 import type { Chunk } from '../world/Chunk';
 import type { ChunkManager } from '../world/ChunkManager';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from '../world/chunkConstants';
@@ -466,42 +467,42 @@ export class ChunkRenderer {
 
     this.terrainGroup = new THREE.Group();
     this.terrainGroup.name = 'chunks-terrain';
-    this.terrainGroup.renderOrder = 0;
+    this.terrainGroup.renderOrder = RENDER_ORDER.terrain;
     scene.add(this.terrainGroup);
 
     this.cutoutGroup = new THREE.Group();
     this.cutoutGroup.name = 'chunks-cutouts';
-    this.cutoutGroup.renderOrder = 10;
+    this.cutoutGroup.renderOrder = RENDER_ORDER.cutout;
     scene.add(this.cutoutGroup);
 
     this.translucentDepthGroup = new THREE.Group();
     this.translucentDepthGroup.name = 'chunks-translucent-depth';
-    this.translucentDepthGroup.renderOrder = 19;
+    this.translucentDepthGroup.renderOrder = RENDER_ORDER.translucentDepth;
     scene.add(this.translucentDepthGroup);
 
     this.waterDepthGroup = new THREE.Group();
     this.waterDepthGroup.name = 'chunks-water-depth';
-    this.waterDepthGroup.renderOrder = 19;
+    this.waterDepthGroup.renderOrder = RENDER_ORDER.translucentDepth;
     scene.add(this.waterDepthGroup);
 
     this.lavaDepthGroup = new THREE.Group();
     this.lavaDepthGroup.name = 'chunks-lava-depth';
-    this.lavaDepthGroup.renderOrder = 19;
+    this.lavaDepthGroup.renderOrder = RENDER_ORDER.translucentDepth;
     scene.add(this.lavaDepthGroup);
 
     this.translucentGroup = new THREE.Group();
     this.translucentGroup.name = 'chunks-translucent';
-    this.translucentGroup.renderOrder = 20;
+    this.translucentGroup.renderOrder = RENDER_ORDER.translucent;
     scene.add(this.translucentGroup);
 
     this.waterGroup = new THREE.Group();
     this.waterGroup.name = 'chunks-water';
-    this.waterGroup.renderOrder = 21;
+    this.waterGroup.renderOrder = RENDER_ORDER.water;
     scene.add(this.waterGroup);
 
     this.lavaGroup = new THREE.Group();
     this.lavaGroup.name = 'chunks-lava';
-    this.lavaGroup.renderOrder = 22;
+    this.lavaGroup.renderOrder = RENDER_ORDER.lava;
     scene.add(this.lavaGroup);
 
     this.fireMaterial = new THREE.MeshBasicMaterial({

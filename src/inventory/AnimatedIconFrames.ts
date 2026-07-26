@@ -76,18 +76,18 @@ export class AnimatedIconFrames {
     return true;
   }
 
-  public getFrame(id: AnimatedIconId): number {
-    return this.currentFrame.get(id) ?? 0;
+  public getFrame(id: string): number {
+    return this.currentFrame.get(id as AnimatedIconId) ?? 0;
   }
 
   /**
    * Data URL for the current frame, or null while the strip is still
    * loading. Callers fall back to their normal path until then.
    */
-  public getCurrentFrameUrl(id: AnimatedIconId): string | null {
-    const state = this.strips.get(id);
+  public getCurrentFrameUrl(id: string): string | null {
+    const state = this.strips.get(id as AnimatedIconId);
     if (state === undefined || !state.loaded) return null;
-    const frame = this.currentFrame.get(id) ?? 0;
+    const frame = this.currentFrame.get(id as AnimatedIconId) ?? 0;
     const cached = state.frames.get(frame);
     if (cached !== undefined) return cached;
 

@@ -639,8 +639,8 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.SnowBlock, 'snow_block', 'Snow Block', { all: 'snow' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Torch, 'torch', 'Torch', { all: 'torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', lightEmission: 14 });
   registerSimple(BlockIds.Ladder, 'ladder', 'Ladder', { all: 'ladder' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
-  registerSimple(BlockIds.SignPost, 'sign_post', 'Sign', { all: 'oak_side' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
-  registerSimple(BlockIds.WallSign, 'wall_sign', 'Wall Sign', { all: 'oak_side' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
+  registerSimple(BlockIds.SignPost, 'sign_post', 'Sign', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
+  registerSimple(BlockIds.WallSign, 'wall_sign', 'Wall Sign', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
   registerSimple(BlockIds.StoneButton, 'stone_button', 'Stone Button', { all: 'stone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.Lever, 'lever', 'Lever', { all: 'lever' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.StonePressurePlate, 'stone_pressure_plate', 'Stone Pressure Plate', { all: 'stone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });

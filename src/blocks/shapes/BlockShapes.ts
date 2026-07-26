@@ -295,6 +295,54 @@ export function isBedHead(metadata: number): boolean {
   return (metadata & 8) !== 0;
 }
 
+/**
+ * Beta `ModelBed.headInvisibleFace` / `footInvisibleFaceRemap`.
+ *
+ * Face numbering follows Beta: 2 = -Z, 3 = +Z, 4 = -X, 5 = +X.
+ */
+export const BED_HEAD_INVISIBLE_FACE: readonly number[] = [3, 4, 2, 5];
+export const BED_FOOT_REMAP: readonly number[] = [2, 3, 0, 1];
+
+/** Unit offset for a Beta side-face number. */
+export const BED_FACE_OFFSET: Readonly<Record<number, readonly [number, number]>> = {
+  2: [0, -1],
+  3: [0, 1],
+  4: [-1, 0],
+  5: [1, 0],
+};
+
+/**
+ * The face joining the two halves of a bed — the one that must not be drawn,
+ * or a seam appears down the middle of the bed.
+ *
+ * The foot looks along the facing direction toward the head; the head looks
+ * back at the foot, so it goes through Beta's remap table.
+ */
+export function bedHiddenFace(direction: number, head: boolean): number {
+  const dir = direction & 3;
+  return head
+    ? BED_HEAD_INVISIBLE_FACE[BED_FOOT_REMAP[dir]!]!
+    : BED_HEAD_INVISIBLE_FACE[dir]!;
+}
+
+/**
+ * The outward end board of a bed half — always the face opposite the joint,
+ * so the head board and foot board both point away from the bed's middle.
+ */
+export function bedOutwardFace(direction: number, head: boolean): number {
+  return bedHiddenFace(direction, !head);
+}
+
+/** Beta's per-direction "which side face gets mirrored" selector. */
+export function bedFlippedFace(direction: number): number {
+  switch (direction & 3) {
+    case 0: return 5;
+    case 1: return 3;
+    case 3: return 2;
+    default: return 4;
+  }
+}
+
 /** Direction offset from this bed block toward its partner half. */
 export function bedPartnerOffset(metadata: number): readonly [number, number] {
   const direction = BED_FOOT_TO_HEAD[metadata & 3] ?? [0, 1];

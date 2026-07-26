@@ -27,7 +27,15 @@ import { getBetaFluidCornerHeight } from './fluid/FluidSurfaceGeometry';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import { ChunkPassMask, classifyBlockPassMask, hasChunkPass } from './meshing/ChunkPassMask';
 import { getRailShapeForBlock } from '../world/rails/RailShapes';
-import { BED_HEIGHT, fenceSelectionShapes, stairShapes } from '../blocks/shapes/BlockShapes';
+import {
+  BED_HEIGHT,
+  bedFlippedFace,
+  bedHiddenFace,
+  bedOutwardFace,
+  doorShape,
+  fenceSelectionShapes,
+  stairShapes,
+} from '../blocks/shapes/BlockShapes';
 
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
@@ -2075,15 +2083,12 @@ export class ChunkMesher {
       }
     }
 
-    const state = (baseMeta & 4) === 0 ? (baseMeta - 1) & 3 : baseMeta & 3;
-    const thickness = 3 / 16;
-    
-    let minX = 0, minZ = 0, maxX = 1, maxZ = 1;
-    
-    if (state === 0) { minX = 0; maxX = 1; minZ = 0; maxZ = thickness; }
-    else if (state === 1) { minX = 1 - thickness; maxX = 1; minZ = 0; maxZ = 1; }
-    else if (state === 2) { minX = 0; maxX = 1; minZ = 1 - thickness; maxZ = 1; }
-    else if (state === 3) { minX = 0; maxX = thickness; minZ = 0; maxZ = 1; }
+    // Read the panel straight from the shared shape declaration, so the
+    // rendered door and its collision/selection box can never disagree.
+    // (This previously duplicated the state maths with its own thickness.)
+    const panel = doorShape(baseMeta);
+    const minX = panel.minX, maxX = panel.maxX;
+    const minZ = panel.minZ, maxZ = panel.maxZ;
 
     const textureName = resolveBlockTexture(definition, 'side') || 'door_wood_lower';
     let actualTexture = textureName;
@@ -2372,13 +2377,19 @@ export class ChunkMesher {
   }
 
   /**
-   * Beta bed: a 9/16-tall slab whose top face uses the head or foot texture
-   * rotated to the bed's facing, with matching side and end textures.
+   * Beta 1.7.3 bed (`RenderBlocks.renderBlockBed`).
    *
-   * Beta renders this via `RenderBlocks.renderBlockBed`, picking texture
-   * indices per face from the metadata. The block previously fell through to
-   * the generic cutout cube path, so it was a full-height block with the
-   * wrong faces.
+   * The bed is a single 9/16-tall box per half. Beta draws:
+   *  - the top surface at `maxY` (0.5625) with the head/foot top texture,
+   *    rotated per direction via the `bedDirection` table;
+   *  - an underside plank quad at `minY + 0.1875`;
+   *  - four side faces, of which the one joining the two halves is skipped
+   *    (`ModelBed.headInvisibleFace`), which is what stops the seam showing;
+   *  - two of the side faces mirrored (`flipTexture`) so the wood grain runs
+   *    continuously across both halves.
+   *
+   * The previous version drew a floating top and never skipped the joining
+   * face or mirrored the sides, which is the gap visible in the screenshot.
    */
   private buildBed(
     buffers: MeshBuffers,
@@ -2387,71 +2398,91 @@ export class ChunkMesher {
     definition: BlockDefinition,
   ): void {
     const metadata = chunk.getBlockMetadata(x, y, z);
-    const head = (metadata & 8) !== 0;
-    const facing = metadata & 3;
-    const height = BED_HEIGHT;
+    // Beta's `isBlockFootOfBed` tests bit 8, which actually marks the HEAD.
+    const isHead = (metadata & 8) !== 0;
+    const direction = metadata & 3;
 
-    const topName = head ? 'bed_head_top' : 'bed_feet_top';
-    const sideName = head ? 'bed_head_side' : 'bed_feet_side';
-    const endName = head ? 'bed_head_end' : 'bed_feet_end';
-
-    const top = this.getSafeUvRect(topName);
-    const side = this.getSafeUvRect(sideName);
-    const end = this.getSafeUvRect(endName);
-    const bottom = this.getSafeUvRect(resolveBlockTexture(definition, 'bottom') ?? 'planks_oak');
+    const top = this.getSafeUvRect(isHead ? 'bed_head_top' : 'bed_feet_top');
+    const side = this.getSafeUvRect(isHead ? 'bed_head_side' : 'bed_feet_side');
+    const end = this.getSafeUvRect(isHead ? 'bed_head_end' : 'bed_feet_end');
+    const plank = this.getSafeUvRect(resolveBlockTexture(definition, 'bottom') ?? 'planks_oak');
     if (top === undefined || side === undefined || end === undefined) return;
 
     const tint = resolveBlockTint(definition, 'side');
     const light = this.getLightComponentsAt(chunk, x, y, z);
-    const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
-    const b = [light.block, light.block, light.block, light.block] as Quad4;
 
-    const push = (
-      normal: readonly [number, number, number],
+    const x0 = x, x1 = x + 1;
+    const z0 = z, z1 = z + 1;
+    const yTop = y + BED_HEIGHT;
+    // Beta draws the underside plank 3/16 above the block floor.
+    const yPlank = y + 0.1875;
+
+    const quad = (
       corners: [Corner, Corner, Corner, Corner],
+      normal: readonly [number, number, number],
       rect: { u0: number; v0: number; u1: number; v1: number },
-      customUvs?: readonly [number, number, number, number, number, number, number, number],
+      uvs?: readonly [number, number, number, number, number, number, number, number],
     ): void => {
-      buffers.pushQuad(corners, normal, rect, tint, light, 1, FluidTextureKind.WaterStill, customUvs);
+      buffers.pushQuad(corners, normal, rect, tint, light, 1, FluidTextureKind.WaterStill, uvs);
     };
-    void l; void b;
 
-    const x0 = x, x1 = x + 1, z0 = z, z1 = z + 1;
-    const y0 = y, y1 = y + height;
-
-    // Beta rotates the top texture so the pillow faces the head of the bed.
-    const rotateTopUv = (
+    /** Corner UVs in draw order, optionally rotated and/or mirrored. */
+    const mapUv = (
       rect: { u0: number; v0: number; u1: number; v1: number },
       quarterTurns: number,
+      mirror: boolean,
     ): readonly [number, number, number, number, number, number, number, number] => {
-      const corners: [number, number][] = [
+      let corners: [number, number][] = [
         [rect.u0, rect.v1], [rect.u1, rect.v1], [rect.u1, rect.v0], [rect.u0, rect.v0],
       ];
-      const turned = corners.slice(quarterTurns % 4).concat(corners.slice(0, quarterTurns % 4));
+      if (mirror) corners = [corners[1]!, corners[0]!, corners[3]!, corners[2]!];
+      const turns = ((quarterTurns % 4) + 4) % 4;
+      const turned = corners.slice(turns).concat(corners.slice(0, turns));
       return [
         turned[0]![0], turned[0]![1], turned[1]![0], turned[1]![1],
         turned[2]![0], turned[2]![1], turned[3]![0], turned[3]![1],
       ] as const;
     };
 
-    push([0, 1, 0], [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], top, rotateTopUv(top, facing));
-    if (bottom !== undefined) {
-      push([0, -1, 0], [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], bottom);
+    // Top surface. Beta swaps/flips the UV corners per direction so the
+    // pillow always points along the bed; that is equivalent to a quarter-turn
+    // per facing value.
+    quad(
+      [[x0, yTop, z1], [x1, yTop, z1], [x1, yTop, z0], [x0, yTop, z0]],
+      [0, 1, 0], top, mapUv(top, direction, false),
+    );
+
+    // Underside plank (Beta uses the plank texture, drawn downward-facing).
+    if (plank !== undefined) {
+      quad([[x0, yPlank, z0], [x1, yPlank, z0], [x1, yPlank, z1], [x0, yPlank, z1]], [0, -1, 0], plank);
     }
 
-    // The end texture goes on the outward face (foot end or headboard); the
-    // other three vertical faces use the side texture.
-    const endFace = facing;
-    const faces: { normal: readonly [number, number, number]; corners: [Corner, Corner, Corner, Corner]; dir: number }[] = [
-      { normal: [0, 0, 1], corners: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], dir: 0 },
-      { normal: [-1, 0, 0], corners: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], dir: 1 },
-      { normal: [0, 0, -1], corners: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]], dir: 2 },
-      { normal: [1, 0, 0], corners: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], dir: 3 },
+    // Beta `ModelBed.headInvisibleFace` / `footInvisibleFaceRemap`, shared with
+    // the collision/validation side so render and logic cannot drift apart.
+    const hiddenFace = bedHiddenFace(direction, isHead);
+    const outward = bedOutwardFace(direction, isHead);
+    const flippedFace = bedFlippedFace(direction);
+
+    // Sides, keyed by Beta's face numbering: 2 = -Z, 3 = +Z, 4 = -X, 5 = +X.
+    const sides: readonly {
+      face: number;
+      corners: [Corner, Corner, Corner, Corner];
+      normal: readonly [number, number, number];
+    }[] = [
+      { face: 2, corners: [[x1, y, z0], [x0, y, z0], [x0, yTop, z0], [x1, yTop, z0]], normal: [0, 0, -1] },
+      { face: 3, corners: [[x0, y, z1], [x1, y, z1], [x1, yTop, z1], [x0, yTop, z1]], normal: [0, 0, 1] },
+      { face: 4, corners: [[x0, y, z0], [x0, y, z1], [x0, yTop, z1], [x0, yTop, z0]], normal: [-1, 0, 0] },
+      { face: 5, corners: [[x1, y, z1], [x1, y, z0], [x1, yTop, z0], [x1, yTop, z1]], normal: [1, 0, 0] },
     ];
-    for (const face of faces) {
-      // The head's board faces opposite the foot's.
-      const outward = head ? (endFace + 2) & 3 : endFace;
-      push(face.normal, face.corners, face.dir === outward ? end : side);
+
+    for (const entry of sides) {
+      // Skip the joining face so the two halves read as one bed.
+      if (entry.face === hiddenFace) continue;
+      // Beta picks the end texture for the outward face of each half and the
+      // side texture elsewhere, via `bedDirection`. The end board faces away
+      // from the joint, i.e. the opposite of the hidden face.
+      const rect = entry.face === outward ? end : side;
+      quad(entry.corners, entry.normal, rect, mapUv(rect, 0, entry.face === flippedFace));
     }
   }
 

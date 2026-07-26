@@ -3,7 +3,6 @@ import { Entity } from '../core/Entity';
 import { LivingEntity } from '../living/LivingEntity';
 import { EntityTypeIds } from '../core/EntityType';
 import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
-import { attachEntityLighting } from '../../rendering/ChunkRenderer';
 import { BlockIds } from '../../blocks/BlockId';
 import type { NbtCompound, NbtTag } from '../../nbt/Nbt';
 
@@ -59,7 +58,6 @@ export class FishingBobberEntity extends Entity {
   private tileY = -1;
   private tileZ = -1;
 
-  private ownGeometry: THREE.BufferGeometry | null = null;
   private ownMaterial: THREE.Material | null = null;
 
   /**
@@ -325,21 +323,32 @@ export class FishingBobberEntity extends Entity {
 
   private buildModel(): void {
     if (typeof document === 'undefined') return;
-    // Beta renders the bobber as a small camera-facing sprite.
-    this.ownGeometry = new THREE.PlaneGeometry(BOBBER_SIZE, BOBBER_SIZE);
-    const material = new THREE.MeshBasicMaterial({
+    // Beta `RenderFish` billboards the bobber: it rotates the quad by
+    // `180 - playerViewY` about Y and `-playerViewX` about X every frame, so
+    // the sprite always faces the camera. A THREE.Sprite reproduces that
+    // exactly without needing the camera here, and unlike a fixed PlaneGeometry
+    // it can never present edge-on as an invisible sliver.
+    const material = new THREE.SpriteMaterial({
       color: 0xffffff,
       transparent: true,
       alphaTest: 0.1,
-      side: THREE.DoubleSide,
+      // Beta draws the bobber unfogged at full brightness.
+      fog: false,
+      depthTest: true,
+      depthWrite: false,
     });
     const texture = this.ctx.entityTextures?.get('fishingBobber');
     if (texture !== undefined) material.map = texture;
-    attachEntityLighting(material);
     this.ownMaterial = material;
-    const mesh = new THREE.Mesh(this.ownGeometry, material);
-    this.renderObject = mesh;
-    this.ctx.scene.add(mesh);
+    const sprite = new THREE.Sprite(material);
+    // Beta scales the sprite by 0.5 over a 1-block quad, i.e. half a block,
+    // but clamps the drawn size to the 0.25 entity box.
+    sprite.scale.set(BOBBER_SIZE, BOBBER_SIZE, BOBBER_SIZE);
+    // The bobber is small and often at the edge of view while cast; Beta sets
+    // `ignoreFrustumCheck`, so match that or it pops out near screen borders.
+    sprite.frustumCulled = false;
+    this.renderObject = sprite;
+    this.ctx.scene.add(sprite);
   }
 
   public onRemove(): void {
@@ -347,9 +356,7 @@ export class FishingBobberEntity extends Entity {
       this.renderObject.removeFromParent();
       this.renderObject = null;
     }
-    this.ownGeometry?.dispose();
     this.ownMaterial?.dispose();
-    this.ownGeometry = null;
     this.ownMaterial = null;
   }
 

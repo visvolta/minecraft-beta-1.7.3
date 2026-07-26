@@ -1,7 +1,6 @@
 import { Player } from './Player.ts';
 import { PlayerModel } from './PlayerModel.ts';
 import {
-  ANIMATION_AIRBORNE_ARM_ROTATION,
   ANIMATION_AIRBORNE_LEG_ROTATION,
   ANIMATION_AIRBORNE_SWING_MULTIPLIER,
   ANIMATION_ARM_SWING_LIMIT,
@@ -53,7 +52,13 @@ export const getPlayerPoseState = getPlayerAnimationState;
 export class PlayerAnimator {
   public constructor() {}
 
-  public update(player: Player, model: PlayerModel, headYaw: number, headPitch: number, partialTick: number, deltaSeconds = 1 / 60): void {
+  /**
+   * @param holdingItem Beta `ModelBiped.heldItemRight`. When the player has
+   *   something in hand the right arm is half-swung and tipped forward, which
+   *   is what makes a third-person item read as *held* rather than clipped
+   *   against a freely swinging arm.
+   */
+  public update(player: Player, model: PlayerModel, headYaw: number, headPitch: number, partialTick: number, deltaSeconds = 1 / 60, holdingItem = false): void {
     const state = getPlayerAnimationState(player);
     const normalSwing=player.prevSwingProgress+(player.swingProgress-player.prevSwingProgress)*partialTick,breaking=(player.prevBreakingSwingPhase+((player.breakingSwingPhase-player.prevBreakingSwingPhase+1)%1)*partialTick)%1,swingProgress=player.armAction!=='none'?breaking:normalSwing;
     const limbSwingPhase = player.prevLimbSwingPhase + (player.limbSwingPhase - player.prevLimbSwingPhase) * partialTick;
@@ -68,7 +73,15 @@ export class PlayerAnimator {
     let bodyTarget = player.bodyYaw;
     const movementDeltaForTarget = normalizeAngle(movementYaw - player.bodyYaw);
     const movementForward = Math.cos(movementDeltaForTarget);
-    if (state !== 'minecart_sitting' && horizontalSpeed > 0.08 && movementForward > 0.35) {
+    // While flying the velocity direction swings sharply as the player
+    // accelerates and turns, so chasing it made the torso wobble. Beta has no
+    // flight, so the calmest correct behaviour is to let the body follow the
+    // head only, exactly as it does when standing still.
+    const followsMovement = state !== 'minecart_sitting'
+      && state !== 'flying'
+      && horizontalSpeed > 0.08
+      && movementForward > 0.35;
+    if (followsMovement) {
       bodyTarget = movementYaw;
     } else if (Math.abs(headDeltaBefore) > ANIMATION_BODY_HEAD_DEADZONE) {
       bodyTarget = headYaw - Math.sign(headDeltaBefore) * ANIMATION_BODY_HEAD_DEADZONE;
@@ -108,13 +121,33 @@ export class PlayerAnimator {
     let leftLegX = Math.cos(limbSwingPhase * phaseDirection) * ANIMATION_LEG_SWING_LIMIT * limbSwingAmount;
     const strafeLean = clamp(localStrafe * limbSwingAmount * ANIMATION_STRAFE_LEAN_LIMIT, -ANIMATION_STRAFE_LEAN_LIMIT, ANIMATION_STRAFE_LEAN_LIMIT);
 
+    // Beta `ModelBiped.setRotationAngles` composes the arms in a fixed order:
+    // base limb swing, then the riding offset, then the held-item pose, and
+    // only then the attack swing. Composing them in any other order changes
+    // the result because the held-item pose *scales* whatever came before it.
+    if (state === 'minecart_sitting') {
+      rightArmX += -0.62831855;
+      leftArmX += -0.62831855;
+    }
+
+    // Beta `heldItemRight`: `rotateAngleX = rotateAngleX * 0.5 - 0.31415927`.
+    // Only the right arm is affected; Beta never populates `heldItemLeft`.
+    if (holdingItem) {
+      rightArmX = rightArmX * 0.5 - 0.31415927;
+    }
+
     let rightArmZ = 0.0;
     let leftArmZ = 0.0;
-    const time = performance.now() / 1000;
-    rightArmZ += Math.cos(time * ANIMATION_IDLE_ARM_Z_FREQUENCY) * ANIMATION_IDLE_ARM_Z_AMPLITUDE + ANIMATION_IDLE_ARM_Z_AMPLITUDE;
-    leftArmZ -= Math.cos(time * ANIMATION_IDLE_ARM_Z_FREQUENCY) * ANIMATION_IDLE_ARM_Z_AMPLITUDE + ANIMATION_IDLE_ARM_Z_AMPLITUDE;
-    rightArmX += Math.sin(time * ANIMATION_IDLE_ARM_X_FREQUENCY) * ANIMATION_IDLE_ARM_X_AMPLITUDE;
-    leftArmX -= Math.sin(time * ANIMATION_IDLE_ARM_X_FREQUENCY) * ANIMATION_IDLE_ARM_X_AMPLITUDE;
+    // Beta's gentle idle arm sway is a grounded pose. Applying it while
+    // airborne or flying compounded with the swing and read as flailing.
+    const airborne = state === 'jumping' || state === 'falling' || state === 'flying';
+    if (!airborne) {
+      const time = performance.now() / 1000;
+      rightArmZ += Math.cos(time * ANIMATION_IDLE_ARM_Z_FREQUENCY) * ANIMATION_IDLE_ARM_Z_AMPLITUDE + ANIMATION_IDLE_ARM_Z_AMPLITUDE;
+      leftArmZ -= Math.cos(time * ANIMATION_IDLE_ARM_Z_FREQUENCY) * ANIMATION_IDLE_ARM_Z_AMPLITUDE + ANIMATION_IDLE_ARM_Z_AMPLITUDE;
+      rightArmX += Math.sin(time * ANIMATION_IDLE_ARM_X_FREQUENCY) * ANIMATION_IDLE_ARM_X_AMPLITUDE;
+      leftArmX -= Math.sin(time * ANIMATION_IDLE_ARM_X_FREQUENCY) * ANIMATION_IDLE_ARM_X_AMPLITUDE;
+    }
 
     if (swingProgress > 0) {
       let f = swingProgress;
@@ -128,29 +161,34 @@ export class PlayerAnimator {
       rightArmZ += Math.sin(swingProgress * Math.PI) * -0.4 * ANIMATION_PLACEMENT_SWING_STRENGTH;
     }
 
+    // Beta `ModelBiped.setRotationAngles` applies NO extra arm or leg offset
+    // while airborne: the limbs simply follow `limbSwingAmount`, which decays
+    // toward zero once the player leaves the ground. The previous constant
+    // offset is what pushed the arms visibly backward when jumping/falling.
+    //
+    // Legs keep a small airborne tuck, which reads correctly and is the one
+    // deliberate departure; arms are left to the swing alone.
     if (state === 'jumping' || state === 'falling') {
-      rightArmX += ANIMATION_AIRBORNE_ARM_ROTATION;
-      leftArmX += ANIMATION_AIRBORNE_ARM_ROTATION;
       if (limbSwingAmount < 0.05) {
         rightLegX += ANIMATION_AIRBORNE_LEG_ROTATION;
         leftLegX += ANIMATION_AIRBORNE_LEG_ROTATION;
       }
+      model.bodyGroup.rotation.x = 0;
+      model.bodyGroup.rotation.z = 0;
     } else if (state === 'flying') {
-      const flyPitch = horizontalSpeed > 0.08 ? -ANIMATION_FLYING_PITCH_LIMIT * clamp(horizontalSpeed / 8, 0, 1) : 0;
+      // Creative flight has no Beta equivalent, so keep it deliberately calm:
+      // a small steady forward lean with no per-frame sway. Reusing the ground
+      // walk's body turn here is what made the torso wobble in the air.
+      const flyPitch = -ANIMATION_FLYING_PITCH_LIMIT * clamp(horizontalSpeed / 8, 0, 1);
       model.bodyGroup.rotation.x = flyPitch;
-      model.bodyGroup.rotation.z = -strafeLean;
-      rightArmX += flyPitch * 0.4;
-      leftArmX += flyPitch * 0.4;
-    }
-
-    if (state !== 'flying') {
+      model.bodyGroup.rotation.z = 0;
+    } else {
       model.bodyGroup.rotation.x = 0;
       model.bodyGroup.rotation.z = 0;
     }
 
     if (state === 'minecart_sitting') {
-      rightArmX += -0.62831855;
-      leftArmX += -0.62831855;
+      // Arms were already tipped back above, in Beta's composition order.
       rightLegX = -1.2566371;
       leftLegX = -1.2566371;
       model.rightLegGroup.rotation.y = 0.31415927;
@@ -160,8 +198,9 @@ export class PlayerAnimator {
       model.leftLegGroup.rotation.y = localStrafe * 0.18 * limbSwingAmount;
     }
 
-    model.rightArmGroup.rotation.set(rightArmX, 0, rightArmZ + strafeLean * 0.4);
-    model.leftArmGroup.rotation.set(leftArmX, 0, leftArmZ + strafeLean * 0.4);
+    const armLean = airborne ? 0 : strafeLean * 0.4;
+    model.rightArmGroup.rotation.set(rightArmX, 0, rightArmZ + armLean);
+    model.leftArmGroup.rotation.set(leftArmX, 0, leftArmZ + armLean);
     model.rightLegGroup.rotation.x = rightLegX;
     model.leftLegGroup.rotation.x = leftLegX;
   }

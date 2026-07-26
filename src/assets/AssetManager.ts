@@ -53,6 +53,14 @@ export class AssetManager {
     textureNames.add('bed_feet_top');
     textureNames.add('bed_feet_side');
     textureNames.add('bed_feet_end');
+    // Rail variants chosen per metadata at mesh time: the curved sheet and
+    // the powered/active states are never named by a block definition, so
+    // without these the atlas has no entry and the mesher falls back.
+    textureNames.add('rail_normal');
+    textureNames.add('rail_normal_turned');
+    textureNames.add('rail_golden');
+    textureNames.add('rail_golden_powered');
+    textureNames.add('rail_detector');
     textureNames.add('door_wood_upper');
     textureNames.add('door_iron_upper');
 

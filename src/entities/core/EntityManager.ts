@@ -1,4 +1,5 @@
 import type { AABB } from '../../physics/AABB';
+import { applyEntityRenderOrder } from '../../rendering/RenderOrder';
 import type { Chunk } from '../../world/Chunk';
 import type { NbtCompound } from '../../nbt/Nbt';
 import { EntityIdAllocator, chunkKey, chunkCoordsOf } from './EntityId';
@@ -218,6 +219,10 @@ export class EntityManager {
       this.addToChunkBucket(entity);
       this.markChunkDirty(entity.chunkX, entity.chunkZ);
       entity.onSpawn(ctx);
+      // Entities must sit on their own render layer, above opaque terrain but
+      // below the translucent depth pre-pass. Applied centrally so a new
+      // entity type can never default to layer 0 and vanish behind water.
+      if (entity.renderObject !== null) applyEntityRenderOrder(entity.renderObject);
     }
   }
 

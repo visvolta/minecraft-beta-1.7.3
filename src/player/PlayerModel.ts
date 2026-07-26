@@ -1,4 +1,5 @@
 import { BoxGeometry, Group, Mesh, MeshBasicMaterial } from 'three';
+import { applyEntityRenderOrder } from '../rendering/RenderOrder';
 import { PLAYER_MODEL_SCALE, PLAYER_MODEL_SHOULDER_OFFSET_Y, PLAYER_OUTER_LAYER_SCALE } from './PlayerConstants.ts';
 import type { PlayerSkinManager } from './PlayerSkinManager.ts';
 import { attachEntityLighting } from '../rendering/ChunkRenderer.ts';
@@ -122,6 +123,8 @@ export class PlayerModel {
     this.root.add(this.rightArmGroup);
     this.root.add(this.leftLegGroup);
     this.root.add(this.rightLegGroup);
+    // Entity layer: the player must stay visible through and under water.
+    applyEntityRenderOrder(this.root);
   }
 
   public setVisible(visible: boolean): void {

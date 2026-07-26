@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyEntityRenderOrder } from './RenderOrder';
 import type { EntityManager } from '../entities/core/EntityManager';
 import { MinecartEntity } from '../entities/MinecartEntity';
 import type { EntityTextureAssets } from '../assets/EntityTextureAssets';
@@ -143,6 +144,8 @@ export class MinecartRenderSystem {
         renderer = new MinecartRenderer(this.textures.get('minecart'));
         this.renderers.set(entity.uuid, renderer);
         this.scene.add(renderer.root);
+        // Entity layer: keeps carts visible through water.
+        applyEntityRenderOrder(renderer.root);
       }
       renderer.update(snapshotMinecart(entity, alpha));
     });

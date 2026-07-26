@@ -454,7 +454,9 @@ export class InteractionController {
       return true;
     }
 
-    const yaw = this.cameraYawRadians();
+    // Beta's spawn/heading maths needs Beta-convention yaw, not the
+    // 180-degree-offset internal camera yaw.
+    const yaw = this.betaYawRadians();
     const pitch = this.cameraPitchRadians();
     // Beta spawns the bobber just in front of and below the eye.
     const originX = this.player.position.x - Math.cos(yaw) * 0.16;
@@ -491,6 +493,16 @@ export class InteractionController {
    * from the rod, dies, or the world is torn down, so a hook can never
    * outlive the session that made it.
    */
+  /**
+   * The bobber currently in the world, if any. Exposed so the renderer can
+   * draw the line to it; returns null the moment it is removed.
+   */
+  public getActiveBobber(): FishingBobberEntity | null {
+    const bobber = this.activeBobber;
+    if (bobber === null || bobber.removed) return null;
+    return bobber;
+  }
+
   public clearFishingBobber(): void {
     if (this.activeBobber === null) return;
     if (!this.activeBobber.removed) this.activeBobber.markRemoved();
@@ -507,7 +519,8 @@ export class InteractionController {
     const arrowSlot = this.findArrowSlot();
     if (arrowSlot < 0) return false;
 
-    const yaw = this.cameraYawRadians();
+    // Beta convention yaw: `cameraYawRadians()` would fire the arrow backwards.
+    const yaw = this.betaYawRadians();
     const pitch = this.cameraPitchRadians();
     // Beta offsets the spawn slightly behind and below the eye.
     const originX = this.player.position.x - Math.cos(yaw) * 0.16;
@@ -547,8 +560,43 @@ export class InteractionController {
     return -1;
   }
 
+  /**
+   * Project-internal yaw used by projectile spawning: 0 points along -Z.
+   * This is 180 degrees out from Beta's `rotationYaw`, so anything porting a
+   * Beta placement formula must use `betaYawDegrees()` instead.
+   */
   private cameraYawRadians(): number {
     return Math.atan2(-this.lookDirection.x, this.lookDirection.z) + Math.PI;
+  }
+
+  /**
+   * The player's yaw in Beta's own convention and units.
+   *
+   * Beta measures `rotationYaw` in degrees with 0 = facing +Z, and derives the
+   * look vector as `(-sin(yaw), cos(yaw))`. Feeding a Beta placement formula
+   * the project's internal yaw (which is offset by 180 degrees) is what made
+   * stairs, doors and rails face the opposite way from the player.
+   */
+  private betaYawDegrees(): number {
+    const yaw = Math.atan2(-this.lookDirection.x, this.lookDirection.z) * 180 / Math.PI;
+    return ((yaw % 360) + 360) % 360;
+  }
+
+  /**
+   * The player's yaw in Beta's convention, in radians.
+   *
+   * Beta's projectile spawn formulas (`EntityArrow`, `EntityFish`) read
+   * `rotationYaw` directly:
+   *   posX  -= cos(yaw) * 0.16
+   *   motionX = -sin(yaw) * cos(pitch)
+   *   motionZ =  cos(yaw) * cos(pitch)
+   * Those only produce a forward-going projectile when `yaw` is Beta's own
+   * angle. Feeding them `cameraYawRadians()` (offset by 180 degrees) negates
+   * both the spawn offset and the heading, which fired arrows and cast the
+   * fishing bobber directly backwards out of the player's back.
+   */
+  private betaYawRadians(): number {
+    return Math.atan2(-this.lookDirection.x, this.lookDirection.z);
   }
 
   private cameraPitchRadians(): number {
@@ -664,8 +712,9 @@ export class InteractionController {
     if (this.blockUpdateWorld.getBlock(footX, footY, footZ) !== BlockIds.Air) return false;
 
     // Beta orients the bed by the player's facing quadrant.
-    const yaw = this.cameraYawRadians();
-    const direction = Math.floor((yaw * 4 / (Math.PI * 2)) + 0.5) & 3;
+    // Beta `ItemBed.onItemUse`: floor(yaw * 4 / 360 + 0.5) & 3, in Beta's own
+    // yaw convention.
+    const direction = Math.floor((this.betaYawDegrees() * 4 / 360) + 0.5) & 3;
     const offset = BED_FOOT_TO_HEAD[direction] ?? [0, 1];
     const headX = footX + offset[0];
     const headZ = footZ + offset[1];
@@ -834,9 +883,18 @@ export class InteractionController {
       }
     }
 
-    const targetX = hit.blockPos.x + hit.face.x;
-    const targetY = hit.blockPos.y + hit.face.y;
-    const targetZ = hit.blockPos.z + hit.face.z;
+    // Beta `ItemBlock.onItemUse` offsets by the clicked face, EXCEPT when the
+    // clicked block is itself replaceable (a fluid or snow layer), in which
+    // case the new block takes that cell directly. Without this a click on
+    // water placed the block in the air cell in front of it, so a submerged
+    // player could never build.
+    const clickedId = this.blockUpdateWorld.getBlock(hit.blockPos.x, hit.blockPos.y, hit.blockPos.z);
+    const clickedDefinition = this.blockRegistry.getById(clickedId);
+    const replaceClicked = clickedDefinition?.replaceable === true;
+
+    const targetX = replaceClicked ? hit.blockPos.x : hit.blockPos.x + hit.face.x;
+    const targetY = replaceClicked ? hit.blockPos.y : hit.blockPos.y + hit.face.y;
+    const targetZ = replaceClicked ? hit.blockPos.z : hit.blockPos.z + hit.face.z;
 
     if (targetY < 0 || targetY >= CHUNK_SIZE_Y) {
       return false;
@@ -879,8 +937,7 @@ export class InteractionController {
       // Beta `ItemDoor.onItemUse` derives facing from the player's yaw in
       // degrees. Using the raw look vector with ad-hoc quadrants (as before)
       // put doors sideways relative to the player.
-      const yawDegrees = this.cameraYawRadians() * 180 / Math.PI;
-      const facing = doorFacingFromYaw(yawDegrees);
+      const facing = doorFacingFromYaw(this.betaYawDegrees());
 
       const isSolidAt = (dx: number, dz: number, dy: number): boolean =>
         this.blockUpdateWorld.isNormalCube(targetX + dx, targetY + dy, targetZ + dz);
@@ -926,15 +983,32 @@ export class InteractionController {
       return heldMeta;
     }
 
+    // Beta `BlockSign` wall variant: metadata is the face the sign hangs on
+    // (2 = -Z, 3 = +Z, 4 = -X, 5 = +X), taken from the clicked face normal so
+    // the board sits flat on the exact face the player targeted. Without this
+    // every wall sign defaulted to one orientation.
+    if (blockId === BlockIds.WallSign) {
+      if (hit.face.z === -1) return 2;
+      if (hit.face.z === 1) return 3;
+      if (hit.face.x === -1) return 4;
+      if (hit.face.x === 1) return 5;
+      return 2;
+    }
+
+    // Beta `BlockSign` standing variant: 16 rotation steps from the yaw.
+    if (blockId === BlockIds.SignPost) {
+      return Math.floor(((this.betaYawDegrees() + 180) * 16 / 360) + 0.5) & 15;
+    }
+
     // Beta seeds a rail along the player's facing axis; onPlaced then
     // reconciles it against neighbours, which is what forms corners.
     if (blockId === BlockIds.Rail || blockId === BlockIds.PoweredRail || blockId === BlockIds.DetectorRail) {
-      return railShapeFromPlayerYaw(this.cameraYawRadians() * 180 / Math.PI);
+      return railShapeFromPlayerYaw(this.betaYawDegrees());
     }
 
     // Beta `BlockStairs.onBlockPlacedBy`: stairs face the player.
     if (blockId === BlockIds.WoodStairs || blockId === BlockIds.CobblestoneStairs) {
-      return stairFacingFromYaw(this.cameraYawRadians() * 180 / Math.PI);
+      return stairFacingFromYaw(this.betaYawDegrees());
     }
 
     if (blockId === BlockIds.Ladder) {

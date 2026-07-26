@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyEntityRenderOrder } from './RenderOrder';
 import type { EntityManager } from '../entities/core/EntityManager';
 import { BoatEntity } from '../entities/BoatEntity';
 import { applyLegacyBoxUv } from '../entities/living/LegacyModelUv';
@@ -60,6 +61,8 @@ export class BoatRenderer {
     // Boats must darken at night and in caves like every other entity.
     attachEntityLighting(this.material);
     scene.add(this.root);
+    // Keep vehicles on the entity layer so water does not hide them.
+    applyEntityRenderOrder(this.root);
   }
 
   /**
