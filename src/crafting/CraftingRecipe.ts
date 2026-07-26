@@ -19,6 +19,12 @@ export interface RecipeMatchResult {
 
 export interface CraftingRecipe {
   matches(grid: CraftingGrid): RecipeMatchResult | null;
+  /**
+   * The stack this recipe produces, independent of any grid. Exposed so
+   * completeness checks and UI can inspect outputs without simulating a
+   * matching grid for every recipe.
+   */
+  readonly result: ItemStack;
 }
 
 /** Helper returning container returns (`Only implement container-item returns for recipes and items that actually exist and are confirmed by Beta 1.7.3`). */

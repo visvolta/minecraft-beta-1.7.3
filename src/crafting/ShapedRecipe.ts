@@ -94,4 +94,10 @@ export class ShapedRecipe implements CraftingRecipe {
       consumption
     };
   }
+
+  /** @see CraftingRecipe.result */
+  public get result(): ItemStack {
+    return this.output;
+  }
+
 }

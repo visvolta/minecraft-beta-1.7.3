@@ -14,7 +14,7 @@ export class InventoryTooltip {
     this.root.style.background = 'rgba(16, 0, 16, 0.95)';
     this.root.style.border = '2px solid #360088';
     this.root.style.color = '#fff';
-    this.root.style.fontFamily = 'monospace';
+    this.root.style.fontFamily = 'Minecraft, monospace';
     this.root.style.fontWeight = 'bold';
     this.root.style.imageRendering = 'pixelated';
     this.root.style.display = 'none';

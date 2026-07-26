@@ -1,8 +1,31 @@
 import { BlockIds } from '../../blocks/BlockId';
-import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
+import type { AABB } from '../../physics/AABB';
+import { doorShape } from '../../blocks/shapes/BlockShapes';
+import { toWorldBound } from '../../blocks/shapes/toWorldBounds';
+import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry, BoundingBoxType } from '../BlockBehaviour';
 
 export class DoorBehaviour implements BlockBehaviour {
     public constructor(private readonly isIron: boolean) {}
+
+    /**
+     * Doors occupy a thin panel, not the whole cell. Both halves derive their
+     * shape from the lower half's metadata so the upper half swings with the
+     * door instead of colliding as a full cube (the cause of the previous
+     * one-way collision and mismatched selection outline).
+     */
+    public getBoundingBoxes(
+        ctx: BlockBehaviourContext,
+        x: number,
+        y: number,
+        z: number,
+        _type: BoundingBoxType,
+    ): AABB[] | undefined {
+        const metadata = ctx.world.getBlockMetadata(x, y, z);
+        const isUpper = (metadata & 8) !== 0;
+        // Facing and the open flag live on the lower half in Beta.
+        const stateMeta = isUpper ? ctx.world.getBlockMetadata(x, y - 1, z) : metadata;
+        return toWorldBound(doorShape(stateMeta), x, y, z);
+    }
 
     public onInteract(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
         if (this.isIron) return true;
@@ -12,7 +35,10 @@ export class DoorBehaviour implements BlockBehaviour {
         const ly = isUpper ? y - 1 : y;
         const lz = z;
         const lowerMeta = ctx.world.getBlockMetadata(lx, ly, lz);
-        this.setDoorState(ctx, lx, ly, lz, (lowerMeta & 4) === 0);
+        const opening = (lowerMeta & 4) === 0;
+        this.setDoorState(ctx, lx, ly, lz, opening);
+        // Beta plays one door sound per toggle, from the lower half.
+        ctx.playBlockSound?.(opening ? 'door_open' : 'door_close', lx + 0.5, ly + 0.5, lz + 0.5);
         return true;
     }
 

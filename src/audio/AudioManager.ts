@@ -51,6 +51,9 @@ export const WORLD_AUDIO_LIMITS = {
 type PlaybackPriority = 'critical' | 'important' | 'player' | 'normal' | 'ambient';
 const PRIORITY_RANK: Readonly<Record<PlaybackPriority, number>> = { critical: 4, important: 3, player: 2, normal: 1, ambient: 0 };
 type WorldSource = { readonly source: AudioBufferSourceNode; readonly gain: GainNode; readonly panner?: PannerNode; readonly key: string; readonly priority: PlaybackPriority; readonly x?: number; readonly y?: number; readonly z?: number; readonly startedAt: number; };
+/** Beta ships rain as numbered variants; impacts pick one at random. */
+const RAIN_IMPACT_KEYS = ['ambient.weather.rain1','ambient.weather.rain2','ambient.weather.rain3','ambient.weather.rain4','ambient.weather.rain5','ambient.weather.rain6','ambient.weather.rain7','ambient.weather.rain8'];
+
 type RainLayer = { readonly source: AudioBufferSourceNode; readonly gain: GainNode; readonly filter: BiquadFilterNode; };
 type AudioTelemetry = { started: number; ended: number; rejectedDistance: number; rejectedDeduplication: number; rejectedSaturation: number; evicted: number; pending: number; };
 const AUDIO_TELEMETRY_ENABLED = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
@@ -85,6 +88,8 @@ export class AudioManager implements MobSoundSink {
   private rainFadeTimer: number | undefined;
   private rainGeneration = 0;
   private rainStartPending = false;
+  /** Beta `EntityRenderer.rainSoundCounter`; gates discrete impact sounds. */
+  private rainSoundCounter = 0;
   private readonly onUiClick = (): void => { void this.activate().then(() => this.play({ type: 'ui.click' })); };
   private readonly onVisibilityChange = (): void => this.handleVisibility();
   private readonly pendingLoopStarts = new Map<string, number>();
@@ -130,6 +135,7 @@ export class AudioManager implements MobSoundSink {
       case 'block.break': this.playBlockMaterial(event.material, event.x, event.y, event.z, 1, 0.8, 'break'); break;
       case 'block.place': this.playBlockMaterial(event.material, event.x, event.y, event.z, 0.8, 0.8, 'place'); break;
       case 'block.mine': this.playBlockMaterial(event.material, event.x, event.y, event.z, 0.25, 0.5, 'mine'); break;
+      case 'block.action': this.playPositional(`random.${event.id}`, event.x, event.y, event.z, 1, 0.9 + Math.random() * 0.2, WORLD_AUDIO_LIMITS.defaultDistance, 'player', `block.action.${event.id}`, WORLD_AUDIO_LIMITS.shortDedupeMs); break;
       case 'step': this.playStepMaterial(event.material, event.x, event.y, event.z, event.volume ?? 0.15, event.pitch ?? 1); break;
       case 'player.damage': { const key = event.kind === 'hurt' ? this.randomVariant('damage.hit', ['damage.hit1','damage.hit2','damage.hit3']) : event.kind === 'fall-big' ? 'damage.fallbig' : 'damage.fallsmall'; const pitch = event.kind === 'hurt' ? 1 + (Math.random() - Math.random()) * 0.2 : 1; this.playPositional(key, event.x, event.y, event.z, 1, pitch, 16, 'important', `player.damage.${event.kind}`); break; }
       case 'random.explode': this.playPositional(this.randomKey(['random.explode1','random.explode2','random.explode3']), event.x, event.y, event.z, 4, 0.7 + Math.random() * 0.2, 64, 'critical', 'random.explode'); break;
@@ -184,6 +190,33 @@ export class AudioManager implements MobSoundSink {
   /** Cover is sampled by the engine at a low rate: 0=open sky, 1=deep cover. */
   public setRainCover(cover: number): void { this.rainCover = Math.max(0, Math.min(1, cover)); this.applyRainMix(); }
 
+  /**
+   * Beta's rain sound: discrete positional one-shots at raindrop impact
+   * points, NOT a continuous loop.
+   *
+   * `EntityRenderer.renderRainSnow` counts eligible impacts per frame and
+   * fires only when `random.nextInt(3) < rainSoundCounter++`, resetting the
+   * counter on each play. Impacts above the player's head (with sky over the
+   * player) use volume 0.1 / pitch 0.5; everything else 0.2 / pitch 1.0.
+   *
+   * The looping layers remain for the low background wash, but the
+   * characteristic Beta patter comes from here.
+   */
+  public playRainImpact(x: number, y: number, z: number, aboveListener: boolean): void {
+    if (this.worldPaused || this.rainStrength <= 0.01) return;
+    if (this.rainSoundCounter++ <= Math.floor(Math.random() * 3)) return;
+    this.rainSoundCounter = 0;
+    const volume = aboveListener ? 0.1 : 0.2;
+    const pitch = aboveListener ? 0.5 : 1;
+    this.playPositional(
+      this.randomVariant('ambient.weather.rain', RAIN_IMPACT_KEYS),
+      x, y, z,
+      volume * (1 - this.rainCover * 0.8), pitch,
+      WORLD_AUDIO_LIMITS.defaultDistance, 'ambient', 'ambient.weather.rain',
+      WORLD_AUDIO_LIMITS.shortDedupeMs,
+    );
+  }
+
   public setMinecartLoop(id: string, inside: boolean, speed: number): void {
     const key = `minecart.${id}.${inside ? 'inside' : 'base'}`;
     const soundKey = inside ? 'minecart.inside' : 'minecart.base';
@@ -236,10 +269,14 @@ export class AudioManager implements MobSoundSink {
     return [];
   }
 
-  private playBlockMaterial(digMat: DigSoundMaterial, x: number, y: number, z: number, volume: number, pitch: number, reason: 'break' | 'place' | 'mine'): void {
-    const mat = digMat === 'glass' && reason === 'place' ? 'stone' : digMat;
-    const key = mat === 'glass' ? this.randomVariant(`dig.${reason}.glass`, ['random.glass1','random.glass2','random.glass3']) : this.randomVariant(`dig.${reason}.${mat}`, DIG_SOUND_MATERIALS[mat].map((entry) => entry.key));
-    this.playPositional(key, x, y, z, volume, pitch, WORLD_AUDIO_LIMITS.defaultDistance, 'player', `block.${reason}.${mat}`, WORLD_AUDIO_LIMITS.shortDedupeMs);
+  private playBlockMaterial(material: DigSoundMaterial, x: number, y: number, z: number, volume: number, pitch: number, reason: 'break' | 'place' | 'mine'): void {
+    // Beta's glass material shatters only when broken; placing a glass block
+    // uses its step sound (stone), so placement never plays the shatter.
+    const resolved: DigSoundMaterial = material === 'glass' && reason !== 'break' ? 'stone' : material;
+    const key = resolved === 'glass'
+      ? this.randomVariant(`dig.${reason}.glass`, ['random.glass1', 'random.glass2', 'random.glass3'])
+      : this.randomVariant(`dig.${reason}.${resolved}`, DIG_SOUND_MATERIALS[resolved].map((entry) => entry.key));
+    this.playPositional(key, x, y, z, volume, pitch, WORLD_AUDIO_LIMITS.defaultDistance, 'player', `block.${reason}.${resolved}`, WORLD_AUDIO_LIMITS.shortDedupeMs);
   }
 
   private setAudioParam(param: AudioParam | undefined, value: number): boolean {

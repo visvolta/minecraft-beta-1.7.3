@@ -13,6 +13,8 @@ import { CreeperEntity } from './hostile/CreeperEntity';
 import { ArrowEntity } from './projectiles/ArrowEntity';
 import { PrimedTntEntity } from './PrimedTntEntity';
 import { MinecartEntity } from './MinecartEntity';
+import { BoatEntity } from './BoatEntity';
+import { PaintingEntity } from './PaintingEntity';
 
 /**
  * Registers every entity type's string id, numeric id and deserialiser with
@@ -36,4 +38,8 @@ export function registerEntityTypes(registry: EntityTypeRegistry): void {
   registry.register(EntityTypeIds.Arrow, 'Arrow', ArrowEntity.deserialize);
   registry.register(EntityTypeIds.PrimedTnt, 'PrimedTnt', PrimedTntEntity.deserialize);
   registry.register(EntityTypeIds.Minecart, 'Minecart', MinecartEntity.deserialize);
+  registry.register(EntityTypeIds.Boat, 'Boat', BoatEntity.deserialize);
+  registry.register(EntityTypeIds.Painting, 'Painting', PaintingEntity.deserialize);
+  // FishingBobber is deliberately NOT registered: a bobber restored without
+  // its angler is meaningless, so it is dropped on load rather than revived.
 }

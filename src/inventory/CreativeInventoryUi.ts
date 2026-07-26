@@ -1,24 +1,28 @@
 import type { CreativeInventoryEntry } from './CreativeInventorySource';
 import type { SlotContentRenderer } from './SlotContentRenderer';
+import { CREATIVE, SLOT_PITCH, SLOT_SIZE, fractionForThumbOffset, thumbOffsetForFraction } from '../ui/BetaGuiMetrics';
 
 export type CreativeInventoryTab = 'survival' | 'creative' | 'food' | 'building';
 
-const GUI_W = 195;
-const GUI_H = 136;
-const SLOT = 16;
-const STEP = 18;
-const GRID_X = 7;
-const GRID_Y = 18;
-const GRID_COLS = 9;
-const GRID_ROWS = 5;
-const GRID_VIEW_W = GRID_COLS * STEP;
-const GRID_VIEW_H = GRID_ROWS * STEP;
-const HOTBAR_Y = 112;
-const SCROLL_X = 174;
-const SCROLL_Y = 1;
-const SCROLL_TRACK_H = 88;
-const THUMB_H = 15;
-const PAGE_SIZE = GRID_COLS * GRID_ROWS;
+// Layout comes from the shared Beta metrics module so the grid, hotbar and
+// scrollbar are all derived from one description instead of independently
+// hardcoded numbers (which is how the track drifted 17px out of step).
+const GUI_W = CREATIVE.windowWidth;
+const GUI_H = CREATIVE.windowHeight;
+const SLOT = SLOT_SIZE;
+const STEP = SLOT_PITCH;
+const GRID_X = CREATIVE.gridX;
+const GRID_Y = CREATIVE.gridY;
+const GRID_COLS = CREATIVE.columns;
+const GRID_VIEW_W = CREATIVE.gridWidth;
+const GRID_VIEW_H = CREATIVE.gridHeight;
+const HOTBAR_Y = CREATIVE.hotbarY;
+const SCROLL_X = CREATIVE.scrollbarX;
+const SCROLL_Y = CREATIVE.scrollbarY;
+const SCROLL_W = CREATIVE.scrollbarWidth;
+const SCROLL_TRACK_H = CREATIVE.scrollbarHeight;
+const THUMB_H = CREATIVE.thumbHeight;
+const PAGE_SIZE = CREATIVE.pageSize;
 const ASSET = '/textures/gui/creative/';
 
 const TAB_ICONS: Readonly<Record<CreativeInventoryTab, string>> = {
@@ -126,10 +130,10 @@ export class CreativeInventoryUi {
 
   private createScrollbar(): void {
     this.scrollTrack.dataset.creativeScrollTrack = 'true';
-    this.scrollTrack.style.cssText = `position:absolute;left:${SCROLL_X}px;top:${SCROLL_Y}px;width:12px;height:${SCROLL_TRACK_H}px;cursor:pointer`;
+    this.scrollTrack.style.cssText = `position:absolute;left:${SCROLL_X}px;top:${SCROLL_Y}px;width:${SCROLL_W}px;height:${SCROLL_TRACK_H}px;cursor:pointer`;
     this.scrollThumb.src = `${ASSET}scroll_bar.png`;
     this.scrollThumb.draggable = false;
-    this.scrollThumb.style.cssText = 'position:absolute;left:0;top:0;width:12px;height:15px;image-rendering:pixelated;cursor:grab';
+    this.scrollThumb.style.cssText = `position:absolute;left:0;top:0;width:${SCROLL_W}px;height:${THUMB_H}px;image-rendering:pixelated;cursor:grab`;
     this.scrollTrack.append(this.scrollThumb);
     this.windowEl.append(this.scrollTrack);
   }
@@ -196,17 +200,19 @@ export class CreativeInventoryUi {
 
   public pageFromTrackClientY(clientY: number, entries: readonly CreativeInventoryEntry[]): number {
     const rect = this.scrollTrack.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / Math.max(1, rect.height)));
-    return Math.round(ratio * this.getMaxPage(entries));
+    // Convert to unscaled track pixels, then centre the thumb on the cursor so
+    // the grab point matches where the thumb is drawn.
+    const scale = rect.height / SCROLL_TRACK_H || 1;
+    const offset = (clientY - rect.top) / scale - THUMB_H / 2;
+    return Math.round(fractionForThumbOffset(offset) * this.getMaxPage(entries));
   }
 
   public render(entries: readonly CreativeInventoryEntry[]): void {
     const start = this.page * PAGE_SIZE;
     for (let i = 0; i < PAGE_SIZE; i++) this.slotRenderer.renderSlot(this.sourceSlots[i]!, entries[start + i]?.stack ?? null);
     const maxPage = this.getMaxPage(entries);
-    const maxThumbTop = SCROLL_TRACK_H - THUMB_H;
-    const top = maxPage === 0 ? 0 : Math.round((maxThumbTop * this.page) / maxPage);
-    this.scrollThumb.style.top = `${top}px`;
+    const fraction = maxPage === 0 ? 0 : this.page / maxPage;
+    this.scrollThumb.style.top = `${thumbOffsetForFraction(fraction)}px`;
   }
 
   public renderHotbar(stacks: readonly (import('./ItemStack').ItemStack | null)[]): void {

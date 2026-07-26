@@ -72,8 +72,9 @@ export function registerDefaultSmeltingAndFuels(
   tryRegisterSmelting('chicken', 'chicken_raw', -1, new ItemStack('chicken_cooked', 'item', 1, 0), 200);
   tryRegisterSmelting('mutton', 'mutton_raw', -1, new ItemStack('mutton_cooked', 'item', 1, 0), 200);
   tryRegisterSmelting('fish_cod', 'fish_cod_raw', -1, new ItemStack('fish_cod_cooked', 'item', 1, 0), 200);
-  tryRegisterSmelting('fish_salmon', 'fish_salmon_raw', -1, new ItemStack('fish_salmon_cooked', 'item', 1, 0), 200);
-  tryRegisterSmelting('potato', 'potato', -1, new ItemStack('potato_baked', 'item', 1, 0), 200);
+  // Beta FurnaceRecipes also smelts cobblestone back to stone and clay to brick.
+  tryRegisterSmelting('cobblestone_to_stone', BlockIds.Cobblestone, -1, new ItemStack(BlockIds.Stone, 'block', 1, 0), 200);
+  tryRegisterSmelting('clay_to_brick', 'clay_ball', -1, new ItemStack('brick', 'item', 1, 0), 200);
 
   // --- Fuels ---
   // Coal and Charcoal (1600 ticks = 80s = 8 items)

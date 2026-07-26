@@ -70,6 +70,8 @@ import { BlockIds } from '../blocks/BlockId';
 import { classifyItemRender } from '../inventory/ItemRenderClassifier';
 import { BlockItemModelBuilder } from '../inventory/BlockItemModelBuilder';
 import { ChunkRenderer, attachEntityLighting } from '../rendering/ChunkRenderer';
+import { AnimatedIconController } from '../inventory/AnimatedIconController';
+import { EntityLightingUpdater } from '../rendering/EntityLightingUpdater';
 import { FogController } from '../rendering/FogController';
 import { Renderer } from '../rendering/Renderer';
 import { SkyRenderer } from '../rendering/sky/SkyRenderer';
@@ -103,6 +105,7 @@ import { registerTntBehaviour } from '../world/behaviours/TntBehaviour';
 import { registerPoweredRailBehaviour } from '../world/behaviours/PoweredRailBehaviour';
 import { registerRailBehaviour } from '../world/behaviours/RailBehaviour';
 import { SlabBehaviour } from '../world/behaviours/SlabBehaviour';
+import { registerShapedBlockBehaviours } from '../world/behaviours/ShapedBlockBehaviours';
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
@@ -132,6 +135,9 @@ import { PlayerModel } from '../player/PlayerModel';
 import { PlayerAnimator } from '../player/PlayerAnimator';
 import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
 import { MinecartRenderSystem } from '../rendering/MinecartRenderer';
+import { BoatRenderer } from '../rendering/BoatRenderer';
+import { registerBedBehaviour } from '../world/behaviours/BedBehaviour';
+import { BED_FOOT_TO_HEAD } from '../blocks/shapes/BlockShapes';
 import { FirstPersonHeldItemRenderer } from '../rendering/FirstPersonHeldItemRenderer.ts';
 import { FirstPersonMotionController } from '../player/FirstPersonMotionController';
 import { CameraModeController, CameraMode } from '../camera/CameraModeController';
@@ -217,12 +223,17 @@ export class Engine {
   private readonly blockHighlight: BlockHighlight;
   private readonly destroyOverlayRenderer: DestroyOverlayRenderer;
   private readonly itemAtlas: ItemTextureAtlas;
+  private readonly animatedIcons: AnimatedIconController;
+  private readonly entityLighting: EntityLightingUpdater;
+  /** World spawn, used to aim the compass needle. */
+  private readonly worldSpawnPoint: { x: number; y: number; z: number };
   private readonly itemEntityManager: ItemEntityManager;
   private readonly entityManager: EntityManager;
   private readonly naturalMobSpawner: NaturalMobSpawner;
   private readonly explosionService: ExplosionService;
   private readonly entityParticles: SimpleEntityParticleSink;
   private readonly minecartRenderSystem: MinecartRenderSystem;
+  private readonly boatRenderer: BoatRenderer;
   private simulationAccumulatorTicks = 0;
   /** Beta distanceWalkedModified and nextStepDistance equivalents. */
   private playerStepDistance = 0;
@@ -353,6 +364,7 @@ export class Engine {
     const worldSeed = BigInt(metadata.seed);
     this.atlas = atlas;
     this.itemAtlas = itemAtlas;
+    this.animatedIcons = new AnimatedIconController(itemAtlas);
     this.blockRegistry = blockRegistry;
     this.skinManager = skinManager;
     this.armourGeometryCache = new ArmourGeometryCache(skinManager);
@@ -443,6 +455,7 @@ export class Engine {
       sounds:this.audioManager,
     });
     this.minecartRenderSystem = new MinecartRenderSystem(this.entityManager, this.renderer.scene, this.entityTextures);
+    this.boatRenderer = new BoatRenderer(this.renderer.scene, this.entityTextures.get('boat'));
     this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng, (x, y, z) => this.audioManager.play({ type: 'random.explode', x, y, z }));
 
     this.persistence.setEntityHooks({
@@ -492,6 +505,19 @@ export class Engine {
     registerRailBehaviour(this.blockBehaviourRegistry);
     registerPoweredRailBehaviour(this.blockBehaviourRegistry);
     this.blockBehaviourRegistry.register(BlockIds.Slab, new SlabBehaviour());
+    // Must run after the behaviours above: it layers shared shape bounds onto
+    // whatever behaviour each block already has.
+    registerShapedBlockBehaviours(this.blockBehaviourRegistry);
+    registerBedBehaviour(this.blockBehaviourRegistry, {
+      // Beta `World.isDaytime` refuses sleep outside 12541..23458 ticks.
+      isNight: () => {
+        const time = this.worldTime.getTimeOfDayTicks();
+        return time >= 12541 && time <= 23458;
+      },
+      getPlayerPosition: () => this.player.position,
+      isPlayerSleeping: () => this.playerSleeping,
+      beginSleep: (bedX, bedY, bedZ, direction) => this.beginSleep(bedX, bedY, bedZ, direction),
+    });
     this.weatherController = new WeatherController(worldSeed);
     this.weatherController.restore(metadata.weather);
     this.precipitationSimulator = new PrecipitationSimulator(worldSeed);
@@ -551,6 +577,7 @@ export class Engine {
       getDifficulty: () => metadata.difficulty,
       isThundering: () => this.weatherController.getState().thundering,
     });
+    this.worldSpawnPoint = metadata.spawn;
     this.precipitationRenderer = new PrecipitationRenderer(
       this.renderer.scene,
       this.chunkManager,
@@ -609,6 +636,7 @@ export class Engine {
       this.entityManager,
       animalInteractions,
       this.foodUseController,
+      (id, x, y, z) => this.audioManager.play({ type: 'block.action', id, x, y, z }),
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
     this.destroyOverlayRenderer = new DestroyOverlayRenderer(
@@ -679,7 +707,9 @@ export class Engine {
     registerDefaultSmeltingAndFuels(this.smeltingRegistry, this.fuelRegistry, blockRegistry, this.hotbarHudRenderer.getSlotContentRenderer()['itemIcons']);
     this.furnaceManager.deserialize(metadata.furnaces);
 
+    this.entityLighting = new EntityLightingUpdater(this.blockUpdateWorld);
     this.chestManager = new ChestManager(this.blockUpdateWorld, this.itemEntityManager);
+    this.chestManager.setBlockSoundSink((id, x, y, z) => this.audioManager.play({ type: 'block.action', id, x, y, z }));
     this.chestManager.deserialize(metadata.chests);
 
     registerChestBehaviour(this.blockBehaviourRegistry, this.chestManager);
@@ -1132,6 +1162,7 @@ export class Engine {
       this.playerArmourRenderer.dispose();
       this.playerModel.dispose();
       this.minecartRenderSystem.dispose();
+      this.boatRenderer.dispose();
       this.entityManager.dispose();
       this.entityParticles.dispose();
     });
@@ -1244,6 +1275,7 @@ export class Engine {
     this.worldEventQueue.drainNoop();
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
+    this.updateAnimatedItemIcons();
     if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.cameraController.update();
     if(!this.player.isAlive()){this.player.wishVelocity.x=this.player.wishVelocity.z=0;}
     else {
@@ -1365,6 +1397,11 @@ export class Engine {
     const px = Math.floor(this.player.position.x); const pey = Math.floor(this.player.position.y + FIRST_PERSON_CAMERA_OFFSET_Y); const pz = Math.floor(this.player.position.z);
     const skyLight = this.blockUpdateWorld.getSkylight(px, pey, pz); const blockLight = this.blockUpdateWorld.getBlocklight(px, pey, pz);
     this.firstPersonArmRenderer.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
+    // Mobs, dropped items, arrows, minecarts and TNT all carry the same Beta
+    // lighting uniforms but nothing wrote them before, so they rendered fully
+    // lit at night and underground.
+    this.entityLighting.setAtmosphere(atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
+    this.entityManager.forEachActive((entity) => this.entityLighting.update(entity));
     this.heldItemRenderer.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
     this.armourMaterialCache.updateLighting(skyLight, blockLight, atmos.effectiveSkylightSubtracted, atmos.sunBrightnessFactor);
 
@@ -1398,6 +1435,14 @@ export class Engine {
     this.rainSplashRenderer.update(camera, deltaSeconds, atmos, this.precipitationRenderer);
     const splashEnd = performance.now();
     this.lightningManager.setAudioHook((x, y, z, distance) => this.audioManager.play({ type: 'weather.thunder', x, y, z, distance }));
+    // Beta drives its rain sound from raindrop impacts, not a loop: the
+    // splash renderer already knows where drops land, so it is the correct
+    // trigger point. `aboveListener` reproduces Beta's quieter, lower-pitched
+    // variant used when the drop lands above the player under open sky.
+    this.rainSplashRenderer.setAudioHook((x, y, z) => {
+      const aboveListener = y > this.player.position.y + 1;
+      this.audioManager.playRainImpact(x, y, z, aboveListener);
+    });
     this.lightningManager.update(deltaSeconds, weatherState, camera.position.x, camera.position.y, camera.position.z);
     this.lightningRenderer.update(this.lightningManager.getState());
     this.performanceProfiler.recordWeatherTimings({
@@ -1443,6 +1488,7 @@ export class Engine {
     const entityAlpha = totalTicksForAlpha - Math.floor(totalTicksForAlpha);
     this.entityManager.render(entityAlpha);
     this.minecartRenderSystem.update(entityAlpha);
+    this.boatRenderer.update(this.entityManager, entityAlpha);
     this.entityParticles.update(deltaSeconds);
     this.debugStatsCollector.recordFrame(deltaSeconds);
     if (this.debugOverlay.isVisible()) {
@@ -1652,4 +1698,77 @@ export class Engine {
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3)); geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2)); geom.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geom.computeVertexNormals(); return geom;
   }
+
+  /** True while the player is asleep in a bed (Beta `isPlayerSleeping`). */
+  private playerSleeping = false;
+  /** Bed the player is currently occupying, for wake-up cleanup. */
+  private sleepingBed: { x: number; y: number; z: number } | null = null;
+
+  /**
+   * Beta `EntityPlayer.sleepInBedAt` success path: the player is laid on the
+   * bed and, once asleep, the world skips to the next morning.
+   *
+   * Beta runs a 100-tick fade before advancing time; this project applies the
+   * skip immediately on the next tick, which produces the same observable
+   * result (wake at dawn) without a partially-simulated sleep state.
+   */
+  private beginSleep(bedX: number, bedY: number, bedZ: number, direction: number): void {
+    this.playerSleeping = true;
+    this.sleepingBed = { x: bedX, y: bedY, z: bedZ };
+
+    // Beta lays the player on the bed, facing along its direction.
+    this.player.position.x = bedX + 0.5;
+    this.player.position.y = bedY + 0.6;
+    this.player.position.z = bedZ + 0.5;
+    this.player.velocity.x = 0;
+    this.player.velocity.y = 0;
+    this.player.velocity.z = 0;
+    this.cameraController.setRotation(direction * Math.PI / 2, this.cameraController.getPitch());
+
+    this.wakeUpAtDawn();
+  }
+
+  /**
+   * Beta `World.wakeUpAllPlayers`: advance to the start of the next day
+   * (`time + 24000` rounded down to a day boundary) and clear the occupied
+   * flag so the bed can be used again.
+   */
+  private wakeUpAtDawn(): void {
+    const total = this.worldTime.getTotalTicks();
+    const nextDawn = total + 24000 - ((total + 24000) % 24000);
+    this.worldTime.addTicks(nextDawn - total);
+
+    const bed = this.sleepingBed;
+    if (bed !== null) {
+      const metadata = this.blockUpdateWorld.getBlockMetadata(bed.x, bed.y, bed.z);
+      // Clear Beta's occupied bit (4) on both halves.
+      this.blockUpdateWorld.setBlockMetadata(bed.x, bed.y, bed.z, metadata & ~4, { notifyNeighbours: false });
+      const offset = BED_FOOT_TO_HEAD[metadata & 3] ?? [0, 1];
+      const headX = bed.x + offset[0];
+      const headZ = bed.z + offset[1];
+      if (this.blockUpdateWorld.getBlock(headX, bed.y, headZ) === BlockIds.Bed) {
+        const headMeta = this.blockUpdateWorld.getBlockMetadata(headX, bed.y, headZ);
+        this.blockUpdateWorld.setBlockMetadata(headX, bed.y, headZ, headMeta & ~4, { notifyNeighbours: false });
+      }
+    }
+
+    this.playerSleeping = false;
+    this.sleepingBed = null;
+  }
+
+  /**
+   * Keeps the compass and clock icons in step with world state. Beta redraws
+   * these procedurally each tick; this project selects the matching frame from
+   * the shipped strip instead, so the atlas is only re-uploaded when the frame
+   * actually changes.
+   */
+  private updateAnimatedItemIcons(): void {
+    this.animatedIcons.updateClock(this.worldTime.getCelestialAngle());
+    this.animatedIcons.updateCompass(
+      this.cameraController.getYaw(),
+      this.worldSpawnPoint.x - this.player.position.x,
+      this.worldSpawnPoint.z - this.player.position.z,
+    );
+  }
+
 }

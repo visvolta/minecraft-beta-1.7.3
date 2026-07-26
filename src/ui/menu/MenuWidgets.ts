@@ -1,9 +1,10 @@
 import { applyGuiScaleCssVariables, computeGuiScale, logicalHeight, logicalWidth } from '../GuiScale';
+import { BUTTON_HEIGHT, BUTTON_WIDTH, BUTTON_WIDTH_HALF, FONT_SIZE_PX, betaFont } from '../BetaGuiMetrics';
 
 const GUI = '/textures/gui/';
-export const BUTTON_PRIMARY = { width: 300, height: 36 } as const;
-export const BUTTON_SECONDARY = { width: 220, height: 32 } as const;
-export const BUTTON_COMPACT = { width: 150, height: 28 } as const;
+export const BUTTON_PRIMARY = { width: BUTTON_WIDTH, height: BUTTON_HEIGHT } as const;
+export const BUTTON_SECONDARY = { width: BUTTON_WIDTH_HALF * 2, height: BUTTON_HEIGHT } as const;
+export const BUTTON_COMPACT = { width: BUTTON_WIDTH_HALF, height: BUTTON_HEIGHT } as const;
 
 export function guiWidth(): number { return logicalWidth(); }
 export function guiHeight(): number { return logicalHeight(); }
@@ -36,7 +37,7 @@ export class GuiButton {
   public constructor(label: string, onClick: () => void, width: number = BUTTON_PRIMARY.width, height: number = BUTTON_PRIMARY.height) {
     this.width = width;
     this.element.textContent = label;
-    this.element.style.cssText = `position:absolute;width:${width}px;height:${height}px;border:0;padding:0;background:url('${GUI}button_normal.png') 0 0 / 100% 100%;color:white;font:18px Minecraft, monospace;text-shadow:2px 2px #333;image-rendering:pixelated;cursor:pointer`;
+    this.element.style.cssText = `position:absolute;width:${width}px;height:${height}px;border:0;padding:0 4px;box-sizing:border-box;background:url('${GUI}button_normal.png') 0 0 / 100% 100%;color:white;font:${FONT_SIZE_PX}px Minecraft, monospace;line-height:1;display:flex;align-items:center;justify-content:center;text-align:center;white-space:nowrap;overflow:hidden;text-shadow:1px 1px #3f3f3f;image-rendering:pixelated;cursor:pointer`;
     this.element.addEventListener('mouseenter', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_highlighted.png')`; });
     this.element.addEventListener('mouseleave', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_normal.png')`; });
     this.element.addEventListener('mousedown', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_clicked.png')`; });
@@ -50,7 +51,7 @@ export class GuiButton {
 
 export class TextBox {
   public readonly element = document.createElement('input');
-  public constructor(value = '') { this.element.value = value; this.element.style.cssText = 'position:absolute;background:#000;border:2px solid #a0a0a0;color:white;font:18px Minecraft, monospace;height:30px;box-sizing:border-box;padding:2px 4px'; }
+  public constructor(value = '') { this.element.value = value; this.element.style.cssText = `position:absolute;background:#000;border:1px solid #a0a0a0;color:white;font:${betaFont()};line-height:1;height:${BUTTON_HEIGHT}px;box-sizing:border-box;padding:0 4px`; }
   public setPosition(x: number, y: number, w: number): void { this.element.style.left = `${x}px`; this.element.style.top = `${y}px`; this.element.style.width = `${w}px`; }
   public get value(): string { return this.element.value; }
   public set value(value: string) { this.element.value = value; }

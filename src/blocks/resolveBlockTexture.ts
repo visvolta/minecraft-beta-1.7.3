@@ -28,21 +28,24 @@ export function resolveSlabTexture(
   slot: 'top' | 'bottom' | 'side',
   metadata: number | undefined
 ): string {
-  const meta = (metadata !== undefined && !Number.isNaN(metadata)) ? metadata : 0;
-  if (meta === 0) {
-    return slot === 'top' ? 'stone_slab_top' : 'stone_slab_side';
+  // Only the low bits select the material in Beta `BlockStep`; any placement
+  // flag must not change which texture is sampled.
+  const material = (metadata !== undefined && Number.isFinite(metadata)) ? (metadata & 7) : 0;
+  const horizontal = slot === 'top' || slot === 'bottom';
+  switch (material) {
+    case 1:
+      return horizontal ? 'sandstone_top' : 'sandstone_normal';
+    case 2:
+      return 'planks_oak';
+    case 3:
+      return 'cobblestone';
+    case 0:
+    default:
+      // Beta stone slab: cut face on top and bottom, ridged side texture.
+      return horizontal ? 'stone_slab_top' : 'stone_slab_side';
   }
-  if (meta === 1) {
-    return (slot === 'top' || slot === 'bottom') ? 'sandstone_top' : 'sandstone_normal';
-  }
-  if (meta === 2) {
-    return 'planks_oak';
-  }
-  if (meta === 3) {
-    return 'cobblestone';
-  }
-  return 'stone_slab_top';
 }
+
 
 /**
  * Maps an absolute world face direction to a semantic block face (front/side/top/bottom) 

@@ -52,8 +52,19 @@ export function resolveBlockDrops(blockId:number,blockMetadata=0,canHarvest=true
       const lapisCount = 4 + Math.floor(Math.random() * 5);
       return [{ type: 'item', id: 'dye_powder_blue', count: lapisCount, metadata: 4 }];
 
+    // Beta BlockGlowStone: drops 2-4 glowstone dust, never the block.
+    case BlockIds.Glowstone:
+      return [{ type: 'item', id: 'glowstone_dust', count: 2 + Math.floor(random * 3), metadata: 0 }];
+
+    // Beta BlockBed: only the foot half drops, and it drops the bed item.
+    case BlockIds.Bed:
+      if ((blockMetadata & 8) !== 0) return []; // Head half drops nothing
+      return [{ type: 'item', id: 'bed', count: 1, metadata: 0 }];
+
     case BlockIds.DoubleSlab:
-      return [{ type: 'block', id: BlockIds.Slab, count: 2, metadata: blockMetadata }];
+      // Beta `damageDropped` carries the material across; mask to the
+      // material bits so no placement flag leaks into the dropped item.
+      return [{ type: 'block', id: BlockIds.Slab, count: 2, metadata: blockMetadata & 7 }];
 
     case BlockIds.RedstoneWire:
       return [{ type: 'item', id: 'redstone_dust', count: 1, metadata: 0 }];

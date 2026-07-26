@@ -5,6 +5,10 @@ import type { Player } from '../player/Player';
 import { AABB } from './AABB';
 import type { BlockBehaviourRegistry } from '../world/BlockBehaviour';
 import { forEachBlockBounds, getBlockBounds } from '../world/BlockBehaviour';
+import { BlockIds } from '../blocks/BlockId';
+
+/** Beta `BlockSoulSand.onEntityWalking`: motionX/Z *= 0.4. */
+const SOUL_SAND_HORIZONTAL_DRAG = 0.4;
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';import { CREATIVE_FLIGHT_ACCELERATION, CREATIVE_FLIGHT_DRAG_PER_SECOND, CREATIVE_FLIGHT_VERTICAL_SPEED } from '../player/PlayerConstants';import { isLavaInAABB,isWaterInAABB } from '../entities/living/HazardDetection';import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 
 /**
@@ -229,6 +233,25 @@ export class PlayerPhysics {
     }
 
     player.grounded=grounded;player.onGround=grounded;player.collidedHorizontally=collidedHorizontally;player.isCollidedHorizontally=collidedHorizontally;player.isCollidedVertically=collidedVertically;
+
+    this.applyWalkedBlockDrag(player);
+  }
+
+  /**
+   * Beta `Block.onEntityWalking`: the block being stood on may damp horizontal
+   * motion. Soul sand is the only such block in Beta 1.7.3, multiplying both
+   * horizontal components by 0.4 each tick.
+   *
+   * Sampled at the block just below the feet, matching Beta's use of
+   * `posY - yOffset - 1` when reporting the walked-on block.
+   */
+  private applyWalkedBlockDrag(player: Player): void {
+    const blockX = Math.floor(player.position.x);
+    const blockY = Math.floor(player.position.y - 0.2);
+    const blockZ = Math.floor(player.position.z);
+    if (this.blockUpdateWorld.getBlock(blockX, blockY, blockZ) !== BlockIds.SoulSand) return;
+    player.velocity.x *= SOUL_SAND_HORIZONTAL_DRAG;
+    player.velocity.z *= SOUL_SAND_HORIZONTAL_DRAG;
   }
 
   /**

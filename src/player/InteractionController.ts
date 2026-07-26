@@ -17,6 +17,24 @@ import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import { Inventory } from '../inventory/Inventory';
 import { InventoryTransferService } from '../inventory/InventoryTransferService';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
+import { ArrowEntity } from '../entities/projectiles/ArrowEntity';
+import { FishingBobberEntity } from '../entities/projectiles/FishingBobberEntity';
+import { BoatEntity } from '../entities/BoatEntity';
+import { PaintingEntity } from '../entities/PaintingEntity';
+import { BED_FOOT_TO_HEAD } from '../blocks/shapes/BlockShapes';
+
+/** Maps a hit wall normal onto Beta's painting direction index. */
+function paintingDirectionFromFace(faceX: number, faceZ: number): number {
+  if (faceZ === -1) return 0;
+  if (faceX === -1) return 1;
+  if (faceZ === 1) return 2;
+  if (faceX === 1) return 3;
+  return -1;
+}
+
+/** Beta `EntityArrow` constructor: setArrowHeading(..., 1.5F, 1.0F). */
+const BOW_ARROW_SPEED = 1.5;
+const BOW_ARROW_SPREAD = 1;
 import type { EntityManager } from '../entities/core/EntityManager';
 import { Entity } from '../entities/core/Entity';
 import { LivingEntity } from '../entities/living/LivingEntity';
@@ -48,11 +66,15 @@ export class InteractionController {
   private readonly lookDirection = new THREE.Vector3();
 
   private selectedSlotIndex = 0; // 0 to 8 representing the selected hotbar slot
+  /** The player's cast bobber, if any. At most one exists at a time. */
+  private activeBobber: FishingBobberEntity | null = null;
   private readonly wheelHandler = (event: WheelEvent): void => {
     // Only process scroll if pointer is locked (playing)
     if (this.input.isPointerLocked()) {
       const change = Math.sign(event.deltaY);
       this.selectedSlotIndex = (this.selectedSlotIndex + change + 9) % 9;
+      // Beta drops the bobber when the rod leaves the hand.
+      this.clearFishingBobber();
     }
   };
   private currentHit: RaycastHit | undefined;
@@ -84,6 +106,12 @@ export class InteractionController {
     private readonly entityManager: EntityManager,
     private readonly animalInteractions:AnimalInteractionService,
     private readonly foodUse:FoodUseController,
+    /**
+     * Optional positional sink for block-driven sounds (door hinge, chest
+     * lid). Injected rather than importing AudioManager so this controller
+     * stays usable headlessly in validation.
+     */
+    private readonly playBlockSound?: (id: 'door_open' | 'door_close' | 'chestopen' | 'chestclosed' | 'click', x: number, y: number, z: number) => void,
   ) {
     this.input = input;
     this.camera = camera;
@@ -102,6 +130,8 @@ export class InteractionController {
   public dispose(): void {
     window.removeEventListener('wheel', this.wheelHandler);
     this.breakingController.reset();
+    // A bobber must never survive teardown or a world change.
+    this.clearFishingBobber();
   }
 
   /** Currently targeted block, if any (for BlockHighlight to render). */
@@ -187,8 +217,9 @@ export class InteractionController {
   }
 
   public setSelectedSlotIndex(slotIndex: number): void {
-    if (slotIndex >= 0 && slotIndex < 9) {
+    if (slotIndex >= 0 && slotIndex < 9 && slotIndex !== this.selectedSlotIndex) {
       this.selectedSlotIndex = slotIndex;
+      this.clearFishingBobber();
     }
   }
 
@@ -262,10 +293,20 @@ export class InteractionController {
       }
     }
 
-    if (this.input.isMouseButtonJustPressed('right') && this.player.ridingEntity instanceof MinecartEntity) {
+    if (this.input.isMouseButtonJustPressed('right') && (this.player.ridingEntity instanceof MinecartEntity || this.player.ridingEntity instanceof BoatEntity)) {
       this.dismountPlayerFromMinecart();
       this.player.swingItem();
       return;
+    }
+
+    if (this.input.isMouseButtonJustPressed('right') && this.targetedInteractEntity instanceof BoatEntity) {
+      const boat = this.targetedInteractEntity;
+      if (boat.riddenByEntity === null && this.player.ridingEntity === null) {
+        this.player.mountEntity(boat);
+        boat.updateRiderPosition();
+        this.player.swingItem();
+        return;
+      }
     }
 
     if (this.input.isMouseButtonJustPressed('right') && this.targetedInteractEntity instanceof MinecartEntity) {
@@ -275,6 +316,14 @@ export class InteractionController {
         this.player.swingItem();
         return;
       }
+    }
+
+    // Utility items act on right-click regardless of whether a block is
+    // targeted (Beta's `Item.onItemRightClick`), so this runs before the
+    // no-target early-out below.
+    if (this.input.isMouseButtonJustPressed('right') && this.tryUseUtilityItem()) {
+      this.player.swingItem();
+      return;
     }
 
     if (this.currentHit === undefined) {
@@ -292,12 +341,19 @@ export class InteractionController {
         return;
       }
 
+      if (this.tryUseBoatItem(this.currentHit)
+        || this.tryUsePaintingItem(this.currentHit)
+        || this.tryUseBedItem(this.currentHit)) {
+        this.player.swingItem();
+        return;
+      }
+
       const { x, y, z } = this.currentHit.blockPos;
       const targetId = this.blockUpdateWorld.getBlock(x, y, z);
       
       const behaviour = this.behaviourRegistry.get(targetId);
       if (behaviour.onInteract) {
-        const consumed = behaviour.onInteract({ world: this.blockUpdateWorld, gameTick: 0 } as any, x, y, z);
+        const consumed = behaviour.onInteract({ world: this.blockUpdateWorld, gameTick: 0, playBlockSound: this.playBlockSound } as any, x, y, z);
         if (consumed) {
           this.player.swingItem();
           return;
@@ -315,6 +371,246 @@ export class InteractionController {
       }
       this.player.swingItem();
     }
+  }
+
+  /**
+   * Beta `Item.onItemRightClick` for the items that act on the player rather
+   * than on a targeted block.
+   *
+   * Returns true when the item consumed the click.
+   */
+  private tryUseUtilityItem(): boolean {
+    const stack = this.inventory.getStack(this.selectedSlotIndex);
+    if (stack === null || stack.identity.type !== 'item') return false;
+    const definition = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+    if (definition === undefined) return false;
+
+    if (definition.id === 'bow') return this.fireBow();
+    if (definition.id === 'fishing_rod') return this.useFishingRod();
+    return false;
+  }
+
+  /**
+   * Beta `ItemFishingRod.onItemRightClick`: casting with no bobber out throws
+   * one; clicking again reels it in and damages the rod by the catch result
+   * (0 nothing, 1 fish, 2 stuck in ground, 3 hooked entity).
+   */
+  private useFishingRod(): boolean {
+    const existing = this.activeBobber;
+    if (existing !== null && !existing.removed) {
+      const damage = existing.reelIn();
+      this.activeBobber = null;
+      if (damage > 0 && this.inventory.damageItemInSlot(this.selectedSlotIndex, damage)?.status === 'broken') {
+        this.itemEntityManager.emitItemBreak(this.player.position.x, this.player.position.y, this.player.position.z);
+      }
+      return true;
+    }
+
+    const yaw = this.cameraYawRadians();
+    const pitch = this.cameraPitchRadians();
+    // Beta spawns the bobber just in front of and below the eye.
+    const originX = this.player.position.x - Math.cos(yaw) * 0.16;
+    const originY = this.player.getEyeY() - 0.1;
+    const originZ = this.player.position.z - Math.sin(yaw) * 0.16;
+
+    const bobber = new FishingBobberEntity(
+      this.entityManager.context,
+      this.player as unknown as Entity,
+      originX, originY, originZ,
+    );
+    bobber.cast(yaw, pitch);
+    bobber.spawnCatch = (x, y, z, mx, my, mz) => {
+      this.itemEntityManager.spawnThrownItem(
+        x, y, z,
+        { type: 'item', id: 'fish_cod_raw', count: 1, metadata: 0 },
+        mx, my, mz, 10,
+      );
+    };
+    this.entityManager.add(bobber);
+    this.activeBobber = bobber;
+    this.playBlockSound?.('click', this.player.position.x, this.player.position.y, this.player.position.z);
+    return true;
+  }
+
+  /**
+   * Removes any bobber in the world. Called when the player switches away
+   * from the rod, dies, or the world is torn down, so a hook can never
+   * outlive the session that made it.
+   */
+  public clearFishingBobber(): void {
+    if (this.activeBobber === null) return;
+    if (!this.activeBobber.removed) this.activeBobber.markRemoved();
+    this.activeBobber = null;
+  }
+
+  /**
+   * Beta 1.7.3 `ItemBow.onItemRightClick`: fires immediately on right-click
+   * (the charge-up mechanic is post-Beta). Consumes one arrow, spawns the
+   * projectile from the player's eye with Beta's 1.5 speed / 1.0 spread, and
+   * costs one durability point.
+   */
+  private fireBow(): boolean {
+    const arrowSlot = this.findArrowSlot();
+    if (arrowSlot < 0) return false;
+
+    const yaw = this.cameraYawRadians();
+    const pitch = this.cameraPitchRadians();
+    // Beta offsets the spawn slightly behind and below the eye.
+    const originX = this.player.position.x - Math.cos(yaw) * 0.16;
+    const originY = this.player.getEyeY() - 0.1;
+    const originZ = this.player.position.z - Math.sin(yaw) * 0.16;
+
+    const arrow = new ArrowEntity(this.entityManager.context, this.player as unknown as Entity, originX, originY, originZ);
+    const dirX = -Math.sin(yaw) * Math.cos(pitch);
+    const dirY = -Math.sin(pitch);
+    const dirZ = Math.cos(yaw) * Math.cos(pitch);
+    arrow.launch(dirX, dirY, dirZ, BOW_ARROW_SPEED, BOW_ARROW_SPREAD);
+    this.entityManager.add(arrow);
+
+    this.inventory.decrementSlot(arrowSlot, 1);
+    if (this.inventory.damageItemInSlot(this.selectedSlotIndex, 1)?.status === 'broken') {
+      this.itemEntityManager.emitItemBreak(this.player.position.x, this.player.position.y, this.player.position.z);
+    }
+    this.playBlockSound?.('click', this.player.position.x, this.player.position.y, this.player.position.z);
+    return true;
+  }
+
+  /** First inventory slot holding arrows, or -1. */
+  private findArrowSlot(): number {
+    const slots = this.inventory.getSlots();
+    for (let slot = 0; slot < slots.length; slot++) {
+      const stack = slots[slot];
+      if (stack === null || stack === undefined) continue;
+      const definition = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+      if (definition?.id === 'arrow') return slot;
+    }
+    return -1;
+  }
+
+  private cameraYawRadians(): number {
+    return Math.atan2(-this.lookDirection.x, this.lookDirection.z) + Math.PI;
+  }
+
+  private cameraPitchRadians(): number {
+    return Math.asin(Math.max(-1, Math.min(1, -this.lookDirection.y)));
+  }
+
+  /**
+   * Beta `ItemBoat.onItemRightClick`: a boat is placed on the water surface
+   * the player is looking at, sitting on top of the block face that was hit.
+   */
+  private tryUseBoatItem(hit: RaycastHit): boolean {
+    const stack = this.inventory.getStack(this.selectedSlotIndex);
+    if (stack === null || stack.identity.type !== 'item') return false;
+    const definition = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+    if (definition?.id !== 'boat') return false;
+
+    const { x, y, z } = hit.blockPos;
+    const targetId = this.blockUpdateWorld.getBlock(x, y, z);
+    const isWater = targetId === BlockIds.WaterStill || targetId === BlockIds.WaterFlowing;
+    if (!isWater) return false;
+
+    // Beta floats the hull on the surface of the clicked water column.
+    const boat = new BoatEntity(this.entityManager.context, x + 0.5, y + 1, z + 0.5);
+    boat.yaw = (this.cameraYawRadians() * 180 / Math.PI) + 90;
+    boat.previousYaw = boat.yaw;
+    boat.dropParts = (bx, by, bz) => this.dropBoatParts(bx, by, bz);
+    if (this.entityManager.getEntitiesInAABB(boat.getAABB(), (entity) => entity.canBeCollidedWith()).length > 0) {
+      return false;
+    }
+
+    this.entityManager.add(boat);
+    if (this.shouldConsumeHeldItem()) this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+    return true;
+  }
+
+  /** Beta boat wreckage: three planks and two sticks. */
+  private dropBoatParts(x: number, y: number, z: number): void {
+    for (let i = 0; i < 3; i++) {
+      this.itemEntityManager.spawnThrownItem(x, y, z, { type: 'block', id: BlockIds.Planks, count: 1, metadata: 0 }, 0, 0.1, 0, 10);
+    }
+    for (let i = 0; i < 2; i++) {
+      this.itemEntityManager.spawnThrownItem(x, y, z, { type: 'item', id: 'stick', count: 1, metadata: 0 }, 0, 0.1, 0, 10);
+    }
+  }
+
+  /**
+   * Beta `ItemPainting.onItemUse`: paintings attach to the vertical face of
+   * the block that was clicked, choosing a random variant that fits.
+   */
+  private tryUsePaintingItem(hit: RaycastHit): boolean {
+    const stack = this.inventory.getStack(this.selectedSlotIndex);
+    if (stack === null || stack.identity.type !== 'item') return false;
+    const definition = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+    if (definition?.id !== 'painting') return false;
+
+    // Only vertical faces can hold a painting.
+    if (hit.face.y !== 0) return false;
+    const direction = paintingDirectionFromFace(hit.face.x, hit.face.z);
+    if (direction < 0) return false;
+
+    const anchorX = hit.blockPos.x + hit.face.x;
+    const anchorY = hit.blockPos.y;
+    const anchorZ = hit.blockPos.z + hit.face.z;
+
+    const world = {
+      isSolid: (bx: number, by: number, bz: number): boolean => {
+        const id = this.blockUpdateWorld.getBlock(bx, by, bz);
+        return this.blockRegistry.getById(id)?.solid === true;
+      },
+    };
+    const painting = PaintingEntity.create(
+      this.entityManager.context, world,
+      anchorX, anchorY, anchorZ, direction,
+      (bound) => Math.floor(Math.random() * bound),
+    );
+    if (painting === null) return false;
+
+    painting.dropAsItem = (px, py, pz) => {
+      this.itemEntityManager.spawnThrownItem(px, py, pz, { type: 'item', id: 'painting', count: 1, metadata: 0 }, 0, 0.1, 0, 10);
+    };
+    this.entityManager.add(painting);
+    if (this.shouldConsumeHeldItem()) this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+    return true;
+  }
+
+  /**
+   * Beta `ItemBed.onItemUse`: the clicked cell becomes the foot and the head
+   * goes one step along the player's facing. Both need solid ground and free
+   * space, otherwise the placement is refused.
+   */
+  private tryUseBedItem(hit: RaycastHit): boolean {
+    const stack = this.inventory.getStack(this.selectedSlotIndex);
+    if (stack === null || stack.identity.type !== 'item') return false;
+    const definition = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+    if (definition?.id !== 'bed') return false;
+    if (hit.face.y !== 1) return false;
+
+    const footX = hit.blockPos.x;
+    const footY = hit.blockPos.y + 1;
+    const footZ = hit.blockPos.z;
+    if (this.blockUpdateWorld.getBlock(footX, footY, footZ) !== BlockIds.Air) return false;
+
+    // Beta orients the bed by the player's facing quadrant.
+    const yaw = this.cameraYawRadians();
+    const direction = Math.floor((yaw * 4 / (Math.PI * 2)) + 0.5) & 3;
+    const offset = BED_FOOT_TO_HEAD[direction] ?? [0, 1];
+    const headX = footX + offset[0];
+    const headZ = footZ + offset[1];
+
+    if (this.blockUpdateWorld.getBlock(headX, footY, headZ) !== BlockIds.Air) return false;
+    const groundUnderHead = this.blockUpdateWorld.getBlock(headX, footY - 1, headZ);
+    if (this.blockRegistry.getById(groundUnderHead)?.solid !== true) return false;
+
+    // Foot carries the plain direction; the head sets bit 8.
+    this.blockUpdateWorld.setBlock(footX, footY, footZ, BlockIds.Bed, {
+      metadata: direction, notifyNeighbours: true, updateLighting: true,
+    });
+    this.blockUpdateWorld.setBlock(headX, footY, headZ, BlockIds.Bed, {
+      metadata: direction | 8, notifyNeighbours: true, updateLighting: true,
+    });
+    if (this.shouldConsumeHeldItem()) this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+    return true;
   }
 
   private tryUseMinecartItem(hit: RaycastHit): boolean {
@@ -396,6 +692,7 @@ export class InteractionController {
     // Keys 1-9 set selectedSlotIndex 0-8 with immediate snap
     for (let i = 0; i < 9; i++) {
       if (this.input.isDigitKeyJustPressed((i + 1).toString() as DigitKey)) {
+        if (i !== this.selectedSlotIndex) this.clearFishingBobber();
         this.selectedSlotIndex = i;
       }
     }

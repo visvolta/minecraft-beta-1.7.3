@@ -24,7 +24,7 @@ export class SignUi {
     const title = document.createElement('div');
     title.innerText = 'Edit sign message';
     title.style.color = '#fff';
-    title.style.fontFamily = 'monospace';
+    title.style.fontFamily = 'Minecraft, monospace';
     title.style.fontSize = '20px';
     title.style.marginBottom = '20px';
 
@@ -52,7 +52,7 @@ export class SignUi {
       input.style.border = 'none';
       input.style.outline = 'none';
       input.style.textAlign = 'center';
-      input.style.fontFamily = 'monospace';
+      input.style.fontFamily = 'Minecraft, monospace';
       input.style.fontSize = '20px';
       input.style.color = '#000';
       this.inputs.push(input);
@@ -76,7 +76,7 @@ export class SignUi {
     const help = document.createElement('div');
     help.innerText = 'Press ENTER to save, ESC to cancel';
     help.style.color = '#ccc';
-    help.style.fontFamily = 'monospace';
+    help.style.fontFamily = 'Minecraft, monospace';
     help.style.fontSize = '12px';
     help.style.marginTop = '20px';
 

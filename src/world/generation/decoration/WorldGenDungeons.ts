@@ -1,12 +1,25 @@
 import type { TreeWorldAccessor } from '../trees/TreeWorldAccessor';
 import type { JavaRandom } from '../random/JavaRandom';
 import { BlockIds } from '../../../blocks/BlockId';
+import { pickDungeonSpawnerMob, rollDungeonChest, type LootStack } from './DungeonLoot';
+
+/**
+ * Optional sink for generated dungeon contents. World generation runs before
+ * chest and spawner tile entities exist, so the generator reports what it
+ * placed and the caller attaches it once those are available.
+ */
+export interface DungeonPopulationSink {
+  onDungeonChest(x: number, y: number, z: number, contents: ReadonlyMap<number, LootStack>): void;
+  onDungeonSpawner(x: number, y: number, z: number, mobId: string): void;
+}
 
 /**
  * Faithful port of Beta 1.7.3's WorldGenDungeons.
  * Generates cobblestone and mossy cobblestone rooms with a central spawner and chest blocks.
  */
 export class WorldGenDungeons {
+  public constructor(private readonly sink?: DungeonPopulationSink) {}
+
   public generate(world: TreeWorldAccessor, random: JavaRandom, x: number, y: number, z: number): boolean {
     const heightLimit = 3; // room height factor
     const radiusX = random.nextInt(2) + 2;
@@ -90,6 +103,11 @@ export class WorldGenDungeons {
           // Chest must be placed next to exactly 1 wall block
           if (adjWallCount === 1) {
             world.setBlock(cx, y, cz, BlockIds.Chest);
+            // Beta rolls the loot table immediately, from the same RNG
+            // stream, so the draws must happen here even when no sink is
+            // attached — otherwise later decoration shifts for this seed.
+            const contents = rollDungeonChest(random);
+            this.sink?.onDungeonChest(cx, y, cz, contents);
             break;
           }
         }
@@ -98,6 +116,9 @@ export class WorldGenDungeons {
 
     // Place the Mob Spawner block in the exact center of the room
     world.setBlock(x, y, z, BlockIds.Spawner);
+    // Beta sets the spawner's mob straight after placing it.
+    const mobId = pickDungeonSpawnerMob(random);
+    this.sink?.onDungeonSpawner(x, y, z, mobId);
 
     return true;
   }

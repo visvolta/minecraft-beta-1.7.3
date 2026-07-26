@@ -1,6 +1,6 @@
 /**
- * Public surface of the replacement persistence system (Stage 1, isolated —
- * not wired into production gameplay).
+ * Public surface of the persistence system. Wired into the running game via
+ * Engine and ApplicationController.
  */
 
 export { WorldPersistenceService, WRITE_PRIORITY_BACKGROUND, WRITE_PRIORITY_FORCED } from './WorldPersistenceService';

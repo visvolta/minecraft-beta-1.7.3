@@ -21,6 +21,11 @@ export interface BlockBehaviourContext {
   readonly events?: WorldEventQueue;
   readonly power?: RedstonePowerEngine;
   readonly entities?: EntityManager;
+  /**
+   * Positional one-shot sink for block-driven sounds (door hinge, chest lid).
+   * Optional so worker-side and headless callers can omit audio entirely.
+   */
+  readonly playBlockSound?: (id: 'door_open' | 'door_close' | 'chestopen' | 'chestclosed' | 'click', x: number, y: number, z: number) => void;
 }
 
 export interface BlockBehaviour {

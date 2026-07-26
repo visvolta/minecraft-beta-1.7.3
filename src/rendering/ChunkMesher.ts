@@ -27,6 +27,7 @@ import { getBetaFluidCornerHeight } from './fluid/FluidSurfaceGeometry';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import { ChunkPassMask, classifyBlockPassMask, hasChunkPass } from './meshing/ChunkPassMask';
 import { getRailShapeForBlock } from '../world/rails/RailShapes';
+import { fenceSelectionShapes, stairShapes } from '../blocks/shapes/BlockShapes';
 
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
@@ -971,6 +972,14 @@ export class ChunkMesher {
               this.buildTrapdoor(buffers, chunk, x, y, z, blockId, definition);
               continue;
             }
+            if (blockId === BlockIds.WoodStairs || blockId === BlockIds.CobblestoneStairs) {
+              this.buildStairs(buffers, chunk, x, y, z, definition);
+              continue;
+            }
+            if (blockId === BlockIds.Fence) {
+              this.buildFence(buffers, chunk, x, y, z, definition);
+              continue;
+            }
             if (blockId === BlockIds.Rail || blockId === BlockIds.PoweredRail || blockId === BlockIds.DetectorRail) {
               this.buildRail(buffers, chunk, x, y, z, blockId);
               continue;
@@ -1897,6 +1906,91 @@ export class ChunkMesher {
         [px + 0.5 + dx, y + oy, pz + w + dz],
         [px + 0.5, y + 1 + oy, pz + w]
     ], [0, 0, 1], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
+  }
+
+  /**
+   * Emits a box in local cell coordinates. Shared by the stair and fence
+   * builders so their geometry is generated from the same declarations the
+   * collision and selection paths read, keeping the two in agreement.
+   */
+  private pushLocalBox(
+    buffers: MeshBuffers,
+    x: number, y: number, z: number,
+    b: { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number },
+    uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
+    tint: readonly [number, number, number],
+    light: LightSample,
+  ): void {
+    const { minX, minY, minZ, maxX, maxY, maxZ } = b;
+    const x0 = x + minX, x1 = x + maxX;
+    const y0 = y + minY, y1 = y + maxY;
+    const z0 = z + minZ, z1 = z + maxZ;
+
+    // Beta shades faces by orientation; reuse the same relative brightness the
+    // cube path applies so a stair blends with the blocks around it.
+    const TOP = 1, BOTTOM = 0.5, NS = 0.8, EW = 0.6;
+
+    buffers.pushQuad([[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], [0, 1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, undefined, undefined, TOP);
+    buffers.pushQuad([[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], [0, -1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, undefined, undefined, BOTTOM);
+    buffers.pushQuad([[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], [0, 0, 1], uvRect, tint, light, 1, FluidTextureKind.WaterStill, undefined, undefined, NS);
+    buffers.pushQuad([[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]], [0, 0, -1], uvRect, tint, light, 1, FluidTextureKind.WaterStill, undefined, undefined, NS);
+    buffers.pushQuad([[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], [1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, undefined, undefined, EW);
+    buffers.pushQuad([[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], [-1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, undefined, undefined, EW);
+  }
+
+  /**
+   * Beta `BlockStairs`: a half-height base plus a half-cell full-height step
+   * on the side opposite the facing. Geometry comes from stairShapes so it
+   * matches the collision and selection boxes exactly.
+   */
+  private buildStairs(
+    buffers: MeshBuffers,
+    chunk: Chunk,
+    x: number, y: number, z: number,
+    definition: BlockDefinition,
+  ): void {
+    const metadata = chunk.getBlockMetadata(x, y, z);
+    const uvRect = this.getSafeUvRect(resolveBlockTexture(definition, 'side'));
+    if (uvRect === undefined) return;
+    const tint = resolveBlockTint(definition, 'side');
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    for (const shape of stairShapes(metadata)) {
+      this.pushLocalBox(buffers, x, y, z, shape, uvRect, tint, light);
+    }
+  }
+
+  /**
+   * Beta `BlockFence`: a centre post plus a rail toward each connected
+   * neighbour. Connections are recomputed here from chunk data (the mesher
+   * cannot use the behaviour context), but follow the same rule as
+   * fenceConnectionsAt: link to fences and to solid blocks.
+   */
+  private buildFence(
+    buffers: MeshBuffers,
+    chunk: Chunk,
+    x: number, y: number, z: number,
+    definition: BlockDefinition,
+  ): void {
+    const uvRect = this.getSafeUvRect(resolveBlockTexture(definition, 'side'));
+    if (uvRect === undefined) return;
+    const tint = resolveBlockTint(definition, 'side');
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+
+    const links = (dx: number, dz: number): boolean => {
+      const id = this.getBlockAt(chunk, x + dx, y, z + dz);
+      if (id === BlockIds.Fence) return true;
+      const def = this.blockRegistry.getById(id);
+      return def?.solid === true;
+    };
+
+    const connections = {
+      negX: links(-1, 0), posX: links(1, 0),
+      negZ: links(0, -1), posZ: links(0, 1),
+    };
+
+    for (const shape of fenceSelectionShapes(connections)) {
+      this.pushLocalBox(buffers, x, y, z, shape, uvRect, tint, light);
+    }
   }
 
   private buildSlab(

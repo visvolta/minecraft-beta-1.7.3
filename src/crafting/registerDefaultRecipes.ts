@@ -19,11 +19,19 @@ function canRegister(id: string | number, blockRegistry: BlockRegistry, itemIcon
  * Registers all standard Beta 1.7.3 shaped and shapeless crafting recipes
  * for blocks and items registered in BlockRegistry and ItemIconResolver.
  */
+/**
+ * Recipes skipped during the last registerDefaultRecipes call because an
+ * ingredient or output was not registered. Exposed so validation can fail on
+ * missing content instead of it disappearing into a console warning.
+ */
+export const skippedRecipes: string[] = [];
+
 export function registerDefaultRecipes(
   registry: RecipeRegistry,
   blockRegistry: BlockRegistry,
   itemIcons: ItemIconResolver
 ): void {
+  skippedRecipes.length = 0;
   const tryRegisterShaped = (
     recipeName: string,
     width: number,
@@ -34,12 +42,12 @@ export function registerDefaultRecipes(
   ): void => {
     // Verify all ingredients and output exist
     if (!canRegister(output.identity.id, blockRegistry, itemIcons)) {
-      console.warn(`[RecipeRegistry] Skipping recipe "${recipeName}": missing output asset/block "${output.identity.id}"`);
+      skippedRecipes.push(`${recipeName}: missing output "${String(output.identity.id)}"`);
       return;
     }
     for (const ing of pattern) {
       if (ing !== null && !canRegister(ing.id, blockRegistry, itemIcons)) {
-        console.warn(`[RecipeRegistry] Skipping recipe "${recipeName}": missing ingredient asset/block "${ing.id}"`);
+        skippedRecipes.push(`${recipeName}: missing ingredient "${String(ing.id)}"`);
         return;
       }
     }
@@ -52,12 +60,12 @@ export function registerDefaultRecipes(
     output: ItemStack
   ): void => {
     if (!canRegister(output.identity.id, blockRegistry, itemIcons)) {
-      console.warn(`[RecipeRegistry] Skipping recipe "${recipeName}": missing output asset/block "${output.identity.id}"`);
+      skippedRecipes.push(`${recipeName}: missing output "${String(output.identity.id)}"`);
       return;
     }
     for (const ing of ingredients) {
       if (!canRegister(ing.id, blockRegistry, itemIcons)) {
-        console.warn(`[RecipeRegistry] Skipping recipe "${recipeName}": missing ingredient asset/block "${ing.id}"`);
+        skippedRecipes.push(`${recipeName}: missing ingredient "${String(ing.id)}"`);
         return;
       }
     }
@@ -267,4 +275,245 @@ export function registerDefaultRecipes(
       null,  stick
     ], new ItemStack(hoe, 'item', 1, 0), true);
   }
+
+  // ---------------------------------------------------------------- armour
+  // Beta RecipesArmor: helmet "XXX"/"X X", chestplate "X X"/"XXX"/"XXX",
+  // leggings "XXX"/"X X"/"X X", boots "X X"/"X X".
+  const ARMOUR_MATERIALS: readonly { readonly ingredient: string; readonly prefix: string }[] = [
+    { ingredient: 'leather', prefix: 'leather' },
+    { ingredient: 'iron_ingot', prefix: 'iron' },
+    { ingredient: 'diamond', prefix: 'diamond' },
+    { ingredient: 'gold_ingot', prefix: 'gold' },
+  ];
+  for (const { ingredient, prefix } of ARMOUR_MATERIALS) {
+    const x = { id: ingredient };
+    tryRegisterShaped(`${prefix}_helmet`, 3, 2, [
+      x, x, x,
+      x, null, x,
+    ], new ItemStack(`${prefix}_helmet`, 'item', 1, 0), false);
+    tryRegisterShaped(`${prefix}_chestplate`, 3, 3, [
+      x, null, x,
+      x, x, x,
+      x, x, x,
+    ], new ItemStack(`${prefix}_chestplate`, 'item', 1, 0), false);
+    tryRegisterShaped(`${prefix}_leggings`, 3, 3, [
+      x, x, x,
+      x, null, x,
+      x, null, x,
+    ], new ItemStack(`${prefix}_leggings`, 'item', 1, 0), false);
+    tryRegisterShaped(`${prefix}_boots`, 3, 2, [
+      x, null, x,
+      x, null, x,
+    ], new ItemStack(`${prefix}_boots`, 'item', 1, 0), false);
+  }
+
+  // ------------------------------------------------------- weapons & tools
+  // Beta RecipesWeapons: bow is " #X"/"# X"/" #X" with string and sticks.
+  tryRegisterShaped('bow', 3, 3, [
+    null, { id: 'stick' }, { id: 'string' },
+    { id: 'stick' }, null, { id: 'string' },
+    null, { id: 'stick' }, { id: 'string' },
+  ], new ItemStack('bow', 'item', 1, 0), true);
+
+  tryRegisterShaped('arrow', 1, 3, [
+    { id: 'flint' },
+    { id: 'stick' },
+    { id: 'feather' },
+  ], new ItemStack('arrow', 'item', 4, 0), false);
+
+  tryRegisterShaped('fishing_rod', 3, 3, [
+    null, null, { id: 'stick' },
+    null, { id: 'stick' }, { id: 'string' },
+    { id: 'stick' }, null, { id: 'string' },
+  ], new ItemStack('fishing_rod', 'item', 1, 0), true);
+
+  // ------------------------------------------------------------- utilities
+  tryRegisterShaped('bucket', 3, 2, [
+    { id: 'iron_ingot' }, null, { id: 'iron_ingot' },
+    null, { id: 'iron_ingot' }, null,
+  ], new ItemStack('bucket_empty', 'item', 1, 0), false);
+
+  tryRegisterShaped('compass', 3, 3, [
+    null, { id: 'iron_ingot' }, null,
+    { id: 'iron_ingot' }, { id: 'redstone_dust' }, { id: 'iron_ingot' },
+    null, { id: 'iron_ingot' }, null,
+  ], new ItemStack('compass', 'item', 1, 0), false);
+
+  tryRegisterShaped('clock', 3, 3, [
+    null, { id: 'gold_ingot' }, null,
+    { id: 'gold_ingot' }, { id: 'redstone_dust' }, { id: 'gold_ingot' },
+    null, { id: 'gold_ingot' }, null,
+  ], new ItemStack('clock', 'item', 1, 0), false);
+
+  tryRegisterShaped('boat', 3, 2, [
+    { id: BlockIds.Planks, metadata: -1 }, null, { id: BlockIds.Planks, metadata: -1 },
+    { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 },
+  ], new ItemStack('boat', 'item', 1, 0), false);
+
+  tryRegisterShaped('minecart', 3, 2, [
+    { id: 'iron_ingot' }, null, { id: 'iron_ingot' },
+    { id: 'iron_ingot' }, { id: 'iron_ingot' }, { id: 'iron_ingot' },
+  ], new ItemStack('minecart', 'item', 1, 0), false);
+
+  tryRegisterShaped('paper', 3, 1, [
+    { id: 'reeds' }, { id: 'reeds' }, { id: 'reeds' },
+  ], new ItemStack('paper', 'item', 3, 0), false);
+
+  tryRegisterShaped('book', 1, 3, [
+    { id: 'paper' }, { id: 'paper' }, { id: 'paper' },
+  ], new ItemStack('book_normal', 'item', 1, 0), false);
+
+  tryRegisterShaped('bowl', 3, 2, [
+    { id: BlockIds.Planks, metadata: -1 }, null, { id: BlockIds.Planks, metadata: -1 },
+    null, { id: BlockIds.Planks, metadata: -1 }, null,
+  ], new ItemStack('bowl', 'item', 4, 0), false);
+
+  // ---------------------------------------------------------------- blocks
+  tryRegisterShaped('furnace', 3, 3, [
+    { id: BlockIds.Cobblestone }, { id: BlockIds.Cobblestone }, { id: BlockIds.Cobblestone },
+    { id: BlockIds.Cobblestone }, null, { id: BlockIds.Cobblestone },
+    { id: BlockIds.Cobblestone }, { id: BlockIds.Cobblestone }, { id: BlockIds.Cobblestone },
+  ], new ItemStack(BlockIds.Furnace, 'block', 1, 0), false);
+
+  tryRegisterShaped('fence', 3, 2, [
+    { id: 'stick' }, { id: 'stick' }, { id: 'stick' },
+    { id: 'stick' }, { id: 'stick' }, { id: 'stick' },
+  ], new ItemStack(BlockIds.Fence, 'block', 2, 0), false);
+
+  tryRegisterShaped('cobblestone_stairs', 3, 3, [
+    { id: BlockIds.Cobblestone }, null, null,
+    { id: BlockIds.Cobblestone }, { id: BlockIds.Cobblestone }, null,
+    { id: BlockIds.Cobblestone }, { id: BlockIds.Cobblestone }, { id: BlockIds.Cobblestone },
+  ], new ItemStack(BlockIds.CobblestoneStairs, 'block', 4, 0), true);
+
+  tryRegisterShaped('snow_block', 2, 2, [
+    { id: 'snowball' }, { id: 'snowball' },
+    { id: 'snowball' }, { id: 'snowball' },
+  ], new ItemStack(BlockIds.SnowBlock, 'block', 1, 0), false);
+
+  tryRegisterShaped('clay_block', 2, 2, [
+    { id: 'clay_ball' }, { id: 'clay_ball' },
+    { id: 'clay_ball' }, { id: 'clay_ball' },
+  ], new ItemStack(BlockIds.Clay, 'block', 1, 0), false);
+
+  tryRegisterShaped('wool_from_string', 2, 2, [
+    { id: 'string' }, { id: 'string' },
+    { id: 'string' }, { id: 'string' },
+  ], new ItemStack(BlockIds.Wool, 'block', 1, 0), false);
+
+  tryRegisterShaped('rail', 3, 3, [
+    { id: 'iron_ingot' }, null, { id: 'iron_ingot' },
+    { id: 'iron_ingot' }, { id: 'stick' }, { id: 'iron_ingot' },
+    { id: 'iron_ingot' }, null, { id: 'iron_ingot' },
+  ], new ItemStack(BlockIds.Rail, 'block', 16, 0), false);
+
+  tryRegisterShaped('powered_rail', 3, 3, [
+    { id: 'gold_ingot' }, null, { id: 'gold_ingot' },
+    { id: 'gold_ingot' }, { id: 'stick' }, { id: 'gold_ingot' },
+    { id: 'gold_ingot' }, { id: 'redstone_dust' }, { id: 'gold_ingot' },
+  ], new ItemStack(BlockIds.PoweredRail, 'block', 6, 0), false);
+
+  tryRegisterShaped('detector_rail', 3, 3, [
+    { id: 'iron_ingot' }, null, { id: 'iron_ingot' },
+    { id: 'iron_ingot' }, { id: 'stone_pressure_plate' }, { id: 'iron_ingot' },
+    { id: 'iron_ingot' }, { id: 'redstone_dust' }, { id: 'iron_ingot' },
+  ], new ItemStack(BlockIds.DetectorRail, 'block', 6, 0), false);
+
+  tryRegisterShaped('redstone_torch', 1, 2, [
+    { id: 'redstone_dust' },
+    { id: 'stick' },
+  ], new ItemStack(BlockIds.RedstoneTorchOn, 'block', 1, 0), false);
+
+  tryRegisterShaped('lever', 1, 2, [
+    { id: 'stick' },
+    { id: BlockIds.Cobblestone },
+  ], new ItemStack(BlockIds.Lever, 'block', 1, 0), false);
+
+  tryRegisterShaped('stone_button', 1, 2, [
+    { id: BlockIds.Stone },
+    { id: BlockIds.Stone },
+  ], new ItemStack(BlockIds.StoneButton, 'block', 1, 0), false);
+
+  // ------------------------------------------------------------------ food
+  // Beta RecipesFood: mushroom stew accepts either mushroom order.
+  tryRegisterShaped('mushroom_stew_a', 1, 3, [
+    { id: BlockIds.RedMushroom },
+    { id: BlockIds.BrownMushroom },
+    { id: 'bowl' },
+  ], new ItemStack('mushroom_stew', 'item', 1, 0), false);
+  tryRegisterShaped('mushroom_stew_b', 1, 3, [
+    { id: BlockIds.BrownMushroom },
+    { id: BlockIds.RedMushroom },
+    { id: 'bowl' },
+  ], new ItemStack('mushroom_stew', 'item', 1, 0), false);
+
+  tryRegisterShaped('bread', 3, 1, [
+    { id: 'wheat' }, { id: 'wheat' }, { id: 'wheat' },
+  ], new ItemStack('bread', 'item', 1, 0), false);
+
+  tryRegisterShaped('cookie', 3, 1, [
+    { id: 'wheat' }, { id: 'dye_powder_brown' }, { id: 'wheat' },
+  ], new ItemStack('cookie', 'item', 8, 0), false);
+
+  tryRegisterShaped('golden_apple', 3, 3, [
+    { id: 'gold_ingot' }, { id: 'gold_ingot' }, { id: 'gold_ingot' },
+    { id: 'gold_ingot' }, { id: 'apple' }, { id: 'gold_ingot' },
+    { id: 'gold_ingot' }, { id: 'gold_ingot' }, { id: 'gold_ingot' },
+  ], new ItemStack('apple_golden', 'item', 1, 0), false);
+
+  // ------------------------------------------------------------------ dyes
+  // Beta RecipesDyes: flowers and bone grind into dye.
+  tryRegisterShapeless('dye_yellow', [{ id: BlockIds.Dandelion }], new ItemStack('dye_powder_yellow', 'item', 2, 11));
+  tryRegisterShapeless('dye_red', [{ id: BlockIds.Rose }], new ItemStack('dye_powder_red', 'item', 2, 1));
+  tryRegisterShapeless('dye_bonemeal', [{ id: 'bone' }], new ItemStack('dye_powder_white', 'item', 3, 15));
+
+
+  // ------------------------------------------------- Beta storage blocks
+  // RecipesIngots: 3x3 of the material packs into a block, and one block
+  // unpacks back into nine. Lapis packs from dye metadata 4.
+  const STORAGE_BLOCKS: readonly { readonly block: number; readonly item: string; readonly name: string }[] = [
+    { block: BlockIds.GoldBlock, item: 'gold_ingot', name: 'gold' },
+    { block: BlockIds.IronBlock, item: 'iron_ingot', name: 'iron' },
+    { block: BlockIds.DiamondBlock, item: 'diamond', name: 'diamond' },
+    { block: BlockIds.LapisBlock, item: 'dye_powder_blue', name: 'lapis' },
+  ];
+  for (const { block, item, name } of STORAGE_BLOCKS) {
+    const cell = { id: item };
+    tryRegisterShaped(`${name}_block`, 3, 3, [
+      cell, cell, cell,
+      cell, cell, cell,
+      cell, cell, cell,
+    ], new ItemStack(block, 'block', 1, 0), false);
+    // Reverse recipe: one block yields nine of the material.
+    tryRegisterShaped(`${name}_block_unpack`, 1, 1, [
+      { id: block },
+    ], new ItemStack(item, 'item', 9, 0), false);
+  }
+
+  tryRegisterShaped('sandstone', 2, 2, [
+    { id: BlockIds.Sand }, { id: BlockIds.Sand },
+    { id: BlockIds.Sand }, { id: BlockIds.Sand },
+  ], new ItemStack(BlockIds.SandStone, 'block', 1, 0), false);
+
+  tryRegisterShaped('brick_block', 2, 2, [
+    { id: 'brick' }, { id: 'brick' },
+    { id: 'brick' }, { id: 'brick' },
+  ], new ItemStack(BlockIds.BrickBlock, 'block', 1, 0), false);
+
+  // Beta 1.7.3 has no glowstone crafting recipe: glowstone dust is a Nether
+  // drop and the block cannot be reassembled. Intentionally absent.
+
+  // Beta ItemBed recipe: three wool over three planks.
+  tryRegisterShaped('bed', 3, 2, [
+    { id: BlockIds.Wool, metadata: -1 }, { id: BlockIds.Wool, metadata: -1 }, { id: BlockIds.Wool, metadata: -1 },
+    { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 },
+  ], new ItemStack('bed', 'item', 1, 0), false);
+
+  // Beta ItemPainting recipe: eight sticks around wool.
+  tryRegisterShaped('painting', 3, 3, [
+    { id: 'stick' }, { id: 'stick' }, { id: 'stick' },
+    { id: 'stick' }, { id: BlockIds.Wool, metadata: -1 }, { id: 'stick' },
+    { id: 'stick' }, { id: 'stick' }, { id: 'stick' },
+  ], new ItemStack('painting', 'item', 1, 0), false);
+
 }

@@ -89,9 +89,6 @@ export const BlockIds = {
   WoodDoor: 64,
   RedstoneTorchOff: 75,
   RedstoneTorchOn: 76,
-  RedstoneBlock: 152,
-  RedstoneLampOff: 123,
-  RedstoneLampOn: 124,
   RedstoneWire: 55,
   /** Beta 1.7.3 rails. */
   Rail: 66,
@@ -121,6 +118,26 @@ export const BlockIds = {
   DoubleSlab: 43,
   /** Beta 1.7.3 netherrack. Supports infinite fire. */
   Netherrack: 87,
+  /** Beta 1.7.3 sandstone. Distinct top/side/bottom faces. */
+  /** Beta 1.7.3 bed block. Two halves; metadata bit 8 marks the head. */
+  Bed: 26,
+  SandStone: 24,
+  /** Beta 1.7.3 lapis lazuli storage block. */
+  LapisBlock: 22,
+  /** Beta 1.7.3 gold storage block. */
+  GoldBlock: 41,
+  /** Beta 1.7.3 iron storage block. */
+  IronBlock: 42,
+  /** Beta 1.7.3 diamond storage block. */
+  DiamondBlock: 57,
+  /** Beta 1.7.3 brick block (crafted from four bricks). */
+  BrickBlock: 45,
+  /** Beta 1.7.3 glowstone. Emits full light; drops dust. */
+  Glowstone: 89,
+  /** Beta 1.7.3 cobblestone stairs. Non-full block. */
+  CobblestoneStairs: 67,
+  /** Beta 1.7.3 soul sand ("hellsand"). Slows movement and is slightly short. */
+  SoulSand: 88,
   /** Beta 1.7.3 glass (transparent solid). */
   Glass: 20,
   IronDoor: 71,

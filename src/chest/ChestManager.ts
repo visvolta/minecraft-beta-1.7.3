@@ -156,12 +156,30 @@ export class ChestManager {
     };
   }
 
+  /**
+   * Positional sink for the chest lid sounds. Injected so this manager stays
+   * independent of the audio system and usable headlessly.
+   */
+  private blockSoundSink?: (id: 'chestopen' | 'chestclosed', x: number, y: number, z: number) => void;
+
+  public setBlockSoundSink(sink: (id: 'chestopen' | 'chestclosed', x: number, y: number, z: number) => void): void {
+    this.blockSoundSink = sink;
+  }
+
   public update(): void {
     for (const container of this.containers.values()) {
       container.prevLidAngle = container.lidAngle;
 
       const isOpen = container.viewerCount > 0;
       let targetAngle = isOpen ? 1.0 : 0.0;
+
+      // Beta plays the lid sound as the animation starts moving, once per
+      // transition rather than per tick.
+      if (isOpen && container.lidAngle === 0) {
+        this.blockSoundSink?.('chestopen', container.x + 0.5, container.y + 0.5, container.z + 0.5);
+      } else if (!isOpen && container.lidAngle === 1) {
+        this.blockSoundSink?.('chestclosed', container.x + 0.5, container.y + 0.5, container.z + 0.5);
+      }
 
       if (container.lidAngle < targetAngle) {
         container.lidAngle += 0.1;

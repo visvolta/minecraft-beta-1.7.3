@@ -183,11 +183,13 @@ export class ChestRenderer {
       const c = containers[i]!;
       this.chestMap.set(c.getPosKey(), i);
 
-      // Facing rotations
+      // Facing rotations. The model's decorated front face is +Z, so rotY is
+      // the turn that points +Z along the stored facing:
+      // 2 = -Z (north), 3 = +Z (south), 4 = -X (west), 5 = +X (east).
       let rotY = 0;
       if (c.facing === 2) rotY = Math.PI;
-      else if (c.facing === 4) rotY = Math.PI / 2;
-      else if (c.facing === 5) rotY = -Math.PI / 2;
+      else if (c.facing === 4) rotY = -Math.PI / 2;
+      else if (c.facing === 5) rotY = Math.PI / 2;
 
       this.dummyObj.position.set(c.x + 0.5, c.y + 5/16, c.z + 0.5);
       this.dummyObj.rotation.set(0, rotY, 0);

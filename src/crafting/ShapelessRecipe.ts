@@ -66,4 +66,10 @@ export class ShapelessRecipe implements CraftingRecipe {
 
     return false;
   }
+
+  /** @see CraftingRecipe.result */
+  public get result(): ItemStack {
+    return this.output;
+  }
+
 }

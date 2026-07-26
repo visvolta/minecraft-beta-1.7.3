@@ -1,10 +1,13 @@
 import type { BlockRegistry } from './BlockRegistry';
 import { BlockIds } from './BlockId';
 import type { BlockDefinition, TintColor } from './BlockDefinition';
-import { DEFAULT_BLOCK_SOUND, stepFromDig, type DigSoundMaterial } from '../audio/BlockSoundMaterial';
+import { DEFAULT_BLOCK_SOUND, type BlockSoundDefinition } from '../audio/BlockSoundMaterial';
+import { BETA_BLOCK_SOUNDS } from '../audio/betaBlockSounds';
 
 
 const BETA_EXPLOSION_RESISTANCE: Readonly<Record<string, number>> = {
+  sandstone: 4, lapis_block: 5, gold_block: 10, iron_block: 10, diamond_block: 10,
+  brick_block: 10, glowstone: 1.5, soul_sand: 2.5, cobblestone_stairs: 10, bed: 1,
   air: 0, stone: 6, grass: 0.6, dirt: 0.5, cobblestone: 6,
   bedrock: 3_600_000, sand: 0.5, gravel: 0.6, clay: 0.6,
   flowing_water: 100, still_water: 100, flowing_lava: 100, still_lava: 100,
@@ -12,17 +15,18 @@ const BETA_EXPLOSION_RESISTANCE: Readonly<Record<string, number>> = {
 };
 
 
-function defaultSoundFor(definition: BlockDefinition): typeof DEFAULT_BLOCK_SOUND {
-  const name = definition.name;
-  let dig: DigSoundMaterial = 'stone';
-  if (name.includes('glass')) dig = 'glass';
-  else if (name.includes('wood') || name.includes('plank') || name.includes('log') || name.includes('door') || name.includes('fence') || name.includes('chest') || name.includes('sign') || name.includes('ladder')) dig = 'wood';
-  else if (name.includes('sand')) dig = 'sand';
-  else if (name.includes('gravel')) dig = 'gravel';
-  else if (name.includes('snow')) dig = 'snow';
-  else if (name.includes('wool') || name.includes('cloth')) dig = 'cloth';
-  else if (name.includes('grass') || name.includes('dirt') || name.includes('leaves') || name.includes('sapling') || name.includes('flower') || name.includes('mushroom') || name.includes('reed') || name.includes('crops') || name.includes('cactus')) dig = 'grass';
-  return { dig, step: stepFromDig(dig), volume: 1, pitch: 1 };
+/**
+ * Beta-authentic block sound, from the transcribed `setStepSound` table.
+ *
+ * Falls back to the stone default only for ids Beta itself does not define
+ * (e.g. Air). The previous name-substring heuristic guessed wrongly for many
+ * blocks — "dandelion" and "rose" contain none of the plant keywords, so
+ * flowers broke with stone sounds.
+ */
+function defaultSoundFor(definition: BlockDefinition): BlockSoundDefinition {
+  const beta = BETA_BLOCK_SOUNDS[definition.id];
+  if (beta !== undefined) return { volume: 1, pitch: 1, ...beta };
+  return DEFAULT_BLOCK_SOUND;
 }
 
 function registerBlock(registry: BlockRegistry, definition: BlockDefinition): void {
@@ -649,9 +653,6 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.DetectorRail, 'detector_rail', 'Detector Rail', { all: 'rail_detector' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.RedstoneTorchOn, 'redstone_torch_on', 'Redstone Torch', { all: 'redstone_torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', lightEmission: 7 });
   registerSimple(BlockIds.RedstoneTorchOff, 'redstone_torch_off', 'Redstone Torch (Off)', { all: 'redstone_torch_off' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross' });
-  registerSimple(BlockIds.RedstoneBlock, 'redstone_block', 'Redstone Block', { all: 'redstone_block' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
-  registerSimple(BlockIds.RedstoneLampOff, 'redstone_lamp_off', 'Redstone Lamp', { all: 'redstone_lamp_off' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
-  registerSimple(BlockIds.RedstoneLampOn, 'redstone_lamp_on', 'Lit Redstone Lamp', { all: 'redstone_lamp_on' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: 15 });
 
   registerBlock(registry, {
     id: BlockIds.RedstoneWire,
@@ -676,6 +677,23 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.TNT, 'tnt', 'TNT', { top: 'tnt_top', bottom: 'tnt_bottom', side: 'tnt_side' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Netherrack, 'netherrack', 'Netherrack', { all: 'netherrack' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
 
+  // Beta 1.7.3 blocks 22/24/41/42/45/57/67/88/89.
+  // Sandstone has distinct top/bottom faces (BlockSandStone).
+  registerSimple(BlockIds.SandStone, 'sandstone', 'Sandstone', { top: 'sandstone_top', bottom: 'sandstone_bottom', side: 'sandstone_normal' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.LapisBlock, 'lapis_block', 'Lapis Lazuli Block', { all: 'lapis_block' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.GoldBlock, 'gold_block', 'Block of Gold', { all: 'gold_block' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.IronBlock, 'iron_block', 'Block of Iron', { all: 'iron_block' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.DiamondBlock, 'diamond_block', 'Block of Diamond', { all: 'diamond_block' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.BrickBlock, 'brick_block', 'Bricks', { all: 'brick' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  // Glowstone emits Beta's full light value (setLightValue(1.0F) -> 15).
+  registerSimple(BlockIds.Glowstone, 'glowstone', 'Glowstone', { all: 'glowstone' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: 15 });
+  // Soul sand: a full-width block standing 1/8 short, so entities sink into it.
+  registerSimple(BlockIds.SoulSand, 'soul_sand', 'Soul Sand', { all: 'soul_sand' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  // Cobblestone stairs share the stair geometry/bounds with wooden stairs.
+  registerSimple(BlockIds.CobblestoneStairs, 'cobblestone_stairs', 'Cobblestone Stairs', { all: 'cobblestone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
+  // Bed: two-block furniture, 9/16 tall. Textures resolve per half at mesh time.
+  registerSimple(BlockIds.Bed, 'bed', 'Bed', { top: 'bed_feet_top', bottom: 'planks_oak', side: 'bed_feet_side' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: true });
+
   // Non-full blocks: NOT solid normal cubes, do NOT block weather.
   // Fence: has custom collision in Beta (1.5 blocks tall) but is NOT a
   // full normal cube. Rendered as cutout for now (proper fence geometry
@@ -686,10 +704,14 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.WoodStairs, 'wood_stairs', 'Oak Wood Stairs', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
 
   // Wooden slab: non-full block (half height). blocksWeather: false.
-  registerSimple(BlockIds.Slab, 'wood_slab', 'Oak Wood Slab', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
+  // Beta `BlockStep`: one slab id whose metadata selects the material
+  // (0 stone, 1 sandstone, 2 wood, 3 cobblestone). The base definition
+  // carries the metadata-0 stone textures; per-variant textures are resolved
+  // by resolveSlabTexture at mesh time.
+  registerSimple(BlockIds.Slab, 'stone_slab', 'Stone Slab', { top: 'stone_slab_top', bottom: 'stone_slab_top', side: 'stone_slab_side' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout', blocksWeather: false });
 
   // Double wooden slab: full block, solid.
-  registerSimple(BlockIds.DoubleSlab, 'double_slab', 'Double Wood Slab', { all: 'planks_oak' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.DoubleSlab, 'double_slab', 'Double Stone Slab', { top: 'stone_slab_top', bottom: 'stone_slab_top', side: 'stone_slab_side' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
 
   // Post-process blocks to apply authentic Beta 1.7.3 hardness and harvestableByHand properties
   const hardnessMap: Record<number, number> = {
@@ -756,9 +778,6 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Rail]: 0.7,
     [BlockIds.PoweredRail]: 0.7,
     [BlockIds.DetectorRail]: 0.7,
-    [BlockIds.RedstoneBlock]: 5.0,
-    [BlockIds.RedstoneLampOff]: 0.3,
-    [BlockIds.RedstoneLampOn]: 0.3,
     [BlockIds.RedstoneWire]: 0.0,
     [BlockIds.Planks]: 2.0,
     [BlockIds.CraftingTable]: 2.5,
@@ -768,6 +787,16 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Wool]: 0.8,
     [BlockIds.TNT]: 0.0,
     [BlockIds.Netherrack]: 0.4,
+    [BlockIds.SandStone]: 0.8,
+    [BlockIds.LapisBlock]: 3.0,
+    [BlockIds.GoldBlock]: 3.0,
+    [BlockIds.IronBlock]: 5.0,
+    [BlockIds.DiamondBlock]: 5.0,
+    [BlockIds.BrickBlock]: 2.0,
+    [BlockIds.Glowstone]: 0.3,
+    [BlockIds.SoulSand]: 0.5,
+    [BlockIds.CobblestoneStairs]: 2.0,
+    [BlockIds.Bed]: 0.2,
     [BlockIds.Fence]: 2.0,
     [BlockIds.WoodStairs]: 2.0,
     [BlockIds.Slab]: 2.0,
@@ -794,9 +823,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Netherrack]: false,
   };
 
-  const pickaxePreferred=new Set<number>([BlockIds.Cobblestone,BlockIds.DoubleSlab,BlockIds.Slab,BlockIds.Stone,BlockIds.MossyCobblestone,BlockIds.IronOre,BlockIds.CoalOre,BlockIds.GoldOre,BlockIds.DiamondOre,BlockIds.Ice,BlockIds.Netherrack,BlockIds.LapisOre]);
+  const pickaxePreferred=new Set<number>([BlockIds.SandStone,BlockIds.LapisBlock,BlockIds.GoldBlock,BlockIds.IronBlock,BlockIds.DiamondBlock,BlockIds.BrickBlock,BlockIds.CobblestoneStairs,BlockIds.Glowstone,BlockIds.Cobblestone,BlockIds.DoubleSlab,BlockIds.Slab,BlockIds.Stone,BlockIds.MossyCobblestone,BlockIds.IronOre,BlockIds.CoalOre,BlockIds.GoldOre,BlockIds.DiamondOre,BlockIds.Ice,BlockIds.Netherrack,BlockIds.LapisOre]);
   const axePreferred=new Set<number>([BlockIds.Planks,BlockIds.Bookshelf,BlockIds.Log,BlockIds.SpruceLog,251,BlockIds.Chest]);
-  const shovelPreferred=new Set<number>([BlockIds.Grass,BlockIds.Dirt,BlockIds.Sand,BlockIds.Gravel,BlockIds.Snow,BlockIds.SnowBlock,BlockIds.Clay,BlockIds.Farmland]);
-  const pickRequirements=new Map<number,number>([[BlockIds.Stone,0],[BlockIds.Cobblestone,0],[BlockIds.MossyCobblestone,0],[BlockIds.CoalOre,0],[BlockIds.Furnace,0],[BlockIds.FurnaceBurning,0],[BlockIds.Netherrack,0],[BlockIds.Spawner,0],[BlockIds.IronDoor,0],[BlockIds.IronOre,1],[BlockIds.LapisOre,1],[BlockIds.GoldOre,2],[BlockIds.RedstoneOre,2],[BlockIds.DiamondOre,2],[BlockIds.RedstoneBlock,2],[BlockIds.Obsidian,3]]);
+  const shovelPreferred=new Set<number>([BlockIds.SoulSand,BlockIds.Grass,BlockIds.Dirt,BlockIds.Sand,BlockIds.Gravel,BlockIds.Snow,BlockIds.SnowBlock,BlockIds.Clay,BlockIds.Farmland]);
+  const pickRequirements=new Map<number,number>([[BlockIds.Stone,0],[BlockIds.Cobblestone,0],[BlockIds.MossyCobblestone,0],[BlockIds.CoalOre,0],[BlockIds.Furnace,0],[BlockIds.FurnaceBurning,0],[BlockIds.Netherrack,0],[BlockIds.Spawner,0],[BlockIds.IronDoor,0],[BlockIds.IronOre,1],[BlockIds.LapisOre,1],[BlockIds.GoldOre,2],[BlockIds.RedstoneOre,2],[BlockIds.DiamondOre,2],[BlockIds.LapisBlock,1],[BlockIds.IronBlock,1],[BlockIds.GoldBlock,2],[BlockIds.DiamondBlock,2],[BlockIds.SandStone,0],[BlockIds.BrickBlock,0],[BlockIds.CobblestoneStairs,0],[BlockIds.Obsidian,3]]);
   for(const def of registry.values()){const hardness=hardnessMap[def.id]??1,preferredToolClass=pickaxePreferred.has(def.id)?'pickaxe':axePreferred.has(def.id)?'axe':shovelPreferred.has(def.id)?'shovel':undefined,pickLevel=pickRequirements.get(def.id),snowTool=def.id===BlockIds.Snow||def.id===BlockIds.SnowBlock;registry.updateDefinition(def.id,{hardness,harvestableByHand:handHarvestableMap[def.id]??true,instantBreak:hardness===0,unbreakable:hardness<0,...(preferredToolClass?{preferredToolClass}:{}),...(pickLevel!==undefined?{requiresCorrectToolForDrops:true,minimumHarvestLevel:pickLevel,harvestToolClass:'pickaxe' as const}:snowTool?{requiresCorrectToolForDrops:true,minimumHarvestLevel:0,harvestToolClass:'shovel' as const}:{})});}
 }

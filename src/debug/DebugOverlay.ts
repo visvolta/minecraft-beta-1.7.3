@@ -167,7 +167,7 @@ export class DebugOverlay {
     element.style.padding = '8px 10px';
     element.style.background = 'rgba(0, 0, 0, 0.5)';
     element.style.color = '#ffffff';
-    element.style.fontFamily = 'monospace';
+    element.style.fontFamily = 'Minecraft, monospace';
     element.style.fontSize = '13px';
     element.style.lineHeight = '1.4';
     element.style.whiteSpace = 'pre';
