@@ -162,5 +162,8 @@ export function bedHeadPositionFor(
 }
 
 export function registerBedBehaviour(registry: BlockBehaviourRegistry, host?: BedSleepHost): void {
-  registry.register(BlockIds.Bed, new BedBehaviour(host));
+  // Merge, not replace: the bed's 9/16-tall bounds come from the shared shape
+  // declaration in `registerShapedBlockBehaviours`, and a plain register()
+  // here would drop them and make the bed collide as a full cube.
+  registry.merge(BlockIds.Bed, new BedBehaviour(host));
 }

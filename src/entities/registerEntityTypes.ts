@@ -14,6 +14,7 @@ import { ArrowEntity } from './projectiles/ArrowEntity';
 import { PrimedTntEntity } from './PrimedTntEntity';
 import { MinecartEntity } from './MinecartEntity';
 import { BoatEntity } from './BoatEntity';
+import { SnowballEntity, ThrownEggEntity } from './projectiles/ThrownItemEntity';
 import { PaintingEntity } from './PaintingEntity';
 
 /**
@@ -40,6 +41,8 @@ export function registerEntityTypes(registry: EntityTypeRegistry): void {
   registry.register(EntityTypeIds.Minecart, 'Minecart', MinecartEntity.deserialize);
   registry.register(EntityTypeIds.Boat, 'Boat', BoatEntity.deserialize);
   registry.register(EntityTypeIds.Painting, 'Painting', PaintingEntity.deserialize);
+  registry.register(EntityTypeIds.Snowball, 'Snowball', SnowballEntity.deserialize);
+  registry.register(EntityTypeIds.ThrownEgg, 'ThrownEgg', ThrownEggEntity.deserialize);
   // FishingBobber is deliberately NOT registered: a bobber restored without
   // its angler is meaningless, so it is dropped on load rather than revived.
 }

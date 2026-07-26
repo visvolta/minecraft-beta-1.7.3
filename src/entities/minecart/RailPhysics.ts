@@ -175,3 +175,122 @@ export function railYawRadians(shape: RailShapeDefinition): number {
   }
   return 0;
 }
+
+// ---------------------------------------------------------------- pushing
+//
+// Beta `EntityMinecart` carries a `pushX`/`pushZ` vector: the direction a
+// player last shoved the cart in. It survives across ticks, is renormalised
+// each tick, and is zeroed when it opposes actual motion. Without it a cart
+// cannot be pushed along a track at all, which is why this was the most
+// visible gap in the previous simplified implementation.
+
+/** Beta's `> 0.01D` significance threshold for the push vector. */
+export const MINECART_PUSH_EPSILON = 0.01;
+/** Beta `var41`: push acceleration applied per tick while pushing. */
+export const MINECART_PUSH_ACCELERATION = 0.04;
+/** Beta drag applied to a cart being actively pushed. */
+export const MINECART_PUSHED_DRAG = 0.8;
+/** Beta drag applied to a powered cart with no meaningful push vector. */
+export const MINECART_UNPUSHED_DRAG = 0.9;
+
+export interface MinecartPush { x: number; z: number }
+
+/**
+ * Beta's post-move push reconciliation:
+ *
+ *   if |push| > 0.01 and speed^2 > 0.001:
+ *     normalise push
+ *     if push . motion < 0  -> clear push (player is behind the motion)
+ *     else                  -> push = motion (keep shoving the same way)
+ */
+export function reconcileMinecartPush(
+  push: MinecartPush,
+  velocity: { readonly x: number; readonly z: number },
+): void {
+  const magnitude = Math.hypot(push.x, push.z);
+  if (magnitude <= MINECART_PUSH_EPSILON) return;
+  if (velocity.x * velocity.x + velocity.z * velocity.z <= 0.001) return;
+  const nx = push.x / magnitude;
+  const nz = push.z / magnitude;
+  if (nx * velocity.x + nz * velocity.z < 0) {
+    push.x = 0;
+    push.z = 0;
+  } else {
+    push.x = velocity.x;
+    push.z = velocity.z;
+  }
+}
+
+/**
+ * Beta's rail-borne drag step for an unridden cart, including the push
+ * acceleration branch. Returns whether the cart was actively pushed.
+ */
+export function applyMinecartPushDrag(
+  push: MinecartPush,
+  velocity: { x: number; y: number; z: number },
+): boolean {
+  const magnitude = Math.hypot(push.x, push.z);
+  if (magnitude > MINECART_PUSH_EPSILON) {
+    push.x /= magnitude;
+    push.z /= magnitude;
+    velocity.x *= MINECART_PUSHED_DRAG;
+    velocity.y = 0;
+    velocity.z *= MINECART_PUSHED_DRAG;
+    velocity.x += push.x * MINECART_PUSH_ACCELERATION;
+    velocity.z += push.z * MINECART_PUSH_ACCELERATION;
+    return true;
+  }
+  velocity.x *= MINECART_UNPUSHED_DRAG;
+  velocity.y = 0;
+  velocity.z *= MINECART_UNPUSHED_DRAG;
+  return false;
+}
+
+// ------------------------------------------------------------ orientation
+//
+// Beta derives yaw from the *previous-to-current* position delta rather than
+// from velocity, and flips 180 degrees (toggling `isInReverse`) when the yaw
+// delta crosses +/-170 degrees. That flip is what stops the cart model
+// spinning wildly as it reverses through a curve.
+
+/** Beta's reverse-flip threshold in degrees. */
+export const MINECART_REVERSE_FLIP_DEGREES = 170;
+
+export interface MinecartYawResult {
+  readonly yaw: number;
+  readonly isInReverse: boolean;
+}
+
+/**
+ * Beta's yaw update from `onUpdate`'s tail:
+ *
+ *   dx = prevX - x; dz = prevZ - z
+ *   if dx*dx + dz*dz > 0.001: yaw = atan2(dz, dx) * 180/PI  (+180 if reversed)
+ *   then if the wrapped delta from prevYaw is outside +/-170, flip 180.
+ */
+export function updateMinecartYaw(
+  previousX: number,
+  previousZ: number,
+  x: number,
+  z: number,
+  currentYaw: number,
+  previousYaw: number,
+  isInReverse: boolean,
+): MinecartYawResult {
+  let yaw = currentYaw;
+  let reverse = isInReverse;
+  const dx = previousX - x;
+  const dz = previousZ - z;
+  if (dx * dx + dz * dz > 0.001) {
+    yaw = Math.atan2(dz, dx) * 180 / Math.PI;
+    if (reverse) yaw += 180;
+  }
+  let delta = yaw - previousYaw;
+  while (delta >= 180) delta -= 360;
+  while (delta < -180) delta += 360;
+  if (delta < -MINECART_REVERSE_FLIP_DEGREES || delta >= MINECART_REVERSE_FLIP_DEGREES) {
+    yaw += 180;
+    reverse = !reverse;
+  }
+  return { yaw, isInReverse: reverse };
+}

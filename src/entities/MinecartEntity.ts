@@ -15,9 +15,14 @@ import {
   MINECART_HEIGHT,
   MINECART_OCCUPIED_DRAG,
   MINECART_OFF_RAIL_DRAG,
+  MINECART_MAX_RAIL_SPEED,
   MINECART_WIDTH,
+  applyMinecartPushDrag,
   projectMinecartToRail,
   railYawRadians,
+  reconcileMinecartPush,
+  updateMinecartYaw,
+  type MinecartPush,
 } from './minecart/RailPhysics';
 import type { RailBlockInfo } from '../world/rails/RailShapes';
 
@@ -32,6 +37,13 @@ export class MinecartEntity extends Entity {
   public hurtTime = 0;
   public hurtDir = 1;
   public rollingAmplitude = 0;
+  /**
+   * Beta `pushX`/`pushZ`: the direction the cart was last shoved in. Persists
+   * across ticks so a player can push a cart along a track.
+   */
+  public readonly push: MinecartPush = { x: 0, z: 0 };
+  /** Beta `isInReverse`: whether the model is facing backwards along travel. */
+  public isInReverse = false;
 
   private ctx: EntityWorldContext;
   private droppedItem = false;
@@ -69,75 +81,137 @@ export class MinecartEntity extends Entity {
     if (this.rollingAmplitude > 0) this.rollingAmplitude -= 1;
   }
 
+  /**
+   * Beta `EntityMinecart.onUpdate`'s on-rail branch, in Beta's own order:
+   * slope acceleration, direction alignment, powered-rail effect, snap onto
+   * the rail line, clamped move, slope step-down, drag (push-aware), the
+   * height-difference speed correction, cell-change redirection, and finally
+   * the push reconciliation.
+   */
   private tickOnRail(ctx: EntityTickContext, rail: NonNullable<ReturnType<typeof findMinecartRail>>): void {
+    const world = ctx.world.blockUpdateWorld;
+    const startY = projectMinecartToRail(this.position.x, this.position.y, this.position.z, rail).y;
+
     applySlopeAcceleration(this.velocity, rail.shape);
 
     const aligned = alignVelocityToRail(this.velocity, rail);
     this.velocity.x = aligned.x;
     this.velocity.z = aligned.z;
 
-    applyPoweredRailEffect(ctx.world.blockUpdateWorld, rail, this.velocity);
+    applyPoweredRailEffect(world, rail, this.velocity);
 
     const projected = projectMinecartToRail(this.position.x, this.position.y, this.position.z, rail);
     this.position.x = projected.x;
     this.position.y = projected.y;
     this.position.z = projected.z;
 
-    clampHorizontalVelocity(this.velocity);
+    // Beta clamps the *move delta* (and scales it by 0.75 when ridden)
+    // without writing the clamp back into motion.
+    let moveX = this.velocity.x;
+    let moveZ = this.velocity.z;
+    if (this.riddenByEntity !== null) {
+      moveX *= 0.75;
+      moveZ *= 0.75;
+    }
+    moveX = Math.max(-MINECART_MAX_RAIL_SPEED, Math.min(MINECART_MAX_RAIL_SPEED, moveX));
+    moveZ = Math.max(-MINECART_MAX_RAIL_SPEED, Math.min(MINECART_MAX_RAIL_SPEED, moveZ));
+    this.velocity.x = moveX;
+    this.velocity.z = moveZ;
     this.ctx.physics.move(this);
 
-    const correctedRail = findMinecartRail(ctx.world.blockUpdateWorld, this.position.x, this.position.y, this.position.z) ?? rail;
-    const corrected = projectMinecartToRail(this.position.x, this.position.y, this.position.z, correctedRail);
-    this.position.y = corrected.y;
+    // Drag. Beta applies the push branch only to an unridden cart.
+    if (this.riddenByEntity !== null) {
+      this.velocity.x *= MINECART_OCCUPIED_DRAG;
+      this.velocity.y = 0;
+      this.velocity.z *= MINECART_OCCUPIED_DRAG;
+    } else {
+      applyMinecartPushDrag(this.push, this.velocity);
+      this.velocity.x *= MINECART_EMPTY_DRAG;
+      this.velocity.y = 0;
+      this.velocity.z *= MINECART_EMPTY_DRAG;
+    }
 
-    const drag = this.riddenByEntity === null ? MINECART_EMPTY_DRAG : MINECART_OCCUPIED_DRAG;
-    this.velocity.x *= drag;
-    this.velocity.y = 0;
-    this.velocity.z *= drag;
+    // Beta's slope compensation: the height the cart lost/gained across this
+    // move is fed back into speed at 0.05 per block, then Y is snapped to the
+    // rail line so the cart hugs an ascending track.
+    const correctedRail = findMinecartRail(world, this.position.x, this.position.y, this.position.z) ?? rail;
+    const endY = projectMinecartToRail(this.position.x, this.position.y, this.position.z, correctedRail).y;
+    const heightDelta = (startY - endY) * 0.05;
+    const speed = Math.hypot(this.velocity.x, this.velocity.z);
+    if (speed > 0) {
+      this.velocity.x = this.velocity.x / speed * (speed + heightDelta);
+      this.velocity.z = this.velocity.z / speed * (speed + heightDelta);
+    }
+    this.position.y = endY;
 
+    // Beta redirects motion along the axis actually crossed when the cart
+    // moves into a new cell, which is what carries it around a curve.
     const nextX = Math.floor(this.position.x);
     const nextZ = Math.floor(this.position.z);
     if (nextX !== rail.x || nextZ !== rail.z) {
-      const speed = Math.hypot(this.velocity.x, this.velocity.z);
-      this.velocity.x = speed * (nextX - rail.x);
-      this.velocity.z = speed * (nextZ - rail.z);
+      const magnitude = Math.hypot(this.velocity.x, this.velocity.z);
+      this.velocity.x = magnitude * (nextX - rail.x);
+      this.velocity.z = magnitude * (nextZ - rail.z);
     }
+
+    reconcileMinecartPush(this.push, this.velocity);
 
     this.updateRailOrientation(correctedRail);
   }
 
+  /**
+   * Beta's off-rail branch: clamp motion, halve it while grounded, move, then
+   * apply the 0.95 airborne drag. Note Beta uses 0.5 on the ground and 0.95
+   * in the air — not a single uniform factor.
+   */
   private tickOffRail(_ctx: EntityTickContext): void {
     clampHorizontalVelocity(this.velocity);
+    if (this.onGround) {
+      this.velocity.x *= 0.5;
+      this.velocity.y *= 0.5;
+      this.velocity.z *= 0.5;
+    }
     this.ctx.physics.move(this);
-    this.velocity.x *= MINECART_OFF_RAIL_DRAG;
-    this.velocity.y *= MINECART_OFF_RAIL_DRAG;
-    this.velocity.z *= MINECART_OFF_RAIL_DRAG;
+    if (!this.onGround) {
+      this.velocity.x *= MINECART_OFF_RAIL_DRAG;
+      this.velocity.y *= MINECART_OFF_RAIL_DRAG;
+      this.velocity.z *= MINECART_OFF_RAIL_DRAG;
+    }
   }
 
 
+  /**
+   * Beta derives minecart yaw from the position delta since the previous
+   * tick (not from velocity) and flips 180 degrees when the cart reverses,
+   * tracking that with `isInReverse`. Pitch is 0 on track: Beta sets
+   * `rotationPitch = 0.0F` unconditionally in `onUpdate`.
+   */
   private updateRailOrientation(rail: RailBlockInfo): void {
-    const speed = Math.hypot(this.velocity.x, this.velocity.z);
-    if (speed > 0.001) {
-      this.yaw = Math.atan2(this.velocity.x, this.velocity.z) * 180 / Math.PI;
-    } else if (!Number.isFinite(this.yaw)) {
-      this.yaw = railYawRadians(rail.shape) * 180 / Math.PI;
-    }
-
-    if (!rail.shape.ascending || speed <= 0.001) {
-      if (!rail.shape.ascending) this.pitch = 0;
-      return;
-    }
-
-    let horizontalMotion = 0;
-    if (rail.shape.slopeAxis === 'x') horizontalMotion = this.velocity.x;
-    else if (rail.shape.slopeAxis === 'z') horizontalMotion = this.velocity.z;
-    const direction = horizontalMotion * (rail.shape.slopeDirection ?? 1) >= 0 ? 1 : -1;
-    this.pitch = -Math.atan2(direction, 1) * 180 / Math.PI;
+    const result = updateMinecartYaw(
+      this.previousPosition.x,
+      this.previousPosition.z,
+      this.position.x,
+      this.position.z,
+      this.yaw,
+      this.previousYaw,
+      this.isInReverse,
+    );
+    if (Number.isFinite(result.yaw)) this.yaw = result.yaw;
+    else this.yaw = railYawRadians(rail.shape) * 180 / Math.PI;
+    this.isInReverse = result.isInReverse;
+    this.pitch = 0;
   }
 
+  /**
+   * Beta `applyEntityCollision` for carts: a colliding entity both shoves the
+   * cart (standard impulse) and sets the push vector, which is what lets a
+   * player walk a cart along a track rather than only nudging it once.
+   */
   public override applyEntityCollision(other: Entity): void {
     if (other === this.riddenByEntity || other === this.ridingEntity) return;
     super.applyEntityCollision(other);
+    this.push.x = this.position.x - other.position.x;
+    this.push.z = this.position.z - other.position.z;
   }
 
   public getMountedYOffset(): number {
@@ -195,6 +269,12 @@ export class MinecartEntity extends Entity {
     map.set('HurtTime', nbt.int(this.hurtTime));
     map.set('HurtDir', nbt.int(this.hurtDir));
     map.set('RollingAmplitude', nbt.int(this.rollingAmplitude));
+    // Beta persists the push vector as PushX/PushZ. These are new fields, so
+    // reads treat them as optional and default to 0 (see readEntityNbt) —
+    // minecarts saved before this change still load.
+    map.set('PushX', nbt.double(this.push.x));
+    map.set('PushZ', nbt.double(this.push.z));
+    map.set('InReverse', nbt.byte(this.isInReverse ? 1 : 0));
   }
 
   protected readEntityNbt(data: NbtCompound): void {
@@ -206,6 +286,14 @@ export class MinecartEntity extends Entity {
     if (hurtDir?.type === 'int') this.hurtDir = hurtDir.value >= 0 ? 1 : -1;
     const rolling = data.value.get('RollingAmplitude');
     if (rolling?.type === 'int') this.rollingAmplitude = rolling.value;
+    // Optional: absent in saves written before push support existed, in which
+    // case the cart simply starts with no push vector.
+    const pushX = data.value.get('PushX');
+    if (pushX?.type === 'double') this.push.x = pushX.value;
+    const pushZ = data.value.get('PushZ');
+    if (pushZ?.type === 'double') this.push.z = pushZ.value;
+    const inReverse = data.value.get('InReverse');
+    if (inReverse?.type === 'byte') this.isInReverse = inReverse.value !== 0;
     this.sanitiseNumericState();
   }
 

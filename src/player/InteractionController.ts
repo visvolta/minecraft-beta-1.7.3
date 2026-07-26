@@ -41,6 +41,7 @@ const BOW_ARROW_SPREAD = 1;
 import type { EntityManager } from '../entities/core/EntityManager';
 import { Entity } from '../entities/core/Entity';
 import { LivingEntity } from '../entities/living/LivingEntity';
+import { SnowballEntity, ThrownEggEntity, THROWN_ITEM_SPEED, THROWN_ITEM_INACCURACY } from '../entities/projectiles/ThrownItemEntity';
 import { MinecartEntity } from '../entities/MinecartEntity';
 import { DamageSource } from '../entities/damage/DamageSource';
 import { selectMeleeTarget } from './MeleeTargeting';
@@ -435,7 +436,43 @@ export class InteractionController {
 
     if (definition.id === 'bow') return this.fireBow();
     if (definition.id === 'fishing_rod') return this.useFishingRod();
+    if (definition.id === 'snowball') return this.throwItem('snowball');
+    if (definition.id === 'egg') return this.throwItem('egg');
     return false;
+  }
+
+  /**
+   * Beta `ItemSnowball`/`ItemEgg.onItemRightClick`: consume one, play
+   * `random.bow` at half volume with a randomised low pitch, and spawn the
+   * thrown entity aimed along the player's look vector at speed 1.5.
+   */
+  private throwItem(kind: 'snowball' | 'egg'): boolean {
+    // Same spawn/aim convention as the bow: Beta yaw, eye height with a small
+    // rearward offset, and a look vector derived from yaw/pitch.
+    const yaw = this.betaYawRadians();
+    const pitch = this.cameraPitchRadians();
+    const originX = this.player.position.x - Math.cos(yaw) * 0.16;
+    const originY = this.player.getEyeY() - 0.1;
+    const originZ = this.player.position.z - Math.sin(yaw) * 0.16;
+    const owner = this.player as unknown as Entity;
+    const entity = kind === 'snowball'
+      ? new SnowballEntity(this.entityManager.context, owner, originX, originY, originZ)
+      : new ThrownEggEntity(this.entityManager.context, owner, originX, originY, originZ);
+    const dirX = -Math.sin(yaw) * Math.cos(pitch);
+    const dirY = -Math.sin(pitch);
+    const dirZ = Math.cos(yaw) * Math.cos(pitch);
+    entity.launch(dirX, dirY, dirZ, THROWN_ITEM_SPEED, THROWN_ITEM_INACCURACY);
+    this.entityManager.add(entity);
+
+    this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+    // Beta: 0.5 volume, pitch 0.4 / (rand * 0.4 + 0.8).
+    this.playEntitySound?.(
+      'random.bow',
+      this.player.position.x, this.player.position.y, this.player.position.z,
+      0.5,
+      0.4 / (Math.random() * 0.4 + 0.8),
+    );
+    return true;
   }
 
   /**

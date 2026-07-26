@@ -28,6 +28,12 @@ export const MUSIC_MENU = numbered('music.menu.menu', '/audio/music/menu/menu', 
 export const FIRE_SOUNDS = ['fire','ignite'].map((name) => sound(`fire.${name}`, `/audio/sounds/fire/${name}.ogg`, 'fire'));
 export const RANDOM_SOUNDS = [
   'splash','pop','glass1','glass2','glass3','chestclosed','chestopen','click','door_close','door_open','drink','eat1','eat2','eat3','explode1','explode2','explode3',
+  // Beta gameplay sounds already emitted by this project's code:
+  //   random.bow   — ItemBow release and EntitySkeleton's ranged attack
+  //   random.fuse  — primed TNT (BlockTNT) and the creeper swell
+  //   random.fizz  — fire/lava quenching
+  //   random.break — tool/item durability exhaustion
+  'bow','fuse','fizz','break',
 ].map((name) => sound(`random.${name}`, `/audio/sounds/random/${name}.ogg`, 'random'));
 
 export const MOB_SOUNDS = [
@@ -38,6 +44,12 @@ export const MOB_SOUNDS = [
   sound('mob.creeper.death','/audio/sounds/mob/creeper/death.ogg','mob.creeper'), ...numbered('mob.creeper.say','/audio/sounds/mob/creeper/say',1,4,'mob.creeper'),
   sound('mob.pig.death','/audio/sounds/mob/pig/death.ogg','mob.pig'), ...numbered('mob.pig.say','/audio/sounds/mob/pig/say',1,3,'mob.pig'), ...numbered('mob.pig.step','/audio/sounds/mob/pig/step',1,5,'mob.pig'),
   ...numbered('mob.sheep.say','/audio/sounds/mob/sheep/say',1,3,'mob.sheep'), sound('mob.sheep.shear','/audio/sounds/mob/sheep/shear.ogg','mob.sheep'), ...numbered('mob.sheep.step','/audio/sounds/mob/sheep/step',1,5,'mob.sheep'),
+  // Beta `EntitySkeleton`: mob.skeleton (living), mob.skeletonhurt (hurt AND
+  // death — Beta deliberately reuses the hurt sound for both). The shipped
+  // asset set numbers steps 2..4, with no step1.
+  sound('mob.skeleton.death','/audio/sounds/mob/skeleton/death.ogg','mob.skeleton'), ...numbered('mob.skeleton.hurt','/audio/sounds/mob/skeleton/hurt',1,4,'mob.skeleton'), ...numbered('mob.skeleton.say','/audio/sounds/mob/skeleton/say',1,3,'mob.skeleton'), ...numbered('mob.skeleton.step','/audio/sounds/mob/skeleton/step',2,4,'mob.skeleton'),
+  // Beta zombie ships a fifth step variant alongside the four already listed.
+  sound('mob.zombie.step5','/audio/sounds/mob/zombie/step5.ogg','mob.zombie'),
 ];
 
 export const CAVE_SOUNDS = numbered('ambient.cave.cave','/audio/sounds/ambient/cave/cave',1,16,'ambient.cave');

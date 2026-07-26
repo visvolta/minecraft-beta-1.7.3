@@ -265,7 +265,27 @@ export class AudioManager implements MobSoundSink {
     if (id === 'mob.pig') return kind === 'death' ? ['mob.pig.death'] : ['mob.pig.say1','mob.pig.say2','mob.pig.say3'];
     if (id === 'mob.pigdeath') return ['mob.pig.death'];
     if (id === 'mob.sheep') return ['mob.sheep.say1','mob.sheep.say2','mob.sheep.say3'];
-    if (id === 'step.mob') return ['step.grass1','step.grass2','step.grass3','step.grass4','step.grass5','step.grass6'];
+    // Beta `EntitySkeleton` uses mob.skeletonhurt for BOTH hurt and death.
+    if (id === 'mob.skeleton') return kind === 'death' ? ['mob.skeleton.hurt1','mob.skeleton.hurt2','mob.skeleton.hurt3','mob.skeleton.hurt4'] : ['mob.skeleton.say1','mob.skeleton.say2','mob.skeleton.say3'];
+    if (id === 'mob.skeletonhurt') return ['mob.skeleton.hurt1','mob.skeleton.hurt2','mob.skeleton.hurt3','mob.skeleton.hurt4'];
+    if (id === 'mob.skeletondeath') return ['mob.skeleton.death'];
+    // Emitted by ItemBow release and EntitySkeleton's ranged attack.
+    if (id === 'random.bow') return ['random.bow'];
+    // Emitted by primed TNT and the creeper swell.
+    if (id === 'random.fuse') return ['random.fuse'];
+    if (id === 'random.fizz') return ['random.fizz'];
+    // Item/tool durability exhaustion.
+    if (id === 'random.break') return ['random.break'];
+    // Beta plays random.splash for the fishing bobber entering water and for
+    // entities falling in; the manifest key is already present.
+    if (id === 'random.splash') return ['random.splash'];
+    // Material-driven mob footsteps: `step.<material>` resolved by the entity
+    // from the block it is walking on, matching Beta's per-block StepSound.
+    if (id.startsWith('step.')) {
+      const material = id.slice('step.'.length) as StepSoundMaterial;
+      const entries = STEP_SOUND_MATERIALS[material] as readonly AudioEntry[] | undefined;
+      if (entries !== undefined) return entries.map((entry) => entry.key);
+    }
     return [];
   }
 

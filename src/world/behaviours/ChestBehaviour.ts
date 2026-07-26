@@ -4,7 +4,9 @@ import { BlockIds } from '../../blocks/BlockId';
 import type { ChestManager } from '../../chest/ChestManager';
 
 export function registerChestBehaviour(registry: BlockBehaviourRegistry, chestManager: ChestManager): void {
-  registry.register(BlockIds.Chest, {
+  // Merge, not replace: the chest's 14/16 bounds are supplied by the shared
+  // shape declaration, and this registration runs later during engine setup.
+  registry.merge(BlockIds.Chest, {
     canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
       const isChest = (nx: number, nz: number) => ctx.world.getBlock(nx, y, nz) === BlockIds.Chest;
 

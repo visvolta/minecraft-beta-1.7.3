@@ -20,8 +20,9 @@ export class TntBehaviour implements BlockBehaviour {
         
         if (ctx.entities) {
             const entity = new PrimedTntEntity(ctx.entities.context, x + 0.5, y + 0.5, z + 0.5);
+            // PrimedTntEntity emits random.fuse on construction, matching
+            // Beta's BlockTNT.onBlockAdded.
             ctx.entities.add(entity);
-            // ctx.world.playSound(...) // random.fuse
         }
     }
 }

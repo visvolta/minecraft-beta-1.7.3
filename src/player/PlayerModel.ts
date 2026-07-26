@@ -11,6 +11,11 @@ export class PlayerModel {
   public readonly bodyGroup = new Group();
   public readonly leftArmGroup = new Group();
   public readonly rightArmGroup = new Group();
+  /**
+   * Anchor for the third-person held item, parented to the right arm so it
+   * inherits the arm's swing and attack animation automatically.
+   */
+  public readonly rightHandAttachment = new Group();
   public readonly leftLegGroup = new Group();
   public readonly rightLegGroup = new Group();
 
@@ -92,6 +97,12 @@ export class PlayerModel {
     this.rightArmGroup.add(rightArmMesh);
     this.rightArmGroup.add(this.rightSleeveMesh);
     this.rightArmGroup.position.set(6 * px, 24 * px, 0);
+    // Beta `ModelBiped` renders the held item relative to the right arm, at
+    // the wrist rather than the shoulder pivot. Mirrors the mob-side
+    // `BipedModel.rightHandAttachment` so player and mob held items share one
+    // attachment convention.
+    this.rightHandAttachment.position.set(0, PLAYER_MODEL_SHOULDER_OFFSET_Y * 2, 0);
+    this.rightArmGroup.add(this.rightHandAttachment);
 
     const leftArmMesh = new Mesh(this.leftArmGeo, this.material);
     leftArmMesh.position.set(0, PLAYER_MODEL_SHOULDER_OFFSET_Y, 0);

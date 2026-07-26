@@ -190,10 +190,10 @@ const DYES: readonly ItemDefinition[] = DYE_VARIANTS.map(({ suffix, metadata }) 
  * completeness reporting can distinguish "absent" from "present but inert".
  */
 export const UNIMPLEMENTED_BEHAVIOUR: Readonly<Record<string, string>> = {
-  // Beds sleep and skip to dawn; Beta additionally sets the player's spawn
-  // point on wake, which this project does not yet do.
-  bed: 'Sleeping works; setting the respawn point on wake is not implemented.',
-  cake: 'Progressive eating slices not implemented.',
+  // Cake's placed block (Beta id 92) is not registered at all, so there is no
+  // block to eat slices from. Implementing this needs a block registration
+  // plus the six-slice mesher geometry, not just the eat handler.
+  cake: 'Placed cake block (id 92) is not registered; progressive slices not implemented.',
   redstone_repeater: 'Delay/lock repeater logic not implemented.',
   saddle: 'Pig riding not implemented.',
   minecart_chest: 'Chest-cart inventory not implemented.',
@@ -201,8 +201,6 @@ export const UNIMPLEMENTED_BEHAVIOUR: Readonly<Record<string, string>> = {
   record_13: 'Jukebox playback not implemented.',
   record_cat: 'Jukebox playback not implemented.',
   slimeball: 'Slimes do not spawn; obtainable only via creative.',
-  snowball: 'Throwable snowball projectile not implemented.',
-  egg: 'Throwable egg projectile not implemented.',
 };
 
 function humanizeItemId(id: string): string {

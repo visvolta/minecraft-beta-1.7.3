@@ -71,6 +71,28 @@ export const THIRD_PERSON_HELD_BLOCK_YAW = 0;
 export const THIRD_PERSON_HELD_BLOCK_ROLL = 0;
 export const THIRD_PERSON_HELD_BLOCK_SCALE = 0.35;
 
+/**
+ * Third-person held-item transforms, grouped for the third-person held-item
+ * renderer. Positions are relative to the right-hand attachment (the wrist),
+ * matching Beta `RenderPlayer.renderEquippedItems`, which translates into the
+ * right arm's space before drawing.
+ *
+ * Flat items (tools, swords, food, flat icons) are drawn as an angled sprite;
+ * Beta tilts them so the blade/handle reads correctly from the side.
+ */
+export const THIRD_PERSON_BLOCK_POSITION: readonly [number, number, number] =
+  [THIRD_PERSON_HELD_BLOCK_X, THIRD_PERSON_HELD_BLOCK_Y, THIRD_PERSON_HELD_BLOCK_Z];
+export const THIRD_PERSON_BLOCK_ROTATION: readonly [number, number, number] =
+  [THIRD_PERSON_HELD_BLOCK_PITCH, THIRD_PERSON_HELD_BLOCK_YAW, THIRD_PERSON_HELD_BLOCK_ROLL];
+export const THIRD_PERSON_BLOCK_SCALE = THIRD_PERSON_HELD_BLOCK_SCALE;
+
+export const THIRD_PERSON_FLAT_POSITION: readonly [number, number, number] =
+  [0, -9 * PLAYER_MODEL_SCALE, -1 * PLAYER_MODEL_SCALE];
+/** Beta tilts the sprite about X and rolls it into the grip. */
+export const THIRD_PERSON_FLAT_ROTATION: readonly [number, number, number] =
+  [0, Math.PI / 2, -Math.PI / 4];
+export const THIRD_PERSON_FLAT_SCALE = 0.5;
+
 export const PLAYER_OUTER_LAYER_SCALE = 1.05;
 
 // --- Animation Tuning Constants ---

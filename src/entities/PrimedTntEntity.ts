@@ -33,6 +33,15 @@ export class PrimedTntEntity extends Entity {
     this.setSize(TNT_SIZE, TNT_SIZE);
     this.setPosition(x, y, z);
     this.buildRender();
+    // Beta `BlockTNT.onBlockAdded` plays random.fuse when the TNT primes.
+    this.ctx.sounds?.emit({
+      id: 'random.fuse',
+      kind: 'fuse',
+      x, y, z,
+      volume: 1,
+      pitch: 1,
+      attenuationDistance: 16,
+    });
   }
 
   /** Centre-based AABB. */

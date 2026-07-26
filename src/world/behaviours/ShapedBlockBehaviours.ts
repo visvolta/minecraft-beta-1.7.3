@@ -31,14 +31,19 @@ import { toWorldBound, toWorldBounds } from '../../blocks/shapes/toWorldBounds';
  * so it composes with an existing behaviour instead of replacing it.
  */
 
-/** Adds `getBoundingBoxes` to whatever behaviour is already registered. */
+/**
+ * Adds `getBoundingBoxes` to whatever behaviour is already registered.
+ *
+ * Uses the registry's own merge so the result is independent of registration
+ * order: a behaviour registered for this block *after* this call keeps these
+ * bounds instead of silently replacing them.
+ */
 function mergeBounds(
   registry: BlockBehaviourRegistry,
   blockId: number,
   getBoundingBoxes: NonNullable<BlockBehaviour['getBoundingBoxes']>,
 ): void {
-  const existing = registry.get(blockId);
-  registry.register(blockId, { ...existing, getBoundingBoxes });
+  registry.merge(blockId, { getBoundingBoxes });
 }
 
 /** Beta torches are a thin post, tilted when wall-mounted. */

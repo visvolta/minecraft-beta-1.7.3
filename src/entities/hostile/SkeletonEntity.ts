@@ -41,7 +41,10 @@ export class SkeletonEntity extends BipedHostileEntity {
     if (exposure.canIgnite && this.nextInt(30000) / 1000 < (exposure.brightness - 0.4) * 2) this.setOnFire(300);
     super.onTick(ctx);
   }
-  protected rebuildModel(): void {this.bowRenderer?.dispose();const model=new SkeletonModel(this.ctx.entityTextures?.get('skeleton'));this.attachBiped(model);this.bowRenderer=this.ctx.entityTextures?new SkeletonBowRenderer(model.rightHandAttachment,this.ctx.entityTextures):null;}
+  protected rebuildModel(): void {this.bowRenderer?.dispose();const model=new SkeletonModel(this.ctx.entityTextures?.get('skeleton'));this.attachBiped(model);this.bowRenderer=this.ctx.entityTextures?new SkeletonBowRenderer(model.rightHandAttachment,this.ctx.entityTextures):null;
+    // The bow mesh is parented after `attachBiped` assigned renderObject, so
+    // it misses the setter's render-order stamp; re-apply to cover it.
+    this.refreshRenderOrder();}
   public override updateRenderInterpolation(alpha:number):void{super.updateRenderInterpolation(alpha);this.bowRenderer?.setDrawProgress(this.rangedPoseProgress,this.rangedDrawTicks>0);}
   protected override disposeRender():void{this.bowRenderer?.dispose();this.bowRenderer=null;super.disposeRender();}
   protected override getDropItems(): Drop[] {

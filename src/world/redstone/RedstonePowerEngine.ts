@@ -40,6 +40,22 @@ export class RedstonePowerEngine {
     };
   }
 
+  /**
+   * Whether the block at `position` is a redstone power provider.
+   *
+   * Beta's `onNeighborBlockChange` handlers gate their redstone response on
+   * `var5 > 0 && Block.blocksList[var5].canProvidePower()`, i.e. they only
+   * react when the block that *caused* the update can actually emit power.
+   * Without that gate, an unrelated neighbour change re-evaluates power and
+   * overwrites hand-set state (a hand-opened door slamming shut).
+   */
+  public canBlockProvidePower(position: BlockPosition): boolean {
+    if (!this.world.isLoaded(position.x, position.z)) return false;
+    const blockId = this.world.getBlock(position.x, position.y, position.z);
+    if (blockId === BlockIds.Air) return false;
+    return this.behaviours.get(blockId).canProvidePower === true;
+  }
+
   public getWeakPowerFrom(receiver: BlockPosition, directionToSource: FaceDirection): RedstonePower {
     this.weakQueries++;
     const context = this.createContext(receiver, directionToSource);

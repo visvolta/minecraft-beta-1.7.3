@@ -114,7 +114,15 @@ export class DoorBehaviour implements BlockBehaviour {
    * every neighbour update, so an unpowered door slammed shut on the very
    * next tick after being opened by hand.
    */
-  public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  public neighborChanged(
+    ctx: BlockBehaviourContext,
+    x: number,
+    y: number,
+    z: number,
+    sourceX?: number,
+    sourceY?: number,
+    sourceZ?: number,
+  ): void {
     const metadata = ctx.world.getBlockMetadata(x, y, z);
     const doorId = this.blockId;
 
@@ -122,6 +130,12 @@ export class DoorBehaviour implements BlockBehaviour {
       // An upper half with no lower half below it cannot exist.
       if (ctx.world.getBlock(x, y - 1, z) !== doorId) {
         ctx.world.setBlock(x, y, z, BlockIds.Air, { notifyNeighbours: true });
+        return;
+      }
+      // Beta forwards a power-provider update down to the lower half, which
+      // is the half that owns the open bit.
+      if (this.sourceCanProvidePower(ctx, sourceX, sourceY, sourceZ)) {
+        this.neighborChanged(ctx, x, y - 1, z, sourceX, sourceY, sourceZ);
       }
       return;
     }
@@ -139,7 +153,34 @@ export class DoorBehaviour implements BlockBehaviour {
       return;
     }
 
+    // Beta `BlockDoor.onNeighborBlockChange`:
+    //   else if (var5 > 0 && Block.blocksList[var5].canProvidePower())
+    // Redstone is only re-evaluated when the block that triggered this update
+    // can actually emit power. Re-evaluating on *every* neighbour change made
+    // an unpowered hand-opened door slam shut the moment anything nearby
+    // changed, because the computed state (unpowered) disagreed with the
+    // hand-set open bit.
+    if (!this.sourceCanProvidePower(ctx, sourceX, sourceY, sourceZ)) return;
+
     this.applyRedstone(ctx, x, y, z, metadata);
+  }
+
+  /**
+   * Beta's `var5 > 0 && Block.blocksList[var5].canProvidePower()` gate, where
+   * `var5` is the block id that triggered the neighbour update.
+   *
+   * When the source position is unknown (callers that omit it) the gate stays
+   * closed: silently falling back to "always evaluate" is what produced the
+   * slam-shut behaviour in the first place.
+   */
+  private sourceCanProvidePower(
+    ctx: BlockBehaviourContext,
+    sourceX?: number,
+    sourceY?: number,
+    sourceZ?: number,
+  ): boolean {
+    if (sourceX === undefined || sourceY === undefined || sourceZ === undefined) return false;
+    return ctx.power?.canBlockProvidePower({ x: sourceX, y: sourceY, z: sourceZ }) === true;
   }
 
   /** Beta `onPoweredBlockChange`, driven from the lower half. */

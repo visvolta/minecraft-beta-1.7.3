@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import { AABB } from '../../physics/AABB';
 import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import { chunkCoordsOf, generateEntityUuid } from './EntityId';
+import { applyEntityRenderOrder } from '../../rendering/RenderOrder';
 import type { EntityTickContext, EntityWorldContext } from './EntityContext';
 
 /**
@@ -74,12 +75,46 @@ export abstract class Entity {
   public chunkX = 0;
   public chunkZ = 0;
 
+  private renderObjectValue: THREE.Object3D | null = null;
+
   /**
    * Optional render object owned by the subclass (built once, never per
    * frame). The manager never constructs or disposes meshes — it only drives
    * `updateRenderInterpolation`. `null` for headless/test entities.
+   *
+   * Assigning here automatically stamps the entity render layer onto the
+   * object and its descendants. Doing it in the setter rather than at the
+   * spawn call site is deliberate: visuals are also created on restore, on
+   * model rebuild (mob texture/state changes), and on dropped-item stack
+   * rebuilds. Those paths previously left the new objects at `renderOrder` 0,
+   * where the translucent depth pre-pass hid them behind water.
    */
-  public renderObject: THREE.Object3D | null = null;
+  public get renderObject(): THREE.Object3D | null {
+    return this.renderObjectValue;
+  }
+
+  public set renderObject(object: THREE.Object3D | null) {
+    this.renderObjectValue = object;
+    if (object !== null) applyEntityRenderOrder(object);
+  }
+
+  /**
+   * Re-applies the entity render layer to the current render object.
+   *
+   * Subclasses call this after adding children to an object they already
+   * assigned, since that mutates the tree without reassigning `renderObject`.
+   */
+  protected refreshRenderOrder(): void {
+    this.applyRenderOrderNow();
+  }
+
+  /**
+   * Public form of {@link refreshRenderOrder}, used by the entity manager on
+   * the spawn and restore paths.
+   */
+  public applyRenderOrderNow(): void {
+    if (this.renderObjectValue !== null) applyEntityRenderOrder(this.renderObjectValue);
+  }
 
   /** Sets dimensions and recentres the AABB without moving the feet point. */
   protected setSize(width: number, height: number): void {

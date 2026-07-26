@@ -142,6 +142,7 @@ import { SleepOverlayRenderer } from '../player/SleepOverlayRenderer';
 import { FishingLineRenderer } from '../rendering/FishingLineRenderer';
 import { BED_FOOT_TO_HEAD } from '../blocks/shapes/BlockShapes';
 import { FirstPersonHeldItemRenderer } from '../rendering/FirstPersonHeldItemRenderer.ts';
+import { ThirdPersonHeldItemRenderer } from '../rendering/ThirdPersonHeldItemRenderer.ts';
 import { FirstPersonMotionController } from '../player/FirstPersonMotionController';
 import { CameraModeController, CameraMode } from '../camera/CameraModeController';
 import * as THREE from 'three';
@@ -335,6 +336,7 @@ export class Engine {
   private readonly firstPersonArmRenderer: FirstPersonArmRenderer;
   private readonly firstPersonMotionController: FirstPersonMotionController;
   private readonly heldItemRenderer: FirstPersonHeldItemRenderer;
+  private readonly thirdPersonHeldItemRenderer: ThirdPersonHeldItemRenderer;
   private readonly cameraModeController: CameraModeController;
 
   private readonly skinManager: PlayerSkinManager;
@@ -653,10 +655,27 @@ export class Engine {
       this.blockUpdateWorld,
     );
 
-    this.heldItemRenderer = new FirstPersonHeldItemRenderer(this.firstPersonArmRenderer, this.inventory, blockRegistry, this.atlas, this.itemAtlas);
+    // Built before the held-item renderers so its animated-icon frame source
+    // can be shared with them: clock and compass must show the SAME current
+    // frame in the hotbar, the inventory, and the player's hand.
+    this.hotbarHudRenderer = new HotbarHudRenderer(this.atlas, this.itemAtlas, blockRegistry, this.inventory, this.settings.video.guiScale);
+    this.heldItemRenderer = new FirstPersonHeldItemRenderer(
+      this.firstPersonArmRenderer,
+      this.inventory,
+      blockRegistry,
+      this.atlas,
+      this.itemAtlas,
+      this.hotbarHudRenderer.getAnimatedIcons(),
+    );
+    this.thirdPersonHeldItemRenderer = new ThirdPersonHeldItemRenderer(
+      this.playerModel.rightHandAttachment,
+      blockRegistry,
+      this.atlas,
+      this.itemAtlas,
+      this.hotbarHudRenderer.getAnimatedIcons(),
+    );
     this.firstPersonHeldBlockMesh.visible = false;
     this.thirdPersonHeldBlockMesh.visible = false;
-    this.hotbarHudRenderer = new HotbarHudRenderer(this.atlas, this.itemAtlas, blockRegistry, this.inventory, this.settings.video.guiScale);
     this.hudRenderer=new HudRenderer(this.hotbarHudRenderer,this.player,playerEquipment);
     this.inventoryUi = new InventoryUi();
     this.inventoryTooltip = new InventoryTooltip();
@@ -1710,9 +1729,11 @@ export class Engine {
         this.firstPersonHeldBlockMesh.geometry.dispose(); this.firstPersonHeldBlockMesh.geometry = newGeo; this.firstPersonHeldBlockMesh.material = this.itemHeldMaterial;
         this.thirdPersonHeldBlockMesh.geometry.dispose(); this.thirdPersonHeldBlockMesh.geometry = newGeo.clone(); this.thirdPersonHeldBlockMesh.material = this.itemHeldMaterial;
       }
+      // Third-person visuals are rebuilt by the dedicated renderer, which
+      // shares the hotbar's animated-icon frames.
+      this.thirdPersonHeldItemRenderer.update(stack);
       // Visibility is owned by applyHeldItemVisibility(), which follows the
-      // camera mode. Previously both meshes were forced hidden here, so the
-      // third-person player never appeared to hold anything.
+      // camera mode.
       this.applyHeldItemVisibility(true);
     }
   }
@@ -1724,8 +1745,41 @@ export class Engine {
    */
   private applyHeldItemVisibility(hasItem: boolean): void {
     const thirdPerson = this.cameraModeController.getMode() !== CameraMode.FIRST_PERSON;
-    this.thirdPersonHeldBlockMesh.visible = hasItem && thirdPerson;
+    // Third person is owned by ThirdPersonHeldItemRenderer, which resolves
+    // clock/compass through the same AnimatedIconFrames instance as the
+    // hotbar and inventory. The older per-mesh path built its icon from the
+    // item atlas instead, so the hand could show a different frame from the
+    // HUD; it is kept hidden rather than deleted because the first-person
+    // overlay still shares its geometry builders.
+    this.thirdPersonHeldBlockMesh.visible = false;
     this.firstPersonHeldBlockMesh.visible = false;
+    this.thirdPersonHeldItemRenderer.setVisible(hasItem && thirdPerson);
+  }
+
+  /**
+   * Keeps the third-person held item in step with the animated-icon frame
+   * source. Clock and compass change frame without the stack itself changing,
+   * so the slot-change check in `update()` never fires for them; this runs
+   * every frame and is a no-op unless the cached key actually moved.
+   */
+  private updateThirdPersonAnimatedHeldItem(): void {
+    this.thirdPersonHeldItemRenderer.update(this.inventory.getStack(this.selectedSlot));
+  }
+
+  /**
+   * Beta `EntityPlayer.sleepInBedAt` sets the player's spawn to the bed, so
+   * dying later returns them there instead of the world spawn.
+   *
+   * `worldSpawnPoint` and the respawn controller both hold a reference to the
+   * same metadata spawn object, so mutating it in place updates respawn and
+   * the compass together, and the new value is written out by the next
+   * metadata save.
+   */
+  private setRespawnPointToBed(bedX: number, bedY: number, bedZ: number): void {
+    this.worldSpawnPoint.x = bedX + 0.5;
+    this.worldSpawnPoint.y = bedY + 1;
+    this.worldSpawnPoint.z = bedZ + 0.5;
+    void this.saveMetadata(true);
   }
 
   private createBillboardGeometry(u0: number, v0: number, u1: number, v1: number, isMissing = false): THREE.BufferGeometry {
@@ -1753,6 +1807,7 @@ export class Engine {
    */
   private beginSleep(bedX: number, bedY: number, bedZ: number, direction: number): void {
     this.sleepController.beginSleep({ x: bedX, y: bedY, z: bedZ, direction });
+    this.setRespawnPointToBed(bedX, bedY, bedZ);
 
     const pose = sleepPoseFor({ x: bedX, y: bedY, z: bedZ, direction });
     this.player.position.x = pose.x;
@@ -1954,6 +2009,10 @@ export class Engine {
       this.worldSpawnPoint.x - this.player.position.x,
       this.worldSpawnPoint.z - this.player.position.z,
     );
+
+    // The third-person hand reads the same DOM frame source as the hotbar, so
+    // refresh it here rather than letting it drift on its own timer.
+    this.updateThirdPersonAnimatedHeldItem();
   }
 
 }

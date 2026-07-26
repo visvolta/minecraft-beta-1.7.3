@@ -49,11 +49,87 @@ export interface BlockBehaviour {
 
 const NOOP_BEHAVIOUR: BlockBehaviour = {};
 
+/**
+ * Behaviour capabilities that carry state a later registration must not
+ * silently discard.
+ *
+ * `getBoundingBoxes` is the dangerous one: bed and chest both had their
+ * shared-shape bounds merged in by `registerShapedBlockBehaviours`, then
+ * wiped by a later plain `register()` from their own module. The blocks
+ * silently reverted to a full 1x1x1 cube for collision, selection and
+ * raycasting. Nothing failed loudly, so it survived several passes.
+ */
+const PROTECTED_CAPABILITIES = ['getBoundingBoxes'] as const;
+
+/**
+ * Every callable/own key a behaviour contributes, including methods that live
+ * on a class prototype rather than on the instance itself.
+ */
+function behaviourKeysOf(behaviour: BlockBehaviour): string[] {
+  const keys = new Set<string>(Object.keys(behaviour));
+  let prototype: object | null = Object.getPrototypeOf(behaviour) as object | null;
+  while (prototype !== null && prototype !== Object.prototype) {
+    for (const key of Object.getOwnPropertyNames(prototype)) {
+      if (key !== 'constructor') keys.add(key);
+    }
+    prototype = Object.getPrototypeOf(prototype) as object | null;
+  }
+  return [...keys];
+}
+
 export class BlockBehaviourRegistry {
   private readonly behaviours = new Map<BlockId, BlockBehaviour>();
 
+  /**
+   * Registers a behaviour for a block.
+   *
+   * Registration is deliberately strict: replacing a behaviour that already
+   * supplies a protected capability (currently `getBoundingBoxes`) with one
+   * that does not is almost always an ordering accident, so it throws rather
+   * than quietly dropping the capability. Callers that genuinely mean to
+   * layer onto an existing behaviour should use {@link merge}, which is what
+   * the shared shape declarations do.
+   */
   public register(blockId: BlockId, behaviour: BlockBehaviour): void {
+    const existing = this.behaviours.get(blockId);
+    if (existing !== undefined) {
+      for (const capability of PROTECTED_CAPABILITIES) {
+        if (existing[capability] !== undefined && behaviour[capability] === undefined) {
+          throw new Error(
+            `Block ${String(blockId)}: register() would drop "${capability}" from the existing behaviour. `
+            + `Use merge() to layer onto it, or carry the capability through explicitly.`,
+          );
+        }
+      }
+    }
     this.behaviours.set(blockId, behaviour);
+  }
+
+  /**
+   * Layers `behaviour` onto whatever is already registered for `blockId`,
+   * with the new fields taking precedence. Safe regardless of registration
+   * order, which is why bounds-only declarations use it.
+   */
+  public merge(blockId: BlockId, behaviour: BlockBehaviour): void {
+    const existing = this.behaviours.get(blockId);
+    if (existing === undefined) {
+      this.behaviours.set(blockId, behaviour);
+      return;
+    }
+    // Behaviours are a mix of object literals and class instances. A plain
+    // spread only copies own enumerable properties, which would silently drop
+    // every prototype method of a class-based behaviour (BedBehaviour's
+    // onInteract, for one). Layer via prototype chains instead so both forms
+    // survive, with the incoming behaviour taking precedence.
+    const merged = Object.create(
+      Object.getPrototypeOf(existing) as object | null,
+      Object.getOwnPropertyDescriptors(existing),
+    ) as Record<string, unknown>;
+    const incoming = behaviour as unknown as Record<string, unknown>;
+    for (const key of behaviourKeysOf(behaviour)) {
+      merged[key] = incoming[key];
+    }
+    this.behaviours.set(blockId, merged as unknown as BlockBehaviour);
   }
 
   public get(blockId: BlockId): BlockBehaviour {

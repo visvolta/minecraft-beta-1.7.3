@@ -145,6 +145,11 @@ export class DroppedItemEntity extends Entity {
       }
       group.add(mesh);
     }
+
+    // The stack visual is rebuilt in place when the count changes, so the new
+    // child meshes must be re-stamped with the entity render layer or they
+    // fall back to 0 and vanish behind water.
+    this.refreshRenderOrder();
   }
 
   public override updateRenderInterpolation(alpha: number): void {

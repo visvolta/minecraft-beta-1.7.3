@@ -85,5 +85,9 @@ function isOpaqueSolidBlock(blockId: number): boolean {
 }
 
 export function registerSnowBehaviour(registry: BlockBehaviourRegistry): void {
-  registry.register(BlockIds.Snow, new SnowBehaviour());
+  // Merge, not replace: snow's layer-height bounds (1/8 per layer, from
+  // `snowLayerShape`) are supplied by `registerShapedBlockBehaviours`, which
+  // runs earlier during engine setup. A plain register() here dropped them and
+  // would have made a one-layer snow cover collide as a full cube.
+  registry.merge(BlockIds.Snow, new SnowBehaviour());
 }

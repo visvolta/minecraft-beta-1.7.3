@@ -10,6 +10,7 @@ import { DamageSource } from '../damage/DamageSource';
 import type { ParticleOrigin } from '../particles/EntityParticleSink';
 import { isMovementBackward, updateLimbAnimation, updateLivingYaw, wrapDegrees } from './LivingAnimationMath';
 import type { MobSoundKind } from '../sound/MobSoundEvent';
+import { DEFAULT_BLOCK_SOUND, type StepSoundMaterial } from '../../audio/BlockSoundMaterial';
 import { applyLivingRootYaw } from '../../rendering/LivingRenderTransform';
 import { DroppedItemEntity } from '../items/DroppedItemEntity';
 import type { Drop } from '../items/BlockDropResolver';
@@ -547,10 +548,69 @@ export abstract class LivingEntity extends Entity {
       this.stepDistance += moveDistance;
       if (this.stepDistance >= 1) {
         this.stepDistance -= 1;
-        this.emitSound(this.getStepSoundId(), 'step', 0.15);
+        this.emitStepSound();
       }
     }
   }
+
+  /**
+   * Beta `Entity.onEntityUpdate` footstep block, which picks the sound from
+   * the block actually being walked on rather than a fixed material:
+   *
+   *   var28 = getBlockId(x, y - 0.2 - yOffset, z)
+   *   if (block below that is a fence) use the fence instead
+   *   if (block above is snow) use snow's sound
+   *   else if the block is not liquid, play `step.<material>` at volume*0.15
+   *
+   * `getStepSoundOverrideId()` remains as the override hook for entities whose
+   * step sound is not material-driven, but the default now resolves per block.
+   */
+  protected emitStepSound(): void {
+    const override = this.getStepSoundOverrideId();
+    if (override !== undefined) {
+      this.emitSound(override, 'step', 0.15);
+      return;
+    }
+    const material = this.resolveStepMaterial();
+    if (material === undefined) return;
+    this.emitSound(`step.${material}`, 'step', 0.15, 1);
+  }
+
+  /**
+   * Resolves the Beta step material for the block under the entity's feet.
+   *
+   * Mirrors `Entity.onEntityUpdate`: sample at `y - 0.2 - yOffset`, substitute
+   * the block below when standing on a fence, prefer snow lying on top, and
+   * stay silent over liquids.
+   */
+  private resolveStepMaterial(): StepSoundMaterial | undefined {
+    const world = this.ctx.blockUpdateWorld;
+    if (world === undefined) return undefined;
+    const bx = Math.floor(this.position.x);
+    const by = Math.floor(this.position.y - 0.2 - this.yOffset);
+    const bz = Math.floor(this.position.z);
+
+    let blockId = world.getBlock(bx, by, bz);
+    // Beta: a fence one below takes precedence over the cell itself.
+    if (world.getBlock(bx, by - 1, bz) === BlockIds.Fence) blockId = world.getBlock(bx, by - 1, bz);
+    if (blockId === BlockIds.Air) return undefined;
+
+    // Beta: snow lying on top overrides the block underneath.
+    const above = world.getBlock(bx, by + 1, bz);
+    if (above === BlockIds.Snow) return 'snow';
+
+    const definition = this.ctx.blockRegistry?.getById(blockId);
+    if (definition === undefined) return undefined;
+    // Beta stays silent when walking on a liquid surface.
+    if (definition.isLiquid === true) return undefined;
+    return definition.sound?.step ?? DEFAULT_BLOCK_SOUND.step;
+  }
+
+  /**
+   * Non-material step sound for entities that need one. `undefined` (the
+   * default) means "use the block being walked on", as Beta does.
+   */
+  protected getStepSoundOverrideId(): string | undefined { return undefined; }
 
   // ---- Damage / death (shared flow) --------------------------------------
 
@@ -751,7 +811,6 @@ export abstract class LivingEntity extends Entity {
   protected getAmbientSoundId(): string | undefined { return undefined; }
   protected getHurtSoundId(): string | undefined { return 'random.hurt'; }
   protected getDeathSoundId(): string | undefined { return 'random.hurt'; }
-  protected getStepSoundId(): string { return 'step.mob'; }
   protected getSoundVolume(): number { return 1; }
   protected getTalkInterval(): number { return 80; }
 
