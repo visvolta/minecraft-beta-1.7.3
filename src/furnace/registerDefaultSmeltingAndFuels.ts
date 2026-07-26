@@ -68,6 +68,9 @@ export function registerDefaultSmeltingAndFuels(
   tryRegisterSmelting('cactus_green', BlockIds.Cactus, -1, new ItemStack('dye_powder_green', 'item', 1, 2), 200);
   tryRegisterSmelting('porkchop', 'porkchop_raw', -1, new ItemStack('porkchop_cooked', 'item', 1, 0), 200);
   tryRegisterSmelting('porkchop_num', 319, -1, new ItemStack('porkchop_cooked', 'item', 1, 0), 200);
+  tryRegisterSmelting('beef', 'beef_raw', -1, new ItemStack('beef_cooked', 'item', 1, 0), 200);
+  tryRegisterSmelting('chicken', 'chicken_raw', -1, new ItemStack('chicken_cooked', 'item', 1, 0), 200);
+  tryRegisterSmelting('mutton', 'mutton_raw', -1, new ItemStack('mutton_cooked', 'item', 1, 0), 200);
   tryRegisterSmelting('fish_cod', 'fish_cod_raw', -1, new ItemStack('fish_cod_cooked', 'item', 1, 0), 200);
   tryRegisterSmelting('fish_salmon', 'fish_salmon_raw', -1, new ItemStack('fish_salmon_cooked', 'item', 1, 0), 200);
   tryRegisterSmelting('potato', 'potato', -1, new ItemStack('potato_baked', 'item', 1, 0), 200);

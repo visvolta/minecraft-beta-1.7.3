@@ -7,8 +7,6 @@ import { BlockIds } from '../../blocks/BlockId';
 import type { Drop } from './BlockDropResolver';
 import { classifyItemRender, isBlock3dCategory, isFlatItemCategory, isToolCategory } from '../../inventory/ItemRenderClassifier';
 import { BlockItemModelBuilder } from '../../inventory/BlockItemModelBuilder';
-import { resolveBlockTexture } from '../../blocks/resolveBlockTexture';
-import { resolveBlockTint } from '../../blocks/resolveBlockTint';
 import { ItemIconResolver } from '../../inventory/ItemIconResolver';
 
 /** Dropped-item cube footprint (Beta `EntityItem` is 0.25×0.25). */
@@ -118,42 +116,14 @@ export class DroppedItemEntity extends Entity {
       } else if (isBlock3dCategory(category) && def !== undefined) {
         mesh = new THREE.Mesh(BlockItemModelBuilder.build3DGeometry(def, this.ctx.blockAtlas), this.ctx.heldBlockMaterial);
         mesh.scale.set(0.25, 0.25, 0.25);
-      } else if ((isFlatItemCategory(category) || isToolCategory(category)) && this.drop.type === 'block' && def !== undefined) {
-        const texName = resolveBlockTexture(def, 'side') || resolveBlockTexture(def, 'top') || 'stone';
-        let uvRect = this.ctx.blockAtlas.getUvRect(texName);
-        const tint = resolveBlockTint(def, 'side');
-        let useItemAtlas = false;
-
-        if (uvRect === undefined) {
-          const itemPath = this.icons.resolve(String(this.drop.id));
-          const nameMatch = itemPath.match(/\/textures\/items\/([^/]+)\.png$/);
-          if (nameMatch && nameMatch[1]) {
-            uvRect = this.ctx.itemAtlas.getUvRect(nameMatch[1]);
-            useItemAtlas = uvRect !== undefined;
-          }
-        }
-
-        if (uvRect === undefined) {
-          mesh = new THREE.Mesh(BlockItemModelBuilder.buildDebugPlaceholder(), this.ctx.heldBlockMaterial);
-        } else {
-          const geometry = this.createOpposedQuadsGeometry(uvRect.u0, uvRect.v0, uvRect.u1, uvRect.v1, tint[0], tint[1], tint[2]);
-          mesh = new THREE.Mesh(geometry, useItemAtlas ? this.ctx.itemHeldMaterial : this.ctx.heldBlockMaterial);
-        }
       } else if (isFlatItemCategory(category) || isToolCategory(category)) {
-        const itemKey = String(this.drop.id);
-        let uvRect = this.ctx.itemAtlas.getUvRect(itemKey);
+        const texName = this.icons.resolveTextureName(this.drop.id);
+        let uvRect = this.ctx.itemAtlas.getUvRect(texName);
         let useBlockAtlas = false;
 
         if (uvRect === undefined) {
-          const resolvedPath = this.icons.resolve(itemKey);
-          const itemMatch = resolvedPath.match(/\/textures\/items\/([^/]+)\.png$/);
-          const blockMatch = resolvedPath.match(/\/textures\/blocks\/([^/]+)\.png$/);
-          if (itemMatch && itemMatch[1]) {
-            uvRect = this.ctx.itemAtlas.getUvRect(itemMatch[1]);
-          } else if (blockMatch && blockMatch[1]) {
-            uvRect = this.ctx.blockAtlas.getUvRect(blockMatch[1]);
-            useBlockAtlas = uvRect !== undefined;
-          }
+          uvRect = this.ctx.blockAtlas.getUvRect(texName);
+          useBlockAtlas = uvRect !== undefined;
         }
 
         if (uvRect === undefined) {

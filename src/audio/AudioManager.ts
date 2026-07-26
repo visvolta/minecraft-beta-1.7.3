@@ -236,9 +236,10 @@ export class AudioManager implements MobSoundSink {
     return [];
   }
 
-  private playBlockMaterial(material: DigSoundMaterial, x: number, y: number, z: number, volume: number, pitch: number, reason: 'break' | 'place' | 'mine'): void {
-    const key = material === 'glass' ? this.randomVariant(`dig.${reason}.glass`, ['random.glass1','random.glass2','random.glass3']) : this.randomVariant(`dig.${reason}.${material}`, DIG_SOUND_MATERIALS[material].map((entry) => entry.key));
-    this.playPositional(key, x, y, z, volume, pitch, WORLD_AUDIO_LIMITS.defaultDistance, 'player', `block.${reason}.${material}`, WORLD_AUDIO_LIMITS.shortDedupeMs);
+  private playBlockMaterial(digMat: DigSoundMaterial, x: number, y: number, z: number, volume: number, pitch: number, reason: 'break' | 'place' | 'mine'): void {
+    const mat = digMat === 'glass' && reason === 'place' ? 'stone' : digMat;
+    const key = mat === 'glass' ? this.randomVariant(`dig.${reason}.glass`, ['random.glass1','random.glass2','random.glass3']) : this.randomVariant(`dig.${reason}.${mat}`, DIG_SOUND_MATERIALS[mat].map((entry) => entry.key));
+    this.playPositional(key, x, y, z, volume, pitch, WORLD_AUDIO_LIMITS.defaultDistance, 'player', `block.${reason}.${mat}`, WORLD_AUDIO_LIMITS.shortDedupeMs);
   }
 
   private setAudioParam(param: AudioParam | undefined, value: number): boolean {

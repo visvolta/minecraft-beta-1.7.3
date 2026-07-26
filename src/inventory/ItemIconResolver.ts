@@ -196,4 +196,13 @@ export class ItemIconResolver {
   isKnown(id: string): boolean {
     return this.known.has(id) || id in ITEM_ALIASES || id in BLOCK_TEXTURE_FALLBACKS;
   }
+
+  public resolveTextureName(id: string | number): string {
+    const path = this.resolve(String(id));
+    const itemMatch = path.match(/\/textures\/items\/([^/]+)\.png$/);
+    if (itemMatch && itemMatch[1]) return itemMatch[1];
+    const blockMatch = path.match(/\/textures\/blocks\/([^/]+)\.png$/);
+    if (blockMatch && blockMatch[1]) return blockMatch[1];
+    return String(id);
+  }
 }

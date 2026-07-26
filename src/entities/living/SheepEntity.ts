@@ -70,11 +70,14 @@ export class SheepEntity extends QuadrupedEntity {
   }
 
   protected override getDropItems(): Drop[] {
-    // Beta: one wool block (metadata = fleece colour) only if not sheared.
-    if (this.sheared) {
-      return [];
+    const drops: Drop[] = [];
+    if (!this.sheared) {
+      drops.push({ type: 'block', id: BlockIds.Wool, count: 1, metadata: this.fleeceColor });
     }
-    return [{ type: 'block', id: BlockIds.Wool, count: 1, metadata: this.fleeceColor }];
+    const muttonCount = this.nextInt(2) + 1;
+    const muttonId = this.isBurning() ? 'mutton_cooked' : 'mutton_raw';
+    drops.push({ type: 'item', id: muttonId, count: muttonCount, metadata: 0 });
+    return drops;
   }
 
   protected override getAmbientSoundId(): string { return 'mob.sheep'; }

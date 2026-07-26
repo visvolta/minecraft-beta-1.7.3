@@ -41,8 +41,15 @@ export class CowEntity extends QuadrupedEntity {
   }
 
   protected override getDropItems(): Drop[] {
-    const count = this.nextInt(3);
-    return count === 0 ? [] : [{ type: 'item', id: 'leather', count, metadata: 0 }];
+    const drops: Drop[] = [];
+    const leatherCount = this.nextInt(3);
+    if (leatherCount > 0) {
+      drops.push({ type: 'item', id: 'leather', count: leatherCount, metadata: 0 });
+    }
+    const beefCount = this.nextInt(3) + 1;
+    const beefId = this.isBurning() ? 'beef_cooked' : 'beef_raw';
+    drops.push({ type: 'item', id: beefId, count: beefCount, metadata: 0 });
+    return drops;
   }
 
   protected override getAmbientSoundId(): string { return 'mob.cow'; }

@@ -22,6 +22,8 @@ const FOODS: readonly ItemDefinition[] = [
   { id: 'beef_cooked', numericId: 364, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 8, saturationValue: 0.8, useAction: 'eat' },
   { id: 'chicken_raw', numericId: 365, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 2, saturationValue: 0.3, useAction: 'eat' },
   { id: 'chicken_cooked', numericId: 366, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 6, saturationValue: 0.6, useAction: 'eat' },
+  { id: 'mutton_raw', numericId: 367, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 2, saturationValue: 0.3, useAction: 'eat' },
+  { id: 'mutton_cooked', numericId: 368, stackSize: 64, creativeVisible: true, creativeTab: 'food', foodValue: 6, saturationValue: 0.6, useAction: 'eat' },
 ];
 
 const TOOL_IDS: Readonly<Record<ToolMaterialId, Readonly<Record<ToolClass, number>>>> = {
