@@ -114,7 +114,10 @@ function geometryFromBuffers(buffers: MeshAttributeBuffers): THREE.BufferGeometr
   geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(buffers.fluidTextureKinds), 1));
   geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(buffers.fluidFrameUvs), 2));
   geometry.setAttribute('color', geometry.getAttribute('normalColor'));
-  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(buffers.indices), 1));
+  geometry.setIndex(new THREE.BufferAttribute(
+    buffers.indexType === 'uint16' ? new Uint16Array(buffers.indices) : new Uint32Array(buffers.indices),
+    1,
+  ));
   return geometry;
 }
 

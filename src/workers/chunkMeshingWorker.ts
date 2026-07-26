@@ -68,6 +68,7 @@ function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
     fluidTextureKinds: attributeBuffer(geometry, 'fluidTextureKind'),
     fluidFrameUvs: attributeBuffer(geometry, 'fluidFrameUv'),
     indices: index === null ? new Uint32Array().buffer : ownArrayBuffer(index.array as ArrayBufferView),
+    indexType: index !== null && index.array instanceof Uint16Array ? 'uint16' : 'uint32',
     vertexCount,
     indexCount,
   };
