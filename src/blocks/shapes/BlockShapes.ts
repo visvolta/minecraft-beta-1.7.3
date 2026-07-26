@@ -77,6 +77,17 @@ export function isDoorUpper(metadata: number): boolean {
   return (metadata & 8) !== 0;
 }
 
+/**
+ * Every door block id (Beta's wood + iron, plus the project's spruce/birch
+ * extensions). Centralised so a new species is routed through the shared
+ * door model, collision, placement and destroy-overlay paths automatically.
+ */
+export const DOOR_BLOCK_IDS: readonly number[] = [64, 71, 242, 243];
+
+export function isDoorBlockId(blockId: number): boolean {
+  return DOOR_BLOCK_IDS.includes(blockId);
+}
+
 export function doorShape(metadata: number): LocalBox {
   return DOOR_BOXES[doorStateFromMetadata(metadata)] ?? FULL_CUBE;
 }

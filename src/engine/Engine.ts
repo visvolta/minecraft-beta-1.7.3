@@ -139,6 +139,13 @@ import { BoatRenderer } from '../rendering/BoatRenderer';
 import { registerBedBehaviour } from '../world/behaviours/BedBehaviour';
 import { SleepController, sleepPoseFor, type WakeReason } from '../player/SleepController';
 import { SleepOverlayRenderer } from '../player/SleepOverlayRenderer';
+import { UnderwaterOverlayRenderer, isCameraSubmerged } from '../rendering/UnderwaterOverlayRenderer';
+import { collectAmbientSounds } from '../audio/AmbientBlockAudio';
+import { FIRST_PERSON_ROD_TIP_OFFSET } from '../player/PlayerConstants.ts';
+
+/** Scratch vectors for the fishing-line anchor; avoids per-frame allocation. */
+const FISHING_TIP_LOCAL = new THREE.Vector3();
+const FISHING_TIP_WORLD = new THREE.Vector3();
 import { FishingLineRenderer } from '../rendering/FishingLineRenderer';
 import { BED_FOOT_TO_HEAD } from '../blocks/shapes/BlockShapes';
 import { FirstPersonHeldItemRenderer } from '../rendering/FirstPersonHeldItemRenderer.ts';
@@ -1307,6 +1314,8 @@ export class Engine {
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
     this.updateAnimatedItemIcons();
     this.updateSleepPresentation();
+    this.updateUnderwaterOverlay();
+    this.updateAmbientBlockAudio();
     this.updateFishingLine();
     if (this.animatedIconsDirty) {
       this.animatedIconsDirty = false;
@@ -1328,7 +1337,8 @@ export class Engine {
       } else { this.chunkStreamer.dispatchCriticalLoad(chunkX, chunkZ); }
     }
 
-    this.player.updateAnimationState(deltaSeconds);
+    // Beta's body-yaw maths needs the LOOK direction (camera yaw).
+    this.player.updateAnimationState(deltaSeconds, this.cameraController.getYaw());
     this.cameraModeController.update();
     const camera = this.renderer.camera;
     this.cameraModeController.applyTransform(camera, this.player, this.cameraController.getYaw(), this.cameraController.getPitch());
@@ -1796,6 +1806,7 @@ export class Engine {
   /** Owns the Beta sleep timeline, camera pose and screen fade. */
   private readonly sleepController = new SleepController();
   private readonly sleepOverlay = new SleepOverlayRenderer();
+  private readonly underwaterOverlay = new UnderwaterOverlayRenderer();
   private readonly fishingLine: FishingLineRenderer;
 
   /**
@@ -1930,39 +1941,37 @@ export class Engine {
       this.fishingLine.clear();
       return;
     }
-    // Beta `RenderFish` anchors the line differently per camera mode.
+    // The line must leave the ROD, not an arbitrary body coordinate.
     //
-    // Third person uses the body yaw with a fixed hand offset:
-    //   x -= cos(yaw) * 0.35 + sin(yaw) * 0.85
-    //   y -= 0.45
-    //   z -= sin(yaw) * 0.35 - cos(yaw) * 0.85
-    // First person rotates the hand vector (-0.5, 0.03, 0.8) by the view
-    // angles. In first person the rod itself is drawn by the held-item
-    // renderer, so the line starts at the rod tip just below and right of
-    // centre rather than at the player origin.
+    // Third person: `ThirdPersonHeldItemRenderer.rodTip` is parented to the
+    // player model's right-hand attachment, so it already inherits the arm
+    // swing, body yaw and model scale. Reading its world matrix gives the
+    // true rod-tip position with no duplicated trigonometry.
     //
-    // The camera yaw is offset 180 degrees from Beta's rotationYaw, so the
-    // Beta formulas are fed the converted angle; using the raw camera yaw
-    // anchors the line out of the player's back.
-    const betaYaw = this.cameraController.getYaw() + Math.PI;
-    const sinYaw = Math.sin(betaYaw);
-    const cosYaw = Math.cos(betaYaw);
-
+    // First person: the rod is drawn in the overlay scene by the
+    // first-person renderer, so the tip is derived from the camera basis
+    // using the shared FIRST_PERSON_ROD_TIP_OFFSET constant.
     let handX: number;
     let handY: number;
     let handZ: number;
     if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
-      // Beta's rotated hand vector, reduced to the horizontal terms that
-      // matter for a line the player sees from behind its origin.
-      const right = -0.3;
-      const forward = 0.8;
-      handX = this.player.position.x - sinYaw * forward + cosYaw * right;
-      handY = this.player.getEyeY() - 0.18;
-      handZ = this.player.position.z + cosYaw * forward + sinYaw * right;
+      const camera = this.renderer.camera;
+      FISHING_TIP_LOCAL.set(
+        FIRST_PERSON_ROD_TIP_OFFSET[0],
+        FIRST_PERSON_ROD_TIP_OFFSET[1],
+        FIRST_PERSON_ROD_TIP_OFFSET[2],
+      );
+      FISHING_TIP_LOCAL.applyQuaternion(camera.quaternion);
+      handX = camera.position.x + FISHING_TIP_LOCAL.x;
+      handY = camera.position.y + FISHING_TIP_LOCAL.y;
+      handZ = camera.position.z + FISHING_TIP_LOCAL.z;
     } else {
-      handX = this.player.position.x - cosYaw * 0.35 - sinYaw * 0.85;
-      handY = this.player.getEyeY() - 0.45;
-      handZ = this.player.position.z - sinYaw * 0.35 + cosYaw * 0.85;
+      const tip = this.thirdPersonHeldItemRenderer.rodTip;
+      tip.updateWorldMatrix(true, false);
+      tip.getWorldPosition(FISHING_TIP_WORLD);
+      handX = FISHING_TIP_WORLD.x;
+      handY = FISHING_TIP_WORLD.y;
+      handZ = FISHING_TIP_WORLD.z;
     }
 
     this.fishingLine.update(
@@ -1982,6 +1991,44 @@ export class Engine {
   private refreshOpenContainerIcons(): void {
     if (this.inventoryController.isOpen) this.inventoryController.renderAll();
     else if (this.creativeInventoryController.isOpen) this.creativeInventoryController.render();
+  }
+
+  /**
+   * Beta shows the water overlay only while the CAMERA is inside water, not
+   * merely while the player's feet are wet, so this samples the eye cell.
+   */
+  /**
+   * Beta `randomDisplayTick` ambience for fire and liquids: positional
+   * one-shots rolled per nearby block, never a permanent global loop, so they
+   * fade out naturally as the source is removed or falls out of range.
+   */
+  private updateAmbientBlockAudio(): void {
+    const camera = this.renderer.camera;
+    const sounds = collectAmbientSounds(
+      this.blockUpdateWorld,
+      camera.position.x, camera.position.y, camera.position.z,
+      () => Math.random(),
+    );
+    for (const sound of sounds) {
+      this.audioManager.emit({
+        id: sound.id,
+        kind: 'ambient',
+        x: sound.x, y: sound.y, z: sound.z,
+        volume: sound.volume,
+        pitch: sound.pitch,
+        attenuationDistance: 16,
+      });
+    }
+  }
+
+  private updateUnderwaterOverlay(): void {
+    const camera = this.renderer.camera;
+    const submerged = isCameraSubmerged(
+      camera.position.x, camera.position.y, camera.position.z,
+      (x, y, z) => this.blockUpdateWorld.getBlock(x, y, z),
+      (id) => id === BlockIds.WaterStill || id === BlockIds.WaterFlowing,
+    );
+    this.underwaterOverlay.setSubmerged(submerged);
   }
 
   private updateAnimatedItemIcons(): void {

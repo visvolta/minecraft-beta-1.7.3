@@ -24,10 +24,18 @@ const OPEN_BIT = 4;
 const UPPER_BIT = 8;
 
 export class DoorBehaviour implements BlockBehaviour {
-  public constructor(private readonly isIron: boolean) {}
+  public constructor(
+    private readonly isIron: boolean,
+    /**
+     * The specific door block this instance governs. Passed explicitly so the
+     * wooden species (oak/spruce/birch) can share one implementation instead
+     * of hardcoding a single id.
+     */
+    private readonly doorBlockId: number = isIron ? BlockIds.IronDoor : BlockIds.WoodDoor,
+  ) {}
 
   private get blockId(): number {
-    return this.isIron ? BlockIds.IronDoor : BlockIds.WoodDoor;
+    return this.doorBlockId;
   }
 
   /**
@@ -264,7 +272,20 @@ export function resolveDoorPlacementMetadata(
   return ((facing - 1) & 3) + 4;
 }
 
+/**
+ * Every wooden door species shares one behaviour implementation: the metadata
+ * layout, hinge maths, collision shape and interaction are identical, only the
+ * texture differs. Adding a species must never fork this logic.
+ */
+export const WOODEN_DOOR_BLOCK_IDS: readonly number[] = [
+  BlockIds.WoodDoor,
+  BlockIds.SpruceDoor,
+  BlockIds.BirchDoor,
+];
+
 export function registerDoorBehaviour(registry: BlockBehaviourRegistry): void {
-  registry.register(BlockIds.WoodDoor, new DoorBehaviour(false));
-  registry.register(BlockIds.IronDoor, new DoorBehaviour(true));
+  for (const blockId of WOODEN_DOOR_BLOCK_IDS) {
+    registry.register(blockId, new DoorBehaviour(false, blockId));
+  }
+  registry.register(BlockIds.IronDoor, new DoorBehaviour(true, BlockIds.IronDoor));
 }

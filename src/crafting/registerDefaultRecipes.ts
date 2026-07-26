@@ -139,6 +139,26 @@ export function registerDefaultRecipes(
     { id: BlockIds.Planks, metadata: -1 }, { id: BlockIds.Planks, metadata: -1 }
   ], new ItemStack('door_wood', 'item', 1, 0), false);
 
+  // Project wood extensions: each species crafts a door from its own planks,
+  // mirroring the oak recipe shape exactly.
+  tryRegisterShaped('spruce_door', 2, 3, [
+    { id: BlockIds.SprucePlanks, metadata: -1 }, { id: BlockIds.SprucePlanks, metadata: -1 },
+    { id: BlockIds.SprucePlanks, metadata: -1 }, { id: BlockIds.SprucePlanks, metadata: -1 },
+    { id: BlockIds.SprucePlanks, metadata: -1 }, { id: BlockIds.SprucePlanks, metadata: -1 }
+  ], new ItemStack('door_spruce', 'item', 1, 0), false);
+
+  tryRegisterShaped('birch_door', 2, 3, [
+    { id: BlockIds.BirchPlanks, metadata: -1 }, { id: BlockIds.BirchPlanks, metadata: -1 },
+    { id: BlockIds.BirchPlanks, metadata: -1 }, { id: BlockIds.BirchPlanks, metadata: -1 },
+    { id: BlockIds.BirchPlanks, metadata: -1 }, { id: BlockIds.BirchPlanks, metadata: -1 }
+  ], new ItemStack('door_birch', 'item', 1, 0), false);
+
+  // Logs -> planks, one species per log type (Beta: 1 log -> 4 planks).
+  tryRegisterShapeless('spruce_planks', [{ id: BlockIds.SpruceLog, metadata: -1 }],
+    new ItemStack(BlockIds.SprucePlanks, 'block', 4, 0));
+  tryRegisterShapeless('birch_planks', [{ id: BlockIds.BirchLog, metadata: -1 }],
+    new ItemStack(BlockIds.BirchPlanks, 'block', 4, 0));
+
   tryRegisterShaped('iron_door', 2, 3, [
     { id: 'iron_ingot' }, { id: 'iron_ingot' },
     { id: 'iron_ingot' }, { id: 'iron_ingot' },

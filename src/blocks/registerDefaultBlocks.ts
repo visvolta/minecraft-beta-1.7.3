@@ -637,7 +637,10 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   });
 
   registerSimple(BlockIds.SnowBlock, 'snow_block', 'Snow Block', { all: 'snow' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
-  registerSimple(BlockIds.Torch, 'torch', 'Torch', { all: 'torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', lightEmission: 14 });
+  // Torches use the dedicated 3D `buildTorch` mesher path (post + top face,
+  // tilted for wall mounts). That path is only reached from the 'cutout'
+  // branch; 'cross' would fall through to the generic crossed-planes model.
+  registerSimple(BlockIds.Torch, 'torch', 'Torch', { all: 'torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout', lightEmission: 14 });
   registerSimple(BlockIds.Ladder, 'ladder', 'Ladder', { all: 'ladder' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.SignPost, 'sign_post', 'Sign', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
   registerSimple(BlockIds.WallSign, 'wall_sign', 'Wall Sign', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
@@ -646,13 +649,17 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.StonePressurePlate, 'stone_pressure_plate', 'Stone Pressure Plate', { all: 'stone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.WoodPressurePlate, 'wood_pressure_plate', 'Wood Pressure Plate', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.WoodDoor, 'wood_door', 'Wood Door', { all: 'door_wood_lower' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
+  // Project wood-door extensions. Identical shape/behaviour to the oak door;
+  // only the texture differs, so they reuse DoorBehaviour and doorShape.
+  registerSimple(BlockIds.SpruceDoor, 'spruce_door', 'Spruce Door', { all: 'door_spruce_lower' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
+  registerSimple(BlockIds.BirchDoor, 'birch_door', 'Birch Door', { all: 'door_birch_lower' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.IronDoor, 'iron_door', 'Iron Door', { all: 'door_iron_lower' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.Trapdoor, 'trapdoor', 'Trapdoor', { all: 'trapdoor' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.Rail, 'rail', 'Rail', { all: 'rail_normal' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.PoweredRail, 'powered_rail', 'Powered Rail', { all: 'rail_golden' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.DetectorRail, 'detector_rail', 'Detector Rail', { all: 'rail_detector' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
-  registerSimple(BlockIds.RedstoneTorchOn, 'redstone_torch_on', 'Redstone Torch', { all: 'redstone_torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', lightEmission: 7 });
-  registerSimple(BlockIds.RedstoneTorchOff, 'redstone_torch_off', 'Redstone Torch (Off)', { all: 'redstone_torch_off' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross' });
+  registerSimple(BlockIds.RedstoneTorchOn, 'redstone_torch_on', 'Redstone Torch', { all: 'redstone_torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout', lightEmission: 7 });
+  registerSimple(BlockIds.RedstoneTorchOff, 'redstone_torch_off', 'Redstone Torch (Off)', { all: 'redstone_torch_off' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
 
   registerBlock(registry, {
     id: BlockIds.RedstoneWire,
@@ -669,6 +676,10 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   // Fire-related blocks for Stage 2/3 fire system.
   // Full opaque cubes that participate in flammability:
   registerSimple(BlockIds.Planks, 'planks', 'Oak Wood Planks', { all: 'planks_oak' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  // Project wood extensions (see BetaDeviations.ts). Beta 1.7.3 has only
+  // Planks(5); these species reuse the same behaviour, sounds and hardness.
+  registerSimple(BlockIds.SprucePlanks, 'spruce_planks', 'Spruce Wood Planks', { all: 'planks_spruce' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.BirchPlanks, 'birch_planks', 'Birch Wood Planks', { all: 'planks_birch' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.CraftingTable, 'crafting_table', 'Crafting Table', { top: 'crafting_table_top', bottom: 'planks_oak', side: 'crafting_table_side', front: 'crafting_table_front' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Furnace, 'furnace', 'Furnace', { top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front_off' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.FurnaceBurning, 'lit_furnace', 'Furnace', { top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front_on' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: 13 });

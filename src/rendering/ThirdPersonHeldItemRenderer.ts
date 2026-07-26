@@ -14,7 +14,35 @@ import { applyEntityRenderOrder } from './RenderOrder';
 import {
   THIRD_PERSON_BLOCK_POSITION, THIRD_PERSON_BLOCK_ROTATION, THIRD_PERSON_BLOCK_SCALE,
   THIRD_PERSON_FLAT_POSITION, THIRD_PERSON_FLAT_ROTATION, THIRD_PERSON_FLAT_SCALE,
+  THIRD_PERSON_TOOL_POSITION, THIRD_PERSON_TOOL_ROTATION, THIRD_PERSON_TOOL_SCALE,
+  THIRD_PERSON_BOW_POSITION, THIRD_PERSON_BOW_ROTATION, THIRD_PERSON_BOW_SCALE,
+  THIRD_PERSON_ROD_POSITION, THIRD_PERSON_ROD_ROTATION, THIRD_PERSON_ROD_SCALE,
+  ROD_TIP_OFFSET,
 } from '../player/PlayerConstants.ts';
+import { classifyItemRender, isToolCategory } from '../inventory/ItemRenderClassifier';
+
+/** Held-item transform categories, each fully configured from PlayerConstants. */
+interface HeldTransform {
+  readonly position: readonly [number, number, number];
+  readonly rotation: readonly [number, number, number];
+  readonly scale: number;
+}
+
+const BLOCK_TRANSFORM: HeldTransform = {
+  position: THIRD_PERSON_BLOCK_POSITION, rotation: THIRD_PERSON_BLOCK_ROTATION, scale: THIRD_PERSON_BLOCK_SCALE,
+};
+const FLAT_TRANSFORM: HeldTransform = {
+  position: THIRD_PERSON_FLAT_POSITION, rotation: THIRD_PERSON_FLAT_ROTATION, scale: THIRD_PERSON_FLAT_SCALE,
+};
+const TOOL_TRANSFORM: HeldTransform = {
+  position: THIRD_PERSON_TOOL_POSITION, rotation: THIRD_PERSON_TOOL_ROTATION, scale: THIRD_PERSON_TOOL_SCALE,
+};
+const BOW_TRANSFORM: HeldTransform = {
+  position: THIRD_PERSON_BOW_POSITION, rotation: THIRD_PERSON_BOW_ROTATION, scale: THIRD_PERSON_BOW_SCALE,
+};
+const ROD_TRANSFORM: HeldTransform = {
+  position: THIRD_PERSON_ROD_POSITION, rotation: THIRD_PERSON_ROD_ROTATION, scale: THIRD_PERSON_ROD_SCALE,
+};
 
 /**
  * Renders the item held in the player's right hand in third person.
@@ -37,6 +65,11 @@ export class ThirdPersonHeldItemRenderer {
   private readonly blockMaterial: THREE.MeshBasicMaterial;
   private readonly spriteMaterial: THREE.MeshBasicMaterial;
   private readonly icons = new ItemIconResolver();
+  /**
+   * Anchor at the tip of a held fishing rod. The fishing line is attached
+   * here so it leaves the rod rather than the player's body.
+   */
+  public readonly rodTip = new THREE.Group();
 
   public constructor(
     handAttachment: THREE.Object3D,
@@ -46,6 +79,8 @@ export class ThirdPersonHeldItemRenderer {
     private readonly animatedIcons?: AnimatedIconFrames,
   ) {
     handAttachment.add(this.root);
+    this.rodTip.position.set(...ROD_TIP_OFFSET);
+    handAttachment.add(this.rodTip);
     this.blockMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
       vertexColors: true,
@@ -90,6 +125,7 @@ export class ThirdPersonHeldItemRenderer {
     if (stack === null) return false;
 
     const presentation = presentationFor(stack.identity, this.blocks);
+    const transform = this.transformFor(stack);
     if (presentation.kind === 'block') {
       const blockDefinition = this.blocks.getById(stack.identity.id);
       if (blockDefinition === undefined) return false;
@@ -97,9 +133,9 @@ export class ThirdPersonHeldItemRenderer {
         IsolatedBlockModelBuilder.build(blockDefinition, this.atlas, stack.metadata),
         this.blockMaterial,
       );
-      this.mesh.position.set(...THIRD_PERSON_BLOCK_POSITION);
-      this.mesh.rotation.set(...THIRD_PERSON_BLOCK_ROTATION);
-      this.mesh.scale.setScalar(THIRD_PERSON_BLOCK_SCALE);
+      this.mesh.position.set(...transform.position);
+      this.mesh.rotation.set(...transform.rotation);
+      this.mesh.scale.setScalar(transform.scale);
     } else {
       // Animated icons must use the shared current frame, never the strip.
       const iconUrl = this.animatedFrameUrl(stack.identity.id)
@@ -117,9 +153,9 @@ export class ThirdPersonHeldItemRenderer {
       );
       this.mesh.userData.ownedTexture = texture;
       this.mesh.userData.ownedMaterial = material;
-      this.mesh.position.set(...THIRD_PERSON_FLAT_POSITION);
-      this.mesh.rotation.set(...THIRD_PERSON_FLAT_ROTATION);
-      this.mesh.scale.setScalar(THIRD_PERSON_FLAT_SCALE);
+      this.mesh.position.set(...transform.position);
+      this.mesh.rotation.set(...transform.rotation);
+      this.mesh.scale.setScalar(transform.scale);
     }
 
     this.root.add(this.mesh);
@@ -159,6 +195,29 @@ export class ThirdPersonHeldItemRenderer {
   /** Hides the held item (used while the player model itself is hidden). */
   public setVisible(visible: boolean): void {
     this.root.visible = visible;
+  }
+
+  /**
+   * Selects the Beta transform branch for a stack. Beta picks between its
+   * 3D-block, full-3D (tools/swords) and flat-item paths; bow and fishing rod
+   * get their own tuned entries so they can be adjusted independently.
+   */
+  private transformFor(stack: ItemStack): HeldTransform {
+    const definition = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+    const id = definition?.id ?? String(stack.identity.id);
+    if (id === 'bow' || id.startsWith('bow_')) return BOW_TRANSFORM;
+    if (id === 'fishing_rod' || id.startsWith('fishing_rod')) return ROD_TRANSFORM;
+    const presentation = presentationFor(stack.identity, this.blocks);
+    if (presentation.kind === 'block') return BLOCK_TRANSFORM;
+    if (isToolCategory(classifyItemRender(stack.identity, this.blocks))) return TOOL_TRANSFORM;
+    return FLAT_TRANSFORM;
+  }
+
+  /** True when the current stack is a fishing rod (line anchors at the tip). */
+  public isHoldingRod(stack: ItemStack | null): boolean {
+    if (stack === null) return false;
+    const id = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id)?.id ?? String(stack.identity.id);
+    return id === 'fishing_rod' || id.startsWith('fishing_rod');
   }
 
   private disposeMesh(): void {

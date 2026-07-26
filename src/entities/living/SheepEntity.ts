@@ -63,6 +63,14 @@ export class SheepEntity extends QuadrupedEntity {
     }
   }
 
+  /**
+   * Beta `EntitySheep.shearWool` plays `mob.sheep.shear` (mapped to the
+   * shipped mob/sheep/shear.ogg) when the fleece is removed.
+   */
+  public emitShearSound(): void {
+    this.emitSound('mob.sheep.shear', 'attack', 1);
+  }
+
   /** Regrows the fleece after a successful grazing action. */
   public regrowWool(): void {
     this.sheared = false;

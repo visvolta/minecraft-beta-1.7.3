@@ -33,7 +33,9 @@ export class AnimalInteractionService {
         drop.velocity.y += animal.nextInt(51) / 1000;
         drop.velocity.z += (animal.nextInt(201) - 100) / 1000;
       }
-      this.inventory.damageItemInSlot(selectedSlot,1);
+      this.inventory.damageItemInSlot(selectedSlot, 1);
+      // Beta `EntitySheep.shearWool` plays mob.sheep.shear at the animal.
+      animal.emitShearSound();
       return 'consumed-success';
     }
 

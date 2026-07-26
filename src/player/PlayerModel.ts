@@ -1,6 +1,6 @@
 import { BoxGeometry, Group, Mesh, MeshBasicMaterial } from 'three';
 import { applyEntityRenderOrder } from '../rendering/RenderOrder';
-import { PLAYER_MODEL_SCALE, PLAYER_MODEL_SHOULDER_OFFSET_Y, PLAYER_OUTER_LAYER_SCALE } from './PlayerConstants.ts';
+import { HAND_ATTACHMENT_POSITION, HAND_ATTACHMENT_ROTATION, PLAYER_MODEL_SCALE, PLAYER_MODEL_SHOULDER_OFFSET_Y, PLAYER_OUTER_LAYER_SCALE } from './PlayerConstants.ts';
 import type { PlayerSkinManager } from './PlayerSkinManager.ts';
 import { attachEntityLighting } from '../rendering/ChunkRenderer.ts';
 
@@ -101,7 +101,8 @@ export class PlayerModel {
     // the wrist rather than the shoulder pivot. Mirrors the mob-side
     // `BipedModel.rightHandAttachment` so player and mob held items share one
     // attachment convention.
-    this.rightHandAttachment.position.set(0, PLAYER_MODEL_SHOULDER_OFFSET_Y * 2, 0);
+    this.rightHandAttachment.position.set(...HAND_ATTACHMENT_POSITION);
+    this.rightHandAttachment.rotation.set(...HAND_ATTACHMENT_ROTATION);
     this.rightArmGroup.add(this.rightHandAttachment);
 
     const leftArmMesh = new Mesh(this.leftArmGeo, this.material);

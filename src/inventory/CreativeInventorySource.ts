@@ -14,8 +14,14 @@ const SLAB_BLOCK_ID: number = BlockIds.Slab;
  * states the game switches to on its own.
  */
 const CREATIVE_EXCLUDED_BLOCKS: ReadonlySet<number> = new Set<number>([
+  // Fluids are world/environment blocks, not player-facing inventory items.
+  // Beta obtains them through buckets. The registrations themselves stay
+  // intact for world simulation, generation and meshing; only the creative
+  // listing is suppressed.
   BlockIds.WaterFlowing,
+  BlockIds.WaterStill,
   BlockIds.LavaFlowing,
+  BlockIds.LavaStill,
   BlockIds.RedstoneTorchOff,
   // Lit furnace and burning-state blocks are likewise transient.
   BlockIds.FurnaceBurning,
@@ -27,6 +33,8 @@ const CREATIVE_EXCLUDED_BLOCKS: ReadonlySet<number> = new Set<number>([
   BlockIds.WallSign,
   BlockIds.Crops,
   BlockIds.WoodDoor,
+  BlockIds.SpruceDoor,
+  BlockIds.BirchDoor,
   BlockIds.IronDoor,
   BlockIds.Reed,
   BlockIds.RedstoneWire,

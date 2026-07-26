@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { isDoorBlockId } from '../blocks/shapes/BlockShapes';
 import type { TextureAtlas } from '../assets/TextureAtlas';
 import { BlockRegistry } from '../blocks/BlockRegistry';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
@@ -258,7 +259,7 @@ export class DestroyOverlayRenderer {
 
           if (blockId === BlockIds.Slab) {
             minY = 0; maxY = 0.5;
-          } else if (blockId === BlockIds.WoodDoor || blockId === BlockIds.IronDoor) {
+          } else if (isDoorBlockId(blockId)) {
             const isUpper = (meta & 8) !== 0;
             let baseMeta = meta;
             if (isUpper) {

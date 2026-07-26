@@ -49,3 +49,36 @@ export function applyEntityRenderOrder(object: {
     node.renderOrder = RENDER_ORDER.entity;
   });
 }
+
+/**
+ * Forces an entity material into three.js's OPAQUE render queue.
+ *
+ * This is the root cause of "entities disappear through water". three.js
+ * partitions objects into an opaque queue and a transparent queue *before* it
+ * sorts by `renderOrder`, and it always draws the whole opaque queue first.
+ * A material with `transparent: true` therefore lands in the transparent
+ * queue and is drawn AFTER the water depth pre-pass (which is opaque,
+ * `colorWrite: false`), no matter how low its `renderOrder` is. The pre-pass
+ * has already stamped the water surface into the depth buffer, so the entity
+ * fails the depth test and vanishes.
+ *
+ * Entity textures are binary cut-outs (skin, mob, item sprites): they need
+ * `alphaTest`, not alpha blending. Clearing `transparent` keeps the cut-out
+ * behaviour, moves the material into the opaque queue, and lets `renderOrder`
+ * actually order it against the pre-pass. Depth testing stays fully enabled.
+ */
+export function useOpaqueEntityQueue(material: {
+  transparent: boolean;
+  alphaTest: number;
+  depthWrite: boolean;
+  depthTest: boolean;
+  needsUpdate: boolean;
+}): void {
+  // A cut-out needs a non-zero alphaTest; without one, clearing `transparent`
+  // would render the texture's fully transparent texels as solid black.
+  if (material.alphaTest <= 0) material.alphaTest = 0.1;
+  material.transparent = false;
+  material.depthWrite = true;
+  material.depthTest = true;
+  material.needsUpdate = true;
+}

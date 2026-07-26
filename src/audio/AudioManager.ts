@@ -250,6 +250,10 @@ export class AudioManager implements MobSoundSink {
     if (id === 'random.hurt') return ['damage.hit1','damage.hit2','damage.hit3'];
     if (id === 'fire.fire') return ['fire.fire'];
     if (id === 'fire.ignite') return ['fire.ignite'];
+    // Beta BlockFluid.randomDisplayTick ambience.
+    if (id === 'liquid.water') return ['liquid.water'];
+    if (id === 'liquid.lava') return ['liquid.lava'];
+    if (id === 'liquid.lavapop') return ['liquid.lavapop'];
     if (id === 'mob.zombie') return kind === 'death' ? ['mob.zombie.death'] : kind === 'hurt' ? ['mob.zombie.hurt1','mob.zombie.hurt2'] : ['mob.zombie.say1','mob.zombie.say2','mob.zombie.say3'];
     if (id === 'mob.zombiedeath') return ['mob.zombie.death'];
     if (id === 'mob.zombiehurt') return ['mob.zombie.hurt1','mob.zombie.hurt2'];
@@ -265,6 +269,7 @@ export class AudioManager implements MobSoundSink {
     if (id === 'mob.pig') return kind === 'death' ? ['mob.pig.death'] : ['mob.pig.say1','mob.pig.say2','mob.pig.say3'];
     if (id === 'mob.pigdeath') return ['mob.pig.death'];
     if (id === 'mob.sheep') return ['mob.sheep.say1','mob.sheep.say2','mob.sheep.say3'];
+    if (id === 'mob.sheep.shear') return ['mob.sheep.shear'];
     // Beta `EntitySkeleton` uses mob.skeletonhurt for BOTH hurt and death.
     if (id === 'mob.skeleton') return kind === 'death' ? ['mob.skeleton.hurt1','mob.skeleton.hurt2','mob.skeleton.hurt3','mob.skeleton.hurt4'] : ['mob.skeleton.say1','mob.skeleton.say2','mob.skeleton.say3'];
     if (id === 'mob.skeletonhurt') return ['mob.skeleton.hurt1','mob.skeleton.hurt2','mob.skeleton.hurt3','mob.skeleton.hurt4'];

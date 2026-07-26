@@ -7,10 +7,26 @@ import { GameMode, isCreativeMode, isSurvivalMode } from './GameMode';
 import type { PlayerEquipment } from '../inventory/PlayerEquipment';
 import { reduceDamageByArmour } from './ArmourProtection';
 import {
+  BETA_BODY_DRAG_RATE, BETA_BODY_DRAG_THRESHOLD_SQUARED, BETA_BODY_HEAD_CLAMP,
+  BETA_BODY_YAW_FOLLOW, BETA_LIMB_SWING_DISTANCE_SCALE, BETA_LIMB_SWING_MOVE_THRESHOLD,
+  BETA_LIMB_SWING_SMOOTHING,
+} from './PlayerConstants';
+
+/**
+ * Wraps an angle delta into [-PI, PI). Beta does this in degrees with
+ * while-loops; this project stores yaw in radians, so the same clamp is
+ * expressed in radians to avoid a unit conversion at every call site.
+ */
+function wrapRadiansPi(value: number): number {
+  let v = value;
+  while (v < -Math.PI) v += Math.PI * 2;
+  while (v >= Math.PI) v -= Math.PI * 2;
+  return v;
+}
+
+const DEG_TO_RAD = Math.PI / 180;
+import {
   ANIMATION_SWING_DURATION_SECONDS,
-  ANIMATION_MOVEMENT_SPEED_SCALING,
-  ANIMATION_RETURN_TO_NEUTRAL_SPEED,
-  ANIMATION_WALK_SWING_FREQUENCY,
   FIRST_PERSON_CAMERA_OFFSET_Y
 } from './PlayerConstants.ts';
 
@@ -193,24 +209,82 @@ export class Player extends Entity {
     // Player persistence is handled by WorldMetadata, not chunk entity NBT.
   }
 
-  public updateAnimationState(deltaSeconds: number): void {
+  /**
+   * Advances the Beta limb-swing / body-yaw state.
+   *
+   * @param headYawRadians Where the player is LOOKING (camera yaw). Beta's
+   *   `rotationYaw`. The body chases the travel direction but is clamped
+   *   relative to this, which is what produces correct strafing and turning.
+   */
+  public updateAnimationState(deltaSeconds: number, headYawRadians = this.bodyYaw): void {
     this.prevLimbSwingPhase = this.limbSwingPhase;
     this.prevLimbSwingAmount = this.limbSwingAmount;
     this.prevSwingProgress=this.swingProgress;this.prevBreakingSwingPhase=this.breakingSwingPhase;if(this.armAction==='breaking')this.breakingSwingPhase=(this.breakingSwingPhase+deltaSeconds*3)%1;else if(this.armAction==='breakingRecover'){this.breakingSwingPhase=Math.min(1,this.breakingSwingPhase+deltaSeconds*3);if(this.breakingSwingPhase>=1)this.stopBreakingAnimation();}
     this.prevBodyYaw = this.bodyYaw;
 
-    const speed = this.ridingEntity === null ? Math.sqrt(this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z) : 0;
-    let targetSwingAmount = 0;
-    if (this.ridingEntity === null && speed > 0.05) {
-      const airborneScale = this.isFlying ? 0.8 : (this.grounded ? 1 : 0.55);
-      targetSwingAmount = Math.min(speed * ANIMATION_MOVEMENT_SPEED_SCALING * airborneScale, 1.0);
+    // ---- Beta `EntityLiving.onUpdate` body-yaw / limb-swing block ----------
+    //
+    // Beta derives BOTH the walk cycle and the body yaw from the actual
+    // horizontal position delta, not from the velocity vector or from forward
+    // speed alone. That single detail is what makes strafing, turning and
+    // backwards movement read correctly: the body turns to face the direction
+    // of travel, and the walk cycle plays in reverse when the player is
+    // moving backwards relative to where they are looking.
+    //
+    //   var5 = sqrt(dx*dx + dz*dz)                     // distance moved
+    //   if (var5 > 0.05) { var8 = 1; var7 = var5 * 3; var6 = atan2(dz,dx) ... }
+    //   if (swingProgress > 0) var6 = rotationYaw      // face aim while swinging
+    //   if (!onGround) var8 = 0                        // no swing airborne
+    //   field_9361_v += (var8 - field_9361_v) * 0.3    // limbSwingAmount
+    //   renderYawOffset += wrap(var6 - renderYawOffset) * 0.3
+    //   var10 = clamp(wrap(rotationYaw - renderYawOffset), -75, 75)
+    //   renderYawOffset = rotationYaw - var10
+    //   if (var10*var10 > 2500) renderYawOffset += var10 * 0.2
+    //   if (var11) var7 *= -1                          // walking backwards
+    //   field_9360_w += var7                           // limbSwingPhase
+    const deltaX = this.position.x - this.previousPosition.x;
+    const deltaZ = this.position.z - this.previousPosition.z;
+    const moved = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+
+    let bodyTarget = this.bodyYaw;
+    let swingTarget = 0;
+    let phaseAdvance = 0;
+    if (moved > BETA_LIMB_SWING_MOVE_THRESHOLD) {
+      swingTarget = 1;
+      phaseAdvance = moved * BETA_LIMB_SWING_DISTANCE_SCALE;
+      // Beta's atan2(dz, dx) - 90 gives the travel direction in its yaw
+      // convention; this project's yaw convention matches it after the same
+      // -90 degree shift.
+      // Beta: atan2(dz, dx) - 90 degrees, expressed in radians. The project's
+      // yaw convention negates X/Z the same way the camera does.
+      bodyTarget = Math.atan2(-deltaX, -deltaZ);
+    }
+    // While swinging, Beta snaps the body to the aim direction so an attack
+    // always faces the target.
+    if (this.swingProgress > 0) bodyTarget = headYawRadians;
+    // Airborne: the swing amount decays to zero (no mid-air walk cycle).
+    if (!this.grounded) swingTarget = 0;
+
+    this.limbSwingAmount += (swingTarget - this.limbSwingAmount) * BETA_LIMB_SWING_SMOOTHING;
+
+    // Body chases the travel/aim direction at 30% per tick.
+    this.bodyYaw += wrapRadiansPi(bodyTarget - this.bodyYaw) * BETA_BODY_YAW_FOLLOW;
+
+    // Head/body separation is clamped to +/-75 degrees; beyond 50 degrees the
+    // body is dragged along so the player cannot stay owl-necked.
+    let headBodyDelta = wrapRadiansPi(headYawRadians - this.bodyYaw);
+    const walkingBackwards = headBodyDelta < -Math.PI / 2 || headBodyDelta >= Math.PI / 2;
+    const clampRad = BETA_BODY_HEAD_CLAMP * DEG_TO_RAD;
+    headBodyDelta = Math.max(-clampRad, Math.min(clampRad, headBodyDelta));
+    this.bodyYaw = headYawRadians - headBodyDelta;
+    const dragThresholdRad = Math.sqrt(BETA_BODY_DRAG_THRESHOLD_SQUARED) * DEG_TO_RAD;
+    if (Math.abs(headBodyDelta) > dragThresholdRad) {
+      this.bodyYaw += headBodyDelta * BETA_BODY_DRAG_RATE;
     }
 
-    const deltaSwing = targetSwingAmount - this.limbSwingAmount;
-    this.limbSwingAmount += deltaSwing * ANIMATION_RETURN_TO_NEUTRAL_SPEED * deltaSeconds;
-
-    // Phase advances based on smoothed swing amount
-    this.limbSwingPhase += this.limbSwingAmount * ANIMATION_WALK_SWING_FREQUENCY * deltaSeconds * 20.0;
+    // Beta plays the walk cycle in reverse when travelling backwards.
+    if (walkingBackwards) phaseAdvance *= -1;
+    this.limbSwingPhase += phaseAdvance;
 
     if (this.isSwinging) {
       this.swingTime += deltaSeconds;

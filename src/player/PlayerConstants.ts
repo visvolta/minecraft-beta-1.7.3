@@ -71,27 +71,154 @@ export const THIRD_PERSON_HELD_BLOCK_YAW = 0;
 export const THIRD_PERSON_HELD_BLOCK_ROLL = 0;
 export const THIRD_PERSON_HELD_BLOCK_SCALE = 0.35;
 
-/**
- * Third-person held-item transforms, grouped for the third-person held-item
- * renderer. Positions are relative to the right-hand attachment (the wrist),
- * matching Beta `RenderPlayer.renderEquippedItems`, which translates into the
- * right arm's space before drawing.
- *
- * Flat items (tools, swords, food, flat icons) are drawn as an angled sprite;
- * Beta tilts them so the blade/handle reads correctly from the side.
- */
-export const THIRD_PERSON_BLOCK_POSITION: readonly [number, number, number] =
-  [THIRD_PERSON_HELD_BLOCK_X, THIRD_PERSON_HELD_BLOCK_Y, THIRD_PERSON_HELD_BLOCK_Z];
-export const THIRD_PERSON_BLOCK_ROTATION: readonly [number, number, number] =
-  [THIRD_PERSON_HELD_BLOCK_PITCH, THIRD_PERSON_HELD_BLOCK_YAW, THIRD_PERSON_HELD_BLOCK_ROLL];
-export const THIRD_PERSON_BLOCK_SCALE = THIRD_PERSON_HELD_BLOCK_SCALE;
+// ===========================================================================
+// Third-person held items — single source of tuning truth
+// ===========================================================================
+//
+// Beta reference: `RenderPlayer.renderSpecials`. It calls
+// `modelBipedMain.bipedRightArm.postRender(0.0625F)` (moving into the right
+// arm's local space, pivot at the shoulder) and then:
+//
+//     glTranslatef(-0.0625F, 0.4375F, 0.0625F)      // -> the hand/wrist
+//
+// then one of three category transforms:
+//
+//   3D block:  translate(0, 0.1875, -0.3125); scale 0.5*0.75; rotX 20; rotY 45
+//   full-3D:   translate(0, 0.1875, 0);       scale 0.625;    rotX -100; rotY 45
+//   flat item: translate(0.25, 0.1875, -0.1875); scale 0.375;
+//              rotZ 60; rotX -90; rotZ 20
+//
+// IMPORTANT AXIS NOTE: Beta's model space has +Y pointing DOWN, and its
+// `glScalef(s, -s, s)` flips Y again for the item quad. Three.js is +Y up, so
+// every Beta Y translation is negated here and the scale stays positive.
+//
+// All values below are in Three.js space (metres, +Y up), derived from the
+// Beta numbers above. Renderers must read these and never hardcode their own.
 
+/** Beta model unit: 1/16 of a block. Beta's `0.0625F`. */
+const U = PLAYER_MODEL_SCALE;
+
+/**
+ * Right-hand attachment, relative to the right arm group whose pivot is the
+ * shoulder.
+ *
+ * Beta: `glTranslatef(-0.0625, 0.4375, 0.0625)` = 1 unit toward the body,
+ * 7 units DOWN the arm, 1 unit forward. Seven units down from the shoulder is
+ * the wrist — the arm box itself is 12 units long.
+ *
+ * The previous value used `SHOULDER_OFFSET_Y * 2` (-12 units), which put the
+ * attachment past the fingertips at roughly leg height. That is why held
+ * items rendered down by the player's leg.
+ */
+export const HAND_ATTACHMENT_POSITION: readonly [number, number, number] =
+  [-1 * U, -7 * U, 1 * U];
+/** Beta applies no extra rotation at the wrist itself. */
+export const HAND_ATTACHMENT_ROTATION: readonly [number, number, number] = [0, 0, 0];
+
+/** Beta 3D-block branch: translate(0, 0.1875, -0.3125), scale 0.5 * 0.75. */
+export const THIRD_PERSON_BLOCK_POSITION: readonly [number, number, number] =
+  [0, -3 * U, -5 * U];
+export const THIRD_PERSON_BLOCK_ROTATION: readonly [number, number, number] =
+  [20 * Math.PI / 180, 45 * Math.PI / 180, 0];
+export const THIRD_PERSON_BLOCK_SCALE = 0.5 * 0.75;
+
+/**
+ * Beta flat-item branch: translate(0.25, 0.1875, -0.1875), scale 0.375, then
+ * rotZ 60, rotX -90, rotZ 20. The composed Z rotation is 60 + 20 = 80 degrees.
+ */
 export const THIRD_PERSON_FLAT_POSITION: readonly [number, number, number] =
-  [0, -9 * PLAYER_MODEL_SCALE, -1 * PLAYER_MODEL_SCALE];
-/** Beta tilts the sprite about X and rolls it into the grip. */
+  [4 * U, -3 * U, -3 * U];
 export const THIRD_PERSON_FLAT_ROTATION: readonly [number, number, number] =
-  [0, Math.PI / 2, -Math.PI / 4];
-export const THIRD_PERSON_FLAT_SCALE = 0.5;
+  [-90 * Math.PI / 180, 0, 80 * Math.PI / 180];
+export const THIRD_PERSON_FLAT_SCALE = 0.375;
+
+/**
+ * Beta full-3D branch (`Item.isFull3D()`), used by swords and tools: they are
+ * held along the arm rather than flat across the palm.
+ */
+export const THIRD_PERSON_TOOL_POSITION: readonly [number, number, number] =
+  [0, -3 * U, 0];
+export const THIRD_PERSON_TOOL_ROTATION: readonly [number, number, number] =
+  [-100 * Math.PI / 180, 45 * Math.PI / 180, 0];
+export const THIRD_PERSON_TOOL_SCALE = 0.625;
+
+/** Bow: Beta treats it as full-3D, angled slightly further forward. */
+export const THIRD_PERSON_BOW_POSITION: readonly [number, number, number] =
+  [0, -3 * U, 1 * U];
+export const THIRD_PERSON_BOW_ROTATION: readonly [number, number, number] =
+  [-100 * Math.PI / 180, 35 * Math.PI / 180, 0];
+export const THIRD_PERSON_BOW_SCALE = 0.625;
+
+/**
+ * Fishing rod: Beta swaps the held model to a stick while a bobber is out
+ * (`if (var1.fishEntity != null) var21 = new ItemStack(Item.stick)`), and the
+ * line is anchored at the rod tip rather than the body.
+ */
+export const THIRD_PERSON_ROD_POSITION: readonly [number, number, number] =
+  [0, -3 * U, 0];
+export const THIRD_PERSON_ROD_ROTATION: readonly [number, number, number] =
+  [-100 * Math.PI / 180, 45 * Math.PI / 180, 0];
+export const THIRD_PERSON_ROD_SCALE = 0.625;
+/**
+ * Rod-tip offset from the hand attachment, in the attachment's local space.
+ * The fishing line starts here so it visually leaves the rod rather than the
+ * player's chest.
+ */
+export const ROD_TIP_OFFSET: readonly [number, number, number] =
+  [0, -2 * U, -11 * U];
+
+/**
+ * First-person rod tip, relative to the first-person arm group. Shares the
+ * same purpose as `ROD_TIP_OFFSET` so both views anchor the line consistently.
+ */
+export const FIRST_PERSON_ROD_TIP_OFFSET: readonly [number, number, number] =
+  [0.34, -0.12, -0.72];
+
+/**
+ * Extra pose applied to the held item while the arm is mid-swing, so the item
+ * tracks the hand instead of appearing to lag behind it.
+ */
+export const HELD_ITEM_SWING_POSITION_SCALE = 1;
+export const HELD_ITEM_USE_FORWARD_OFFSET = 2 * U;
+
+// ===========================================================================
+// Beta limb-swing / body-yaw tuning (EntityLiving.onUpdate)
+// ===========================================================================
+//
+// These reproduce Beta's animation driver verbatim. They are the reason
+// strafing, turning, direction changes and backwards walking read correctly:
+// Beta derives the walk cycle from the actual position delta and turns the
+// body toward the direction of travel, rather than from forward speed alone.
+
+/** Beta `var5 > 0.05F`: minimum per-tick movement that starts the walk cycle. */
+export const BETA_LIMB_SWING_MOVE_THRESHOLD = 0.05;
+/** Beta `var7 = var5 * 3.0F`: distance moved converts to walk-cycle phase. */
+export const BETA_LIMB_SWING_DISTANCE_SCALE = 3;
+/** Beta `field_9361_v += (var8 - field_9361_v) * 0.3F`. */
+export const BETA_LIMB_SWING_SMOOTHING = 0.3;
+/** Beta `renderYawOffset += var9 * 0.3F`: body chases travel direction. */
+export const BETA_BODY_YAW_FOLLOW = 0.3;
+/** Beta clamps head/body separation to +/-75 degrees. */
+export const BETA_BODY_HEAD_CLAMP = 75;
+/** Beta `var10 * var10 > 2500` (i.e. |delta| > 50 degrees) drags the body. */
+export const BETA_BODY_DRAG_THRESHOLD_SQUARED = 2500;
+/** Beta `renderYawOffset += var10 * 0.2F` once past the drag threshold. */
+export const BETA_BODY_DRAG_RATE = 0.2;
+
+/** Beta `ModelBiped`: arm swing frequency multiplier (`var1 * 0.6662F`). */
+export const BETA_LIMB_FREQUENCY = 0.6662;
+/** Beta arm amplitude: `cos(...) * 2.0F * var2 * 0.5F`. */
+export const BETA_ARM_SWING_AMPLITUDE = 2.0;
+export const BETA_ARM_SWING_SCALE = 0.5;
+/** Beta leg amplitude: `cos(...) * 1.4F * var2`. */
+export const BETA_LEG_SWING_AMPLITUDE = 1.4;
+/** Beta `heldItemRight`: `rotateAngleX = rotateAngleX * 0.5F - 0.31415927F`. */
+export const BETA_HELD_ITEM_ARM_SCALE = 0.5;
+export const BETA_HELD_ITEM_ARM_OFFSET = -0.31415927;
+/** Beta riding pose: arms -0.62831855, legs -1.2566371 with +/-0.31415927 yaw. */
+export const BETA_RIDING_ARM_X = -0.62831855;
+export const BETA_RIDING_LEG_X = -1.2566371;
+export const BETA_RIDING_LEG_Y = 0.31415927;
 
 export const PLAYER_OUTER_LAYER_SCALE = 1.05;
 

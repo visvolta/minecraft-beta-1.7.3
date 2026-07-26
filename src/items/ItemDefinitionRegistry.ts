@@ -135,6 +135,10 @@ const GENERIC_ITEMS: readonly ItemDefinition[] = [
   // Placeable items
   { id: 'sign', numericId: 323, stackSize: 16, useAction: 'none', placeBlockId: 63, creativeVisible: true, creativeTab: 'decoration', creativeOrder: 323 },
   { id: 'door_wood', numericId: 324, stackSize: 1, useAction: 'none', placeBlockId: 64, creativeVisible: true, creativeTab: 'decoration', creativeOrder: 324 },
+  // Project wood-door extensions (see BetaDeviations.ts). Ids above Beta's
+  // allocated item range (Beta stops at 357 plus records at 2256/2257).
+  { id: 'door_spruce', numericId: 380, stackSize: 1, useAction: 'none', placeBlockId: 242, creativeVisible: true, creativeTab: 'decoration', creativeOrder: 380 },
+  { id: 'door_birch', numericId: 381, stackSize: 1, useAction: 'none', placeBlockId: 243, creativeVisible: true, creativeTab: 'decoration', creativeOrder: 381 },
   { id: 'door_iron', numericId: 330, stackSize: 1, useAction: 'none', placeBlockId: 71, creativeVisible: true, creativeTab: 'decoration', creativeOrder: 330 },
   { id: 'bed', numericId: 355, stackSize: 1, useAction: 'none', placeBlockId: 26, creativeVisible: true, creativeTab: 'decoration', creativeOrder: 355 },
   { id: 'cake', numericId: 354, stackSize: 1, useAction: 'none', placeBlockId: 92, creativeVisible: true, creativeTab: 'food', creativeOrder: 354 },

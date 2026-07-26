@@ -50,6 +50,45 @@ export class BlockItemModelBuilder {
       return merged;
     }
 
+    if (id === BlockIds.Snow) {
+      // Beta `BlockSnow`: a thin layer, 1/8 tall at metadata 0. Showing a
+      // full cube in the inventory misrepresents what actually gets placed.
+      const layers = (metadata & 7) + 1;
+      const height = layers / 8;
+      return this.buildCustomBoxGeometry(1.0, height, 1.0, -(1 - height) / 2, def, atlas, metadata);
+    }
+
+    if (id === BlockIds.Cactus) {
+      // Beta `BlockCactus` is inset 1/16 on each horizontal side.
+      return this.buildCustomBoxGeometry(14 / 16, 1.0, 14 / 16, 0, def, atlas, metadata);
+    }
+
+    if (id === BlockIds.Fence) {
+      // Beta `BlockFence` inventory model: the centre post plus the two rails
+      // that make it read as a fence rather than a plain narrow box.
+      const post = this.buildCustomBoxGeometry(4 / 16, 1.0, 4 / 16, 0, def, atlas, metadata);
+      const topRail = this.buildCustomBoxGeometry(1.0, 3 / 16, 2 / 16, 5 / 16, def, atlas, metadata);
+      const lowRail = this.buildCustomBoxGeometry(1.0, 3 / 16, 2 / 16, -1 / 16, def, atlas, metadata);
+      const merged = this.mergeGeometries([post, topRail, lowRail]);
+      post.dispose();
+      topRail.dispose();
+      lowRail.dispose();
+      return merged;
+    }
+
+    if (id === BlockIds.WoodStairs || id === BlockIds.CobblestoneStairs) {
+      // Beta `BlockStairs` is a half-height base plus a half-depth upper step.
+      // Built from the same two-box decomposition the collision shape uses, so
+      // the icon matches what the player places.
+      const base = this.buildCustomBoxGeometry(1.0, 0.5, 1.0, -0.25, def, atlas, metadata);
+      const step = this.buildCustomBoxGeometry(1.0, 0.5, 0.5, 0.25, def, atlas, metadata);
+      step.translate(0, 0, 0.25);
+      const merged = this.mergeGeometries([base, step]);
+      base.dispose();
+      step.dispose();
+      return merged;
+    }
+
     // Default: full 1x1x1 cube
     return this.buildCustomBoxGeometry(1.0, 1.0, 1.0, 0, def, atlas);
   }

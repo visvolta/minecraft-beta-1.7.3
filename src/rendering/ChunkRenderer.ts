@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { useOpaqueEntityQueue } from './RenderOrder';
 import { RENDER_ORDER } from './RenderOrder';
 import type { Chunk } from '../world/Chunk';
 import type { ChunkManager } from '../world/ChunkManager';
@@ -109,6 +110,11 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
 }
 
 export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
+  // Every entity material flows through here, so this is the single place
+  // that guarantees entities join three.js's OPAQUE queue. Without it a
+  // `transparent: true` entity is drawn after the water depth pre-pass and
+  // is culled by the water surface (see `useOpaqueEntityQueue`).
+  useOpaqueEntityQueue(material);
   const uniforms = {
     uSkylightSubtracted: { value: 0 },
     uSunBrightnessFactor: { value: 1 },

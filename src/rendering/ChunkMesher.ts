@@ -27,6 +27,7 @@ import { getBetaFluidCornerHeight } from './fluid/FluidSurfaceGeometry';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import { ChunkPassMask, classifyBlockPassMask, hasChunkPass } from './meshing/ChunkPassMask';
 import { getRailShapeForBlock } from '../world/rails/RailShapes';
+import { isDoorBlockId } from '../blocks/shapes/BlockShapes';
 import {
   BED_HEIGHT,
   bedFlippedFace,
@@ -972,7 +973,7 @@ export class ChunkMesher {
               this.buildSlab(buffers, chunk, x, y, z, blockId, definition);
               continue;
             }
-            if (blockId === BlockIds.WoodDoor || blockId === BlockIds.IronDoor) {
+            if (isDoorBlockId(blockId)) {
               this.buildDoor(buffers, chunk, x, y, z, blockId, definition);
               continue;
             }
@@ -2391,6 +2392,13 @@ export class ChunkMesher {
    * The previous version drew a floating top and never skipped the joining
    * face or mirrored the sides, which is the gap visible in the screenshot.
    */
+  /**
+   * Beta `ModelBed.bedDirection` quarter-turns for the top face, indexed by
+   * the bed's facing metadata. Kept beside the mesher so the rotation is
+   * declared once rather than derived inline.
+   */
+  private static readonly BED_TOP_UV_TURNS_TABLE: readonly number[] = [3, 0, 1, 2];
+
   private buildBed(
     buffers: MeshBuffers,
     chunk: Chunk,
@@ -2449,7 +2457,12 @@ export class ChunkMesher {
     // per facing value.
     quad(
       [[x0, yTop, z1], [x1, yTop, z1], [x1, yTop, z0], [x0, yTop, z0]],
-      [0, 1, 0], top, mapUv(top, direction, false),
+      // Beta `bedDirection` rotates the top texture so the pillow always runs
+      // along the bed's length. The table is the NEGATED facing (Beta indexes
+      // it in the opposite rotational sense to this mesher's corner order),
+      // which is why the previous `direction` term rotated the top textures
+      // a quarter-turn to the left.
+      [0, 1, 0], top, mapUv(top, ChunkMesher.BED_TOP_UV_TURNS_TABLE[direction & 3] ?? 0, false),
     );
 
     // Underside plank (Beta uses the plank texture, drawn downward-facing).
@@ -2469,10 +2482,14 @@ export class ChunkMesher {
       corners: [Corner, Corner, Corner, Corner];
       normal: readonly [number, number, number];
     }[] = [
-      { face: 2, corners: [[x1, y, z0], [x0, y, z0], [x0, yTop, z0], [x1, yTop, z0]], normal: [0, 0, -1] },
-      { face: 3, corners: [[x0, y, z1], [x1, y, z1], [x1, yTop, z1], [x0, yTop, z1]], normal: [0, 0, 1] },
-      { face: 4, corners: [[x0, y, z0], [x0, y, z1], [x0, yTop, z1], [x0, yTop, z0]], normal: [-1, 0, 0] },
-      { face: 5, corners: [[x1, y, z1], [x1, y, z0], [x1, yTop, z0], [x1, yTop, z1]], normal: [1, 0, 0] },
+      // Sides span the PLANK line to the mattress top. Beta's bed box is
+      // 0..0.5625 but its underside plank sits at 0.1875, so drawing the
+      // sides from y=0 left an open band between the plank and the floor
+      // that read as a gap under the bed.
+      { face: 2, corners: [[x1, yPlank, z0], [x0, yPlank, z0], [x0, yTop, z0], [x1, yTop, z0]], normal: [0, 0, -1] },
+      { face: 3, corners: [[x0, yPlank, z1], [x1, yPlank, z1], [x1, yTop, z1], [x0, yTop, z1]], normal: [0, 0, 1] },
+      { face: 4, corners: [[x0, yPlank, z0], [x0, yPlank, z1], [x0, yTop, z1], [x0, yTop, z0]], normal: [-1, 0, 0] },
+      { face: 5, corners: [[x1, yPlank, z1], [x1, yPlank, z0], [x1, yTop, z0], [x1, yTop, z1]], normal: [1, 0, 0] },
     ];
 
     for (const entry of sides) {

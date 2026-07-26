@@ -146,6 +146,20 @@ export const BlockIds = {
   BirchLeaves: 250,
   /** Temporary Birch Log for Stage 5 F2 samples (temp ID). */
   BirchLog: 251,
+
+  // --- Project wood extensions (NOT Beta 1.7.3 content) -------------------
+  // Beta has a single Planks(5) block and a single wooden door. These extra
+  // species are an intentional project extension, declared in
+  // BetaDeviations.ts. Ids sit above Beta's allocated block range so they can
+  // never collide with real Beta content or a Beta-written save.
+  /** Project extension: spruce planks. */
+  SprucePlanks: 240,
+  /** Project extension: birch planks. */
+  BirchPlanks: 241,
+  /** Project extension: spruce door (lower/upper share the id, as Beta does). */
+  SpruceDoor: 242,
+  /** Project extension: birch door. */
+  BirchDoor: 243,
 } as const;
 
 /** Numeric block ID (Beta 1.7.3 compatible). */

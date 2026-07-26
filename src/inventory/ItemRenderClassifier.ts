@@ -1,4 +1,5 @@
 import { BlockIds } from '../blocks/BlockId';
+import { isDoorBlockId } from '../blocks/shapes/BlockShapes';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { ItemIdentity } from './ItemStack';
 
@@ -77,7 +78,7 @@ export function classifyItemRender(
 
   // Beta 1.7.3 precise render classification:
   if (
-    def.id === BlockIds.WoodDoor ||
+    isDoorBlockId(def.id) ||
     def.id === BlockIds.IronDoor ||
     def.id === BlockIds.SignPost ||
     def.id === BlockIds.WallSign ||

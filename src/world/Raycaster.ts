@@ -109,6 +109,10 @@ export class Raycaster {
     // the player's eye is never inside a solid block, so this is mostly
     // a defensive first check).
     let travelled = 0;
+    // Voxel the ray starts in; used to ignore the fluid the camera is inside.
+    const originVoxelX = voxelX;
+    const originVoxelY = voxelY;
+    const originVoxelZ = voxelZ;
     
     // Instead of strictly tracking voxel intersections dynamically from the DDA state
     // we use DDA purely to find which voxels the ray passes through, 
@@ -119,7 +123,25 @@ export class Raycaster {
       if (blockId !== AIR_BLOCK_ID) {
         const blockDefinition = this.blockRegistry.getById(blockId);
 
-        const targetable = blockDefinition !== undefined
+        // A fluid occupying the ORIGIN voxel is the fluid the camera is
+        // already inside. Beta's `rayTraceBlocks_do` starts stepping from the
+        // eye and never reports the cell the eye sits in, so a submerged
+        // player targets through the water rather than at their own head.
+        //
+        // Without this guard the fluid-aware placement trace returned a hit at
+        // distance 0 on the camera's own cell, so every underwater placement
+        // resolved to the block the player was standing in and was rejected by
+        // the player-intersection test. That is why building while submerged
+        // did nothing.
+        const isOriginVoxel = voxelX === originVoxelX
+          && voxelY === originVoxelY
+          && voxelZ === originVoxelZ;
+        const skipSubmergedOrigin = isOriginVoxel
+          && blockDefinition !== undefined
+          && blockDefinition.isLiquid === true;
+
+        const targetable = !skipSubmergedOrigin
+          && blockDefinition !== undefined
           && (blockDefinition.isTargetable !== false
             || (includeFluids && blockDefinition.isLiquid === true));
         if (blockDefinition !== undefined && targetable) {

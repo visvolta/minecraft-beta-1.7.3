@@ -3,10 +3,6 @@ import { PlayerModel } from './PlayerModel.ts';
 import {
   ANIMATION_AIRBORNE_LEG_ROTATION,
   ANIMATION_AIRBORNE_SWING_MULTIPLIER,
-  ANIMATION_ARM_SWING_LIMIT,
-  ANIMATION_BODY_HEAD_DEADZONE,
-  ANIMATION_BODY_HEAD_MAX_DELTA,
-  ANIMATION_BODY_TURN_SPEED,
   ANIMATION_FLYING_PITCH_LIMIT,
   ANIMATION_FLYING_SWING_MULTIPLIER,
   ANIMATION_HEAD_PITCH_LIMIT,
@@ -14,10 +10,16 @@ import {
   ANIMATION_IDLE_ARM_X_FREQUENCY,
   ANIMATION_IDLE_ARM_Z_AMPLITUDE,
   ANIMATION_IDLE_ARM_Z_FREQUENCY,
-  ANIMATION_LEG_SWING_LIMIT,
-  ANIMATION_MOVEMENT_BODY_TURN_SPEED,
   ANIMATION_PLACEMENT_SWING_STRENGTH,
-  ANIMATION_STRAFE_LEAN_LIMIT,
+  BETA_LIMB_FREQUENCY,
+  BETA_ARM_SWING_AMPLITUDE,
+  BETA_ARM_SWING_SCALE,
+  BETA_LEG_SWING_AMPLITUDE,
+  BETA_HELD_ITEM_ARM_SCALE,
+  BETA_HELD_ITEM_ARM_OFFSET,
+  BETA_RIDING_ARM_X,
+  BETA_RIDING_LEG_X,
+  BETA_RIDING_LEG_Y,
 } from './PlayerConstants.ts';
 
 function clamp(value: number, min: number, max: number): number {
@@ -31,11 +33,6 @@ function normalizeAngle(angle: number): number {
   return a;
 }
 
-function stepAngle(current: number, target: number, maxStep: number): number {
-  const delta = normalizeAngle(target - current);
-  if (Math.abs(delta) <= maxStep) return target;
-  return current + Math.sign(delta) * maxStep;
-}
 
 export type PlayerAnimationState = 'idle' | 'walking' | 'jumping' | 'falling' | 'flying' | 'minecart_sitting';
 export type PlayerPoseState = PlayerAnimationState;
@@ -58,7 +55,7 @@ export class PlayerAnimator {
    *   is what makes a third-person item read as *held* rather than clipped
    *   against a freely swinging arm.
    */
-  public update(player: Player, model: PlayerModel, headYaw: number, headPitch: number, partialTick: number, deltaSeconds = 1 / 60, holdingItem = false): void {
+  public update(player: Player, model: PlayerModel, headYaw: number, headPitch: number, partialTick: number, _deltaSeconds = 1 / 60, holdingItem = false): void {
     const state = getPlayerAnimationState(player);
     const normalSwing=player.prevSwingProgress+(player.swingProgress-player.prevSwingProgress)*partialTick,breaking=(player.prevBreakingSwingPhase+((player.breakingSwingPhase-player.prevBreakingSwingPhase+1)%1)*partialTick)%1,swingProgress=player.armAction!=='none'?breaking:normalSwing;
     const limbSwingPhase = player.prevLimbSwingPhase + (player.limbSwingPhase - player.prevLimbSwingPhase) * partialTick;
@@ -67,35 +64,11 @@ export class PlayerAnimator {
     else if (state === 'jumping' || state === 'falling') limbSwingAmount *= ANIMATION_AIRBORNE_SWING_MULTIPLIER;
     else if (state === 'flying') limbSwingAmount *= ANIMATION_FLYING_SWING_MULTIPLIER;
 
-    const horizontalSpeed = Math.hypot(player.velocity.x, player.velocity.z);
-    const movementYaw = horizontalSpeed > 0.05 ? Math.atan2(-player.velocity.x, -player.velocity.z) : player.bodyYaw;
-    const headDeltaBefore = normalizeAngle(headYaw - player.bodyYaw);
-    let bodyTarget = player.bodyYaw;
-    const movementDeltaForTarget = normalizeAngle(movementYaw - player.bodyYaw);
-    const movementForward = Math.cos(movementDeltaForTarget);
-    // While flying the velocity direction swings sharply as the player
-    // accelerates and turns, so chasing it made the torso wobble. Beta has no
-    // flight, so the calmest correct behaviour is to let the body follow the
-    // head only, exactly as it does when standing still.
-    const followsMovement = state !== 'minecart_sitting'
-      && state !== 'flying'
-      && horizontalSpeed > 0.08
-      && movementForward > 0.35;
-    if (followsMovement) {
-      bodyTarget = movementYaw;
-    } else if (Math.abs(headDeltaBefore) > ANIMATION_BODY_HEAD_DEADZONE) {
-      bodyTarget = headYaw - Math.sign(headDeltaBefore) * ANIMATION_BODY_HEAD_DEADZONE;
-    }
-    const turnSpeed = (horizontalSpeed > 0.08 ? ANIMATION_MOVEMENT_BODY_TURN_SPEED : ANIMATION_BODY_TURN_SPEED) * deltaSeconds;
-    player.bodyYaw = stepAngle(player.bodyYaw, bodyTarget, turnSpeed);
-    let headYawDiff = normalizeAngle(headYaw - player.bodyYaw);
-    if (headYawDiff > ANIMATION_BODY_HEAD_MAX_DELTA) {
-      player.bodyYaw = headYaw - ANIMATION_BODY_HEAD_MAX_DELTA;
-      headYawDiff = ANIMATION_BODY_HEAD_MAX_DELTA;
-    } else if (headYawDiff < -ANIMATION_BODY_HEAD_MAX_DELTA) {
-      player.bodyYaw = headYaw + ANIMATION_BODY_HEAD_MAX_DELTA;
-      headYawDiff = -ANIMATION_BODY_HEAD_MAX_DELTA;
-    }
+    // Body yaw is computed authoritatively in `Player.updateAnimationState`
+    // using Beta's `EntityLiving.onUpdate` algorithm (travel-direction chase,
+    // +/-75 degree head clamp, 50 degree drag). The animator must NOT
+    // recompute it: doing so previously produced a second, conflicting body
+    // rotation that made turning and strafing look wrong.
     const bodyYaw = player.prevBodyYaw + normalizeAngle(player.bodyYaw - player.prevBodyYaw) * partialTick;
 
     model.updateTransforms(
@@ -109,31 +82,39 @@ export class PlayerAnimator {
 
     this.applyPoseBase(model, state);
 
-    const localDelta = normalizeAngle(movementYaw - bodyYaw);
-    const localForward = horizontalSpeed > 0.001 ? Math.cos(localDelta) : 0;
-    const rawLocalStrafe = horizontalSpeed > 0.001 ? Math.sin(localDelta) : 0;
-    const localStrafe = Math.abs(rawLocalStrafe) < 1e-4 ? 0 : rawLocalStrafe;
-    const backward = localForward < -0.15;
-    const phaseDirection = backward ? -1 : 1;
-    let rightArmX = -Math.cos(limbSwingPhase * phaseDirection) * ANIMATION_ARM_SWING_LIMIT * limbSwingAmount * 0.5;
-    let leftArmX = Math.cos(limbSwingPhase * phaseDirection) * ANIMATION_ARM_SWING_LIMIT * limbSwingAmount * 0.5;
-    let rightLegX = -Math.cos(limbSwingPhase * phaseDirection) * ANIMATION_LEG_SWING_LIMIT * limbSwingAmount;
-    let leftLegX = Math.cos(limbSwingPhase * phaseDirection) * ANIMATION_LEG_SWING_LIMIT * limbSwingAmount;
-    const strafeLean = clamp(localStrafe * limbSwingAmount * ANIMATION_STRAFE_LEAN_LIMIT, -ANIMATION_STRAFE_LEAN_LIMIT, ANIMATION_STRAFE_LEAN_LIMIT);
+    // Beta `ModelBiped.setRotationAngles`, verbatim:
+    //
+    //   rightArm.rotateAngleX = cos(limbSwing * 0.6662 + PI) * 2.0 * amount * 0.5
+    //   leftArm.rotateAngleX  = cos(limbSwing * 0.6662)      * 2.0 * amount * 0.5
+    //   rightLeg.rotateAngleX = cos(limbSwing * 0.6662)      * 1.4 * amount
+    //   leftLeg.rotateAngleX  = cos(limbSwing * 0.6662 + PI) * 1.4 * amount
+    //
+    // The walk direction (forwards vs backwards) and the strafe/turn response
+    // are already baked into `limbSwingPhase` and `bodyYaw` by
+    // `Player.updateAnimationState`, which follows Beta's driver exactly. The
+    // animator therefore reads them rather than re-deriving direction from
+    // forward speed, which is what previously broke strafing.
+    const phase = limbSwingPhase * BETA_LIMB_FREQUENCY;
+    const armAmplitude = BETA_ARM_SWING_AMPLITUDE * limbSwingAmount * BETA_ARM_SWING_SCALE;
+    const legAmplitude = BETA_LEG_SWING_AMPLITUDE * limbSwingAmount;
+    let rightArmX = Math.cos(phase + Math.PI) * armAmplitude;
+    let leftArmX = Math.cos(phase) * armAmplitude;
+    let rightLegX = Math.cos(phase) * legAmplitude;
+    let leftLegX = Math.cos(phase + Math.PI) * legAmplitude;
 
     // Beta `ModelBiped.setRotationAngles` composes the arms in a fixed order:
     // base limb swing, then the riding offset, then the held-item pose, and
     // only then the attack swing. Composing them in any other order changes
     // the result because the held-item pose *scales* whatever came before it.
     if (state === 'minecart_sitting') {
-      rightArmX += -0.62831855;
-      leftArmX += -0.62831855;
+      rightArmX += BETA_RIDING_ARM_X;
+      leftArmX += BETA_RIDING_ARM_X;
     }
 
     // Beta `heldItemRight`: `rotateAngleX = rotateAngleX * 0.5 - 0.31415927`.
     // Only the right arm is affected; Beta never populates `heldItemLeft`.
     if (holdingItem) {
-      rightArmX = rightArmX * 0.5 - 0.31415927;
+      rightArmX = rightArmX * BETA_HELD_ITEM_ARM_SCALE + BETA_HELD_ITEM_ARM_OFFSET;
     }
 
     let rightArmZ = 0.0;
@@ -179,7 +160,8 @@ export class PlayerAnimator {
       // Creative flight has no Beta equivalent, so keep it deliberately calm:
       // a small steady forward lean with no per-frame sway. Reusing the ground
       // walk's body turn here is what made the torso wobble in the air.
-      const flyPitch = -ANIMATION_FLYING_PITCH_LIMIT * clamp(horizontalSpeed / 8, 0, 1);
+      const flySpeed = Math.hypot(player.velocity.x, player.velocity.z);
+      const flyPitch = -ANIMATION_FLYING_PITCH_LIMIT * clamp(flySpeed / 8, 0, 1);
       model.bodyGroup.rotation.x = flyPitch;
       model.bodyGroup.rotation.z = 0;
     } else {
@@ -189,18 +171,20 @@ export class PlayerAnimator {
 
     if (state === 'minecart_sitting') {
       // Arms were already tipped back above, in Beta's composition order.
-      rightLegX = -1.2566371;
-      leftLegX = -1.2566371;
-      model.rightLegGroup.rotation.y = 0.31415927;
-      model.leftLegGroup.rotation.y = -0.31415927;
+      rightLegX = BETA_RIDING_LEG_X;
+      leftLegX = BETA_RIDING_LEG_X;
+      model.rightLegGroup.rotation.y = BETA_RIDING_LEG_Y;
+      model.leftLegGroup.rotation.y = -BETA_RIDING_LEG_Y;
     } else {
-      model.rightLegGroup.rotation.y = localStrafe * 0.18 * limbSwingAmount;
-      model.leftLegGroup.rotation.y = localStrafe * 0.18 * limbSwingAmount;
+      // Beta zeroes leg yaw except while riding.
+      model.rightLegGroup.rotation.y = 0;
+      model.leftLegGroup.rotation.y = 0;
     }
 
-    const armLean = airborne ? 0 : strafeLean * 0.4;
-    model.rightArmGroup.rotation.set(rightArmX, 0, rightArmZ + armLean);
-    model.leftArmGroup.rotation.set(leftArmX, 0, leftArmZ + armLean);
+    // Beta sets arm yaw to 0 and applies no strafe lean: the body yaw itself
+    // already turns the whole torso toward the direction of travel.
+    model.rightArmGroup.rotation.set(rightArmX, 0, rightArmZ);
+    model.leftArmGroup.rotation.set(leftArmX, 0, leftArmZ);
     model.rightLegGroup.rotation.x = rightLegX;
     model.leftLegGroup.rotation.x = leftLegX;
   }

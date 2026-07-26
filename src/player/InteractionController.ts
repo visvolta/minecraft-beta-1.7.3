@@ -1,4 +1,6 @@
 import { BlockBehaviourRegistry } from '../world/BlockBehaviour';
+import { isDoorBlockId } from '../blocks/shapes/BlockShapes';
+import { ItemStack } from '../inventory/ItemStack';
 import * as THREE from 'three';
 import { BlockIds, type BlockId } from '../blocks/BlockId';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
@@ -438,7 +440,82 @@ export class InteractionController {
     if (definition.id === 'fishing_rod') return this.useFishingRod();
     if (definition.id === 'snowball') return this.throwItem('snowball');
     if (definition.id === 'egg') return this.throwItem('egg');
+    if (definition.id === 'bucket_empty') return this.useEmptyBucket();
+    if (definition.id === 'bucket_water') return this.usePlacementBucket(BlockIds.WaterStill);
+    if (definition.id === 'bucket_lava') return this.usePlacementBucket(BlockIds.LavaStill);
     return false;
+  }
+
+  /**
+   * Beta `ItemBucket.onItemRightClick` with `isFull == 0`: raytrace WITH
+   * fluids, and if the hit cell is a water or lava **source** (metadata 0),
+   * remove it and hand back the matching filled bucket.
+   */
+  private useEmptyBucket(): boolean {
+    const hit = this.currentPlacementHit;
+    if (hit === undefined) return false;
+    const { x, y, z } = hit.blockPos;
+    const blockId = this.blockUpdateWorld.getBlock(x, y, z);
+    const metadata = this.blockUpdateWorld.getBlockMetadata(x, y, z);
+    // Beta only collects a full source block, never flowing fluid.
+    if (metadata !== 0) return false;
+
+    let filled: string | undefined;
+    if (blockId === BlockIds.WaterStill) filled = 'bucket_water';
+    else if (blockId === BlockIds.LavaStill) filled = 'bucket_lava';
+    if (filled === undefined) return false;
+
+    this.blockUpdateWorld.setBlock(x, y, z, BlockIds.Air, { notifyNeighbours: true });
+    this.swapHeldBucket(filled);
+    return true;
+  }
+
+  /**
+   * Beta `ItemBucket.onItemRightClick` with a filled bucket: raytrace WITHOUT
+   * fluids, offset by the hit face, and place the fluid if the target cell is
+   * air or a non-solid block. The bucket becomes empty.
+   */
+  private usePlacementBucket(fluidBlockId: number): boolean {
+    // Beta passes `this.isFull == 0` as the fluid flag, so a filled bucket
+    // traces past fluids and lands on the first solid surface.
+    const hit = this.currentHit ?? this.currentPlacementHit;
+    if (hit === undefined) return false;
+
+    const targetX = hit.blockPos.x + hit.face.x;
+    const targetY = hit.blockPos.y + hit.face.y;
+    const targetZ = hit.blockPos.z + hit.face.z;
+    if (targetY < 0 || targetY >= CHUNK_SIZE_Y) return false;
+
+    const existingId = this.blockUpdateWorld.getBlock(targetX, targetY, targetZ);
+    const existing = this.blockRegistry.getById(existingId);
+    // Beta: `isAirBlock(...) || !getBlockMaterial(...).isSolid()`
+    if (existingId !== BlockIds.Air && existing?.solid === true) return false;
+
+    this.blockUpdateWorld.setBlock(targetX, targetY, targetZ, fluidBlockId, {
+      metadata: 0,
+      notifyNeighbours: true,
+    });
+    this.swapHeldBucket('bucket_empty');
+    return true;
+  }
+
+  /**
+   * Beta returns a NEW ItemStack from `onItemRightClick`, i.e. the bucket
+   * transforms in place rather than being consumed. Creative mode leaves the
+   * stack untouched, matching Beta's `capabilities.isCreativeMode` guard.
+   */
+  private swapHeldBucket(itemId: string): void {
+    if (this.player.isCreativeMode()) return;
+    const slot = this.selectedSlotIndex;
+    const stack = this.inventory.getStack(slot);
+    if (stack === null) return;
+    if (stack.count > 1) {
+      // A stack of buckets: consume one and try to add the replacement.
+      this.inventory.decrementSlot(slot, 1);
+      this.inventory.insert('item', itemId, 1, 0);
+      return;
+    }
+    this.inventory.setStack(slot, new ItemStack(itemId, 'item', 1, 0));
   }
 
   /**
@@ -957,7 +1034,7 @@ export class InteractionController {
       return false;
     }
 
-    if (selectedId === BlockIds.WoodDoor || selectedId === BlockIds.IronDoor) {
+    if (isDoorBlockId(selectedId)) {
       if (targetY + 1 >= CHUNK_SIZE_Y) return false;
       const upperId = this.blockUpdateWorld.getBlock(targetX, targetY + 1, targetZ);
       const upperDef = this.blockRegistry.getById(upperId);

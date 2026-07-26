@@ -33,6 +33,8 @@ export const BETA_ITEM_DEVIATIONS: readonly BetaDeviation[] = [
   { id: 'chicken_cooked', numericId: 366, reason: 'Requested addition: smelted counterpart of chicken_raw.' },
   { id: 'mutton_raw', numericId: 367, reason: 'Requested addition: sheep drop mutton (Beta sheep drop wool only).' },
   { id: 'mutton_cooked', numericId: 368, reason: 'Requested addition: smelted counterpart of mutton_raw.' },
+  { id: 'door_spruce', numericId: 380, reason: 'Requested addition: spruce door (Beta has one wooden door only).' },
+  { id: 'door_birch', numericId: 381, reason: 'Requested addition: birch door (Beta has one wooden door only).' },
 ];
 
 /**
@@ -46,6 +48,10 @@ export const BETA_BLOCK_DEVIATIONS: readonly BetaDeviation[] = [
   { id: 'spruce_log', numericId: 252, reason: 'Temporary id: Beta stores spruce as Log(17) metadata 1.' },
   { id: 'spruce_leaves', numericId: 253, reason: 'Temporary id: Beta stores spruce as Leaves(18) metadata 1.' },
   { id: 'podzol', numericId: 254, reason: 'Temporary id: Beta stores podzol as Dirt(3) metadata 2.' },
+  { id: 'spruce_planks', numericId: 240, reason: 'Requested addition: Beta has a single Planks(5) block.' },
+  { id: 'birch_planks', numericId: 241, reason: 'Requested addition: Beta has a single Planks(5) block.' },
+  { id: 'spruce_door', numericId: 242, reason: 'Requested addition: placed form of the spruce door.' },
+  { id: 'birch_door', numericId: 243, reason: 'Requested addition: placed form of the birch door.' },
 ];
 
 const DEVIATION_ITEM_IDS: ReadonlySet<string> = new Set(BETA_ITEM_DEVIATIONS.map((entry) => entry.id));
