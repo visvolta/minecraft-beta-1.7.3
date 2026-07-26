@@ -22,6 +22,9 @@ import { FishingBobberEntity } from '../entities/projectiles/FishingBobberEntity
 import { BoatEntity } from '../entities/BoatEntity';
 import { PaintingEntity } from '../entities/PaintingEntity';
 import { BED_FOOT_TO_HEAD } from '../blocks/shapes/BlockShapes';
+import { doorFacingFromYaw, resolveDoorPlacementMetadata } from '../world/behaviours/DoorBehaviour';
+import { stairFacingFromYaw } from '../blocks/shapes/BlockShapes';
+import { railShapeFromPlayerYaw } from '../world/rails/RailConnectivity';
 
 /** Maps a hit wall normal onto Beta's painting direction index. */
 function paintingDirectionFromFace(faceX: number, faceZ: number): number {
@@ -78,6 +81,8 @@ export class InteractionController {
     }
   };
   private currentHit: RaycastHit | undefined;
+  /** Fluid-aware hit used for block/boat placement (see update()). */
+  private currentPlacementHit: RaycastHit | undefined;
   /** Nearest valid living entity under the crosshair this frame (for melee + debug). */
   private targetedEntity: LivingEntity | undefined;
   private targetedInteractEntity: Entity | undefined;
@@ -112,6 +117,12 @@ export class InteractionController {
      * stays usable headlessly in validation.
      */
     private readonly playBlockSound?: (id: 'door_open' | 'door_close' | 'chestopen' | 'chestclosed' | 'click', x: number, y: number, z: number) => void,
+    /**
+     * Positional one-shot for entity-style sounds (bow release, rod cast).
+     * Separate from playBlockSound because Beta routes these through
+     * `playSoundAtEntity` with their own volume/pitch.
+     */
+    private readonly playEntitySound?: (id: string, x: number, y: number, z: number, volume: number, pitch: number) => void,
   ) {
     this.input = input;
     this.camera = camera;
@@ -256,11 +267,15 @@ export class InteractionController {
 
     this.camera.getWorldDirection(this.lookDirection);
 
-    this.currentHit = this.raycaster.cast(
-      { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
-      { x: this.lookDirection.x, y: this.lookDirection.y, z: this.lookDirection.z },
-      INTERACTION_REACH,
-    );
+    const eye = { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z };
+    const look = { x: this.lookDirection.x, y: this.lookDirection.y, z: this.lookDirection.z };
+    this.currentHit = this.raycaster.cast(eye, look, INTERACTION_REACH);
+
+    // Beta raycasts twice: normally fluids are ignored (so you can mine
+    // through water), but placement uses a fluid-aware trace so blocks and
+    // boats can be put on or under the surface. Keeping them separate is
+    // what lets a submerged player build without water blocking every hit.
+    this.currentPlacementHit = this.raycaster.cast(eye, look, INTERACTION_REACH, true);
 
     // Target the nearest valid living entity under the crosshair (melee reach,
     // capped at the block-hit distance so attacks can't pass through walls).
@@ -272,6 +287,17 @@ export class InteractionController {
     this.breakingController.update(this.currentHit, isLeftClickHeld && this.targetedInteractEntity === undefined, deltaSeconds);
 
     // Entity attacks trigger on the left-click edge: one hit per press.
+    // Beta: any hit knocks a painting off its wall.
+    if (this.input.isMouseButtonJustPressed('left') && this.targetedInteractEntity instanceof PaintingEntity) {
+      this.player.swingItem();
+      this.targetedInteractEntity.attackEntityFrom();
+      return;
+    }
+    if (this.input.isMouseButtonJustPressed('left') && this.targetedInteractEntity instanceof BoatEntity) {
+      this.player.swingItem();
+      this.targetedInteractEntity.attackEntityFrom(PLAYER_MELEE_DAMAGE);
+      return;
+    }
     if (this.input.isMouseButtonJustPressed('left') && this.targetedInteractEntity instanceof MinecartEntity) {
       this.player.swingItem();
       this.targetedInteractEntity.attackMinecart(PLAYER_MELEE_DAMAGE);
@@ -326,7 +352,19 @@ export class InteractionController {
       return;
     }
 
+    // Placement uses the fluid-aware hit so a submerged player (whose normal
+    // trace stops at nothing) can still build and launch boats.
+    const placementHit = this.currentPlacementHit;
+
     if (this.currentHit === undefined) {
+      if (this.input.isMouseButtonJustPressed('right') && placementHit !== undefined) {
+        if (this.tryUseBoatItem(placementHit)
+          || this.tryUseFlintAndSteel(placementHit)
+          || this.tryPlaceBlock(placementHit)) {
+          this.player.swingItem();
+          return;
+        }
+      }
       if (this.input.isMouseButtonJustPressed('left')) {
         this.player.swingItem();
       } else if (this.input.isMouseButtonJustPressed('right')) {
@@ -341,7 +379,12 @@ export class InteractionController {
         return;
       }
 
-      if (this.tryUseBoatItem(this.currentHit)
+      if (this.tryUseFlintAndSteel(placementHit ?? this.currentHit)) {
+        this.player.swingItem();
+        return;
+      }
+
+      if (this.tryUseBoatItem(placementHit ?? this.currentHit)
         || this.tryUsePaintingItem(this.currentHit)
         || this.tryUseBedItem(this.currentHit)) {
         this.player.swingItem();
@@ -365,7 +408,12 @@ export class InteractionController {
         return;
       }
 
-      const placed = this.placeBlock(this.currentHit);
+      // Prefer the fluid-aware hit when it is at least as close, so blocks
+      // can be placed against a water surface rather than through it.
+      const useHit = placementHit !== undefined && placementHit.distance <= this.currentHit.distance + 1e-6
+        ? placementHit
+        : this.currentHit;
+      const placed = this.placeBlock(useHit);
       if (placed && this.shouldConsumeHeldItem()) {
         this.inventory.decrementSlot(this.selectedSlotIndex, 1);
       }
@@ -428,7 +476,13 @@ export class InteractionController {
     };
     this.entityManager.add(bobber);
     this.activeBobber = bobber;
-    this.playBlockSound?.('click', this.player.position.x, this.player.position.y, this.player.position.z);
+    // Beta plays random.bow at 0.5 volume with a randomised low pitch.
+    this.playEntitySound?.(
+      'random.bow',
+      this.player.position.x, this.player.position.y, this.player.position.z,
+      0.5,
+      0.4 / (Math.random() * 0.4 + 0.8),
+    );
     return true;
   }
 
@@ -471,7 +525,13 @@ export class InteractionController {
     if (this.inventory.damageItemInSlot(this.selectedSlotIndex, 1)?.status === 'broken') {
       this.itemEntityManager.emitItemBreak(this.player.position.x, this.player.position.y, this.player.position.z);
     }
-    this.playBlockSound?.('click', this.player.position.x, this.player.position.y, this.player.position.z);
+    // Beta ItemBow: random.bow at full volume with a randomised pitch.
+    this.playEntitySound?.(
+      'random.bow',
+      this.player.position.x, this.player.position.y, this.player.position.z,
+      1,
+      1 / (Math.random() * 0.4 + 0.8),
+    );
     return true;
   }
 
@@ -549,9 +609,21 @@ export class InteractionController {
     const direction = paintingDirectionFromFace(hit.face.x, hit.face.z);
     if (direction < 0) return false;
 
-    const anchorX = hit.blockPos.x + hit.face.x;
+    // The anchor is the WALL block itself, not the air in front of it.
+    // Anchoring to the air cell made hasValidSurface test that air for
+    // solidity, so every placement was refused.
+    const anchorX = hit.blockPos.x;
     const anchorY = hit.blockPos.y;
-    const anchorZ = hit.blockPos.z + hit.face.z;
+    const anchorZ = hit.blockPos.z;
+
+    // The wall must actually be solid before anything is spawned.
+    const wallId = this.blockUpdateWorld.getBlock(anchorX, anchorY, anchorZ);
+    if (this.blockRegistry.getById(wallId)?.solid !== true) return false;
+    // The cell the painting will occupy must be free.
+    const frontId = this.blockUpdateWorld.getBlock(
+      anchorX + hit.face.x, anchorY, anchorZ + hit.face.z,
+    );
+    if (frontId !== BlockIds.Air) return false;
 
     const world = {
       isSolid: (bx: number, by: number, bz: number): boolean => {
@@ -702,6 +774,53 @@ export class InteractionController {
    * Places the selected block adjacent to the hit face, if the position is valid.
    * Returns true on successful block placement, or false on any failure.
    */
+  /**
+   * Beta `ItemFlintAndSteel.onItemUse`: steps one cell along the clicked face
+   * and, if that cell is air, places fire there. The rod is damaged by one
+   * point whether or not the fire took, and breaks when exhausted.
+   */
+  private tryUseFlintAndSteel(hit: RaycastHit): boolean {
+    const stack = this.inventory.getStack(this.selectedSlotIndex);
+    if (stack === null || stack.identity.type !== 'item') return false;
+    const definition = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+    if (definition?.id !== 'flint_and_steel') return false;
+
+    const targetX = hit.blockPos.x + hit.face.x;
+    const targetY = hit.blockPos.y + hit.face.y;
+    const targetZ = hit.blockPos.z + hit.face.z;
+    if (targetY < 0 || targetY >= CHUNK_SIZE_Y) return false;
+
+    // Beta only ignites genuinely empty space; clicking an existing fire or a
+    // solid block still costs durability but places nothing.
+    if (this.blockUpdateWorld.getBlock(targetX, targetY, targetZ) === BlockIds.Air) {
+      this.blockUpdateWorld.setBlock(targetX, targetY, targetZ, BlockIds.Fire, {
+        reason: 'player', notifyNeighbours: true, updateLighting: true, player: this.player,
+      });
+      this.playEntitySound?.(
+        'fire.ignite',
+        targetX + 0.5, targetY + 0.5, targetZ + 0.5,
+        1,
+        Math.random() * 0.4 + 0.8,
+      );
+    }
+
+    if (this.inventory.damageItemInSlot(this.selectedSlotIndex, 1)?.status === 'broken') {
+      this.itemEntityManager.emitItemBreak(
+        this.player.position.x, this.player.position.y, this.player.position.z,
+      );
+    }
+    return true;
+  }
+
+  /** Places the held block and consumes it, for the no-solid-hit path. */
+  private tryPlaceBlock(hit: RaycastHit): boolean {
+    const placed = this.placeBlock(hit);
+    if (placed && this.shouldConsumeHeldItem()) {
+      this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+    }
+    return placed;
+  }
+
   private placeBlock(hit: RaycastHit): boolean {
     let selectedId = this.getSelectedBlockId();
     if (selectedId === 0) {
@@ -748,27 +867,35 @@ export class InteractionController {
       const upperId = this.blockUpdateWorld.getBlock(targetX, targetY + 1, targetZ);
       const upperDef = this.blockRegistry.getById(upperId);
       if (upperDef === undefined || !upperDef.replaceable) return false;
-      
+
       const upperBoxAABB = new AABB(targetX, targetY + 1, targetZ, targetX + 1, targetY + 2, targetZ + 1);
       if (upperBoxAABB.intersects(this.player.getAABB())) {
         return false;
       }
 
-      let yaw = Math.atan2(-this.lookDirection.x, -this.lookDirection.z);
-      while (yaw < 0) yaw += Math.PI * 2;
-      while (yaw >= Math.PI * 2) yaw -= Math.PI * 2;
+      // Beta `BlockDoor.canPlaceBlockAt` requires solid ground under the door.
+      if (!this.blockUpdateWorld.isNormalCube(targetX, targetY - 1, targetZ)) return false;
 
-      let meta = 0;
-      if (yaw >= Math.PI * 0.25 && yaw < Math.PI * 0.75) meta = 1; // North (-Z)
-      else if (yaw >= Math.PI * 0.75 && yaw < Math.PI * 1.25) meta = 2; // East (+X)
-      else if (yaw >= Math.PI * 1.25 && yaw < Math.PI * 1.75) meta = 3; // South (+Z)
-      else meta = 0; // West (-X)
+      // Beta `ItemDoor.onItemUse` derives facing from the player's yaw in
+      // degrees. Using the raw look vector with ad-hoc quadrants (as before)
+      // put doors sideways relative to the player.
+      const yawDegrees = this.cameraYawRadians() * 180 / Math.PI;
+      const facing = doorFacingFromYaw(yawDegrees);
+
+      const isSolidAt = (dx: number, dz: number, dy: number): boolean =>
+        this.blockUpdateWorld.isNormalCube(targetX + dx, targetY + dy, targetZ + dz);
+      const isDoorAt = (dx: number, dz: number, dy: number): boolean =>
+        this.blockUpdateWorld.getBlock(targetX + dx, targetY + dy, targetZ + dz) === selectedId;
+
+      const lowerMeta = resolveDoorPlacementMetadata(facing, isSolidAt, isDoorAt);
 
       this.blockUpdateWorld.setBlock(targetX, targetY, targetZ, selectedId, {
-        metadata: meta, reason: 'player', notifyNeighbours: true, updateLighting: true, player: this.player,
+        metadata: lowerMeta, reason: 'player', notifyNeighbours: true, updateLighting: true, player: this.player,
       });
+      // Beta writes `facing + 8` upstairs: the upper half carries the same
+      // facing/open bits with the upper flag set.
       this.blockUpdateWorld.setBlock(targetX, targetY + 1, targetZ, selectedId, {
-        metadata: meta | 8, reason: 'player', notifyNeighbours: true, updateLighting: true, player: this.player,
+        metadata: (lowerMeta & 7) | 8, reason: 'player', notifyNeighbours: true, updateLighting: true, player: this.player,
       });
 
       this.blockPlacedHandler?.(selectedId, targetX, targetY, targetZ);
@@ -797,6 +924,17 @@ export class InteractionController {
   private getPlacementMetadata(blockId: BlockId, worldX: number, worldY: number, worldZ: number, hit: RaycastHit, heldMeta: number): number {
     if (blockId === BlockIds.Slab || blockId === BlockIds.DoubleSlab) {
       return heldMeta;
+    }
+
+    // Beta seeds a rail along the player's facing axis; onPlaced then
+    // reconciles it against neighbours, which is what forms corners.
+    if (blockId === BlockIds.Rail || blockId === BlockIds.PoweredRail || blockId === BlockIds.DetectorRail) {
+      return railShapeFromPlayerYaw(this.cameraYawRadians() * 180 / Math.PI);
+    }
+
+    // Beta `BlockStairs.onBlockPlacedBy`: stairs face the player.
+    if (blockId === BlockIds.WoodStairs || blockId === BlockIds.CobblestoneStairs) {
+      return stairFacingFromYaw(this.cameraYawRadians() * 180 / Math.PI);
     }
 
     if (blockId === BlockIds.Ladder) {

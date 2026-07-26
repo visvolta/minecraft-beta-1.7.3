@@ -153,8 +153,8 @@ const GENERIC_ITEMS: readonly ItemDefinition[] = [
   { id: 'boat', numericId: 333, stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'transportation', creativeOrder: 333 },
 
   // Music discs
-  { id: 'record_13', numericId: 2256, displayName: 'Music Disc', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2256 },
-  { id: 'record_cat', numericId: 2257, displayName: 'Music Disc', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2257 },
+  { id: 'record_13', numericId: 2256, displayName: 'Music Disc 13', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2256 },
+  { id: 'record_cat', numericId: 2257, displayName: 'Music Disc cat', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2257 },
 ];
 
 /**
@@ -190,8 +190,9 @@ const DYES: readonly ItemDefinition[] = DYE_VARIANTS.map(({ suffix, metadata }) 
  * completeness reporting can distinguish "absent" from "present but inert".
  */
 export const UNIMPLEMENTED_BEHAVIOUR: Readonly<Record<string, string>> = {
-  painting: 'Placeable painting entity and art selection not implemented.',
-  bed: 'Sleep, spawn point and night-skip mechanics not implemented.',
+  // Beds sleep and skip to dawn; Beta additionally sets the player's spawn
+  // point on wake, which this project does not yet do.
+  bed: 'Sleeping works; setting the respawn point on wake is not implemented.',
   cake: 'Progressive eating slices not implemented.',
   redstone_repeater: 'Delay/lock repeater logic not implemented.',
   saddle: 'Pig riding not implemented.',

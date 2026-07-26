@@ -39,7 +39,10 @@ export const FULL_CUBE: LocalBox = box(0, 0, 0, 1, 1, 1);
 
 const DOOR_THICKNESS = 0.1875;
 
-/** Beta door state 0..3 -> occupied slab of the cell. */
+/**
+ * Beta door state 0..3 -> occupied slab of the cell, from
+ * `BlockDoor.setDoorRotation`.
+ */
 const DOOR_BOXES: readonly LocalBox[] = [
   box(0, 0, 0, 1, 1, DOOR_THICKNESS),                 // 0: -Z edge
   box(1 - DOOR_THICKNESS, 0, 0, 1, 1, 1),             // 1: +X edge
@@ -48,15 +51,30 @@ const DOOR_BOXES: readonly LocalBox[] = [
 ];
 
 /**
- * Beta `BlockDoor.getState`: the low two metadata bits give the facing, and
- * bit 4 (open) rotates the panel a quarter turn.
+ * Beta `BlockDoor.getState`, verbatim:
+ *
+ *     (meta & 4) == 0 ? (meta - 1) & 3 : meta & 3
+ *
+ * A closed door sits one quarter-turn *behind* its facing value, and opening
+ * it snaps the panel to the raw facing. Deriving this the intuitive way
+ * (facing, then rotate when open) is wrong for every one of the eight
+ * states — it was the cause of doors blocking movement while open and of
+ * their selection outline sitting on the wrong edge.
  *
  * Metadata layout: bits 0-1 facing, bit 2 (4) open, bit 3 (8) upper half.
  */
 export function doorStateFromMetadata(metadata: number): number {
-  const facing = metadata & 3;
-  const open = (metadata & 4) !== 0;
-  return open ? (facing + 1) & 3 : facing;
+  return (metadata & 4) === 0 ? (metadata - 1) & 3 : metadata & 3;
+}
+
+/** Beta `BlockDoor.isOpen`. */
+export function isDoorOpen(metadata: number): boolean {
+  return (metadata & 4) !== 0;
+}
+
+/** Beta door metadata bit 8 marks the upper half. */
+export function isDoorUpper(metadata: number): boolean {
+  return (metadata & 8) !== 0;
 }
 
 export function doorShape(metadata: number): LocalBox {
@@ -95,14 +113,41 @@ export function torchShape(metadata: number): LocalBox {
 // half-height base over the whole cell plus a half-cell full-height step on
 // the side opposite the facing.
 
-/** Stair metadata 0..3: 0=+X, 1=-X, 2=+Z, 3=-Z ascending. */
+/**
+ * Beta `BlockStairs.onBlockPlacedBy` facing, from the player's yaw:
+ *
+ *     q = floor(yaw * 4 / 360 + 0.5) & 3
+ *     q -> metadata: 0->2, 1->1, 2->3, 3->0
+ *
+ * Yaw is in degrees. Without this the block was always placed with metadata 0,
+ * so every stair faced the same way regardless of the player.
+ */
+export function stairFacingFromYaw(yawDegrees: number): number {
+  const quadrant = Math.floor(yawDegrees * 4 / 360 + 0.5) & 3;
+  switch (quadrant) {
+    case 0: return 2;
+    case 1: return 1;
+    case 2: return 3;
+    default: return 0;
+  }
+}
+
+/**
+ * Beta `BlockStairs.getCollidingBoundingBoxes`, verbatim.
+ *
+ * Beta contributes two **non-overlapping** boxes: a half-height half-cell on
+ * the low side and a full-height half-cell on the high side. The previous
+ * version used a full-width half-height base plus a raised step, which
+ * overlapped and produced a lip the player caught on when walking up.
+ *
+ * Metadata 0 = ascending +X, 1 = ascending -X, 2 = ascending +Z, 3 = -Z.
+ */
 export function stairShapes(metadata: number): readonly LocalBox[] {
-  const base = box(0, 0, 0, 1, 0.5, 1);
   switch (metadata & 3) {
-    case 0: return [base, box(0.5, 0.5, 0, 1, 1, 1)];
-    case 1: return [base, box(0, 0.5, 0, 0.5, 1, 1)];
-    case 2: return [base, box(0, 0.5, 0.5, 1, 1, 1)];
-    default: return [base, box(0, 0.5, 0, 1, 1, 0.5)];
+    case 0: return [box(0, 0, 0, 0.5, 0.5, 1), box(0.5, 0, 0, 1, 1, 1)];
+    case 1: return [box(0, 0, 0, 0.5, 1, 1), box(0.5, 0, 0, 1, 0.5, 1)];
+    case 2: return [box(0, 0, 0, 1, 0.5, 0.5), box(0, 0, 0.5, 1, 1, 1)];
+    default: return [box(0, 0, 0, 1, 1, 0.5), box(0, 0, 0.5, 1, 0.5, 1)];
   }
 }
 

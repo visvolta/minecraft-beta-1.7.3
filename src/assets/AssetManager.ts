@@ -45,6 +45,14 @@ export class AssetManager {
     textureNames.add('sandstone_normal');
 
     // Required Door upper-half textures
+    // Bed faces are chosen per half at mesh time, so they are not reachable
+    // through the block definition's own texture entries.
+    textureNames.add('bed_head_top');
+    textureNames.add('bed_head_side');
+    textureNames.add('bed_head_end');
+    textureNames.add('bed_feet_top');
+    textureNames.add('bed_feet_side');
+    textureNames.add('bed_feet_end');
     textureNames.add('door_wood_upper');
     textureNames.add('door_iron_upper');
 

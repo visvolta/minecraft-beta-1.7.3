@@ -4,8 +4,9 @@ import { wrapDegrees } from '../living/LivingAnimationMath';
 import { nbt, type NbtCompound, type NbtTag } from '../../nbt/Nbt';
 import { EntityTypeIds } from '../core/EntityType';
 import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
-import type { Entity } from '../core/Entity';
 import { DamageSource } from '../damage/DamageSource';
+import { PaintingEntity } from '../PaintingEntity';
+import type { Entity } from '../core/Entity';
 import { LivingEntity } from '../living/LivingEntity';
 import { ProjectileEntity, type ProjectileBlockHit } from './ProjectileEntity';
 
@@ -45,6 +46,17 @@ export class ArrowEntity extends ProjectileEntity {
     else target.attackEntityFrom(source, 4);
     this.markRemoved();
   }
+  /**
+   * Beta: an arrow that strikes a painting knocks it down and is consumed.
+   * Other non-living entities are passed through.
+   */
+  protected override onNonLivingImpact(entity: Entity): boolean {
+    if (!(entity instanceof PaintingEntity)) return false;
+    entity.attackEntityFrom();
+    this.markRemoved();
+    return true;
+  }
+
   public override updateRenderInterpolation(alpha:number):void{super.updateRenderInterpolation(alpha);const root=this.visualRoot;if(!root)return;const yaw=this.previousYaw+wrapDegrees(this.yaw-this.previousYaw)*alpha,pitch=this.previousPitch+(this.pitch-this.previousPitch)*alpha;const yr=yaw*Math.PI/180,pr=pitch*Math.PI/180;ARROW_RENDER_DIRECTION.set(Math.sin(yr)*Math.cos(pr),Math.sin(pr),Math.cos(yr)*Math.cos(pr)).normalize();root.quaternion.setFromUnitVectors(ARROW_LOCAL_FORWARD,ARROW_RENDER_DIRECTION);const shake=Math.max(0,this.arrowShake-alpha);if(shake>0)root.rotateZ(-Math.sin(shake*3)*shake*Math.PI/180);}
   private buildModel():void{const root=new Group();let mesh:Mesh;if(this.ctx.entityTextures){const shared=ArrowRenderAssets.get(this.ctx.entityTextures);mesh=new Mesh(shared.geometry,shared.material);}else{this.ownGeometry=new BoxGeometry(.04,.04,.7);this.ownMaterial=new MeshBasicMaterial({color:0xb9a06a});mesh=new Mesh(this.ownGeometry,this.ownMaterial);}root.add(mesh);this.visualRoot=root;this.renderObject=root;this.ctx.scene.add(root);}
   protected override disposeRender():void{this.visualRoot?.removeFromParent();this.ownGeometry?.dispose();this.ownMaterial?.dispose();this.visualRoot=null;this.ownGeometry=null;this.ownMaterial=null;}

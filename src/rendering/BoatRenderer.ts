@@ -15,9 +15,6 @@ import { attachEntityLighting } from './ChunkRenderer';
  * proportional to remaining damage, alternating with `rockDirection`.
  */
 
-/** Beta ModelBoat panel thickness in blocks (2 texels). */
-const PANEL_THICKNESS = 0.125;
-
 interface BoatSnapshot {
   readonly x: number;
   readonly y: number;
@@ -66,45 +63,57 @@ export class BoatRenderer {
   }
 
   /**
-   * Beta ModelBoat: a 20x6x28-texel hull. The floor lies flat and the four
-   * walls stand around it, each a thin panel.
+   * Beta `ModelBoat`, part for part.
+   *
+   * Five ModelRenderer boxes on a 64x32 sheet, in Beta's own texel units
+   * (1 texel = 1/16 block):
+   *   [0] floor  24 x 16 x 4 at uv(0,8), rotated flat
+   *   [1..4] walls 20 x 6 x 2 at uv(0,0), one per side
+   *
+   * Beta's model has no oars and its `setRotationAngles` is empty, so there
+   * is deliberately nothing animated here.
    */
   private buildHull(): THREE.Group {
     const group = new THREE.Group();
+    const T = 1 / 16;
 
-    // Floor.
-    group.add(this.panel(
-      [1.5, 1.75, PANEL_THICKNESS],
-      [0, PANEL_THICKNESS, 0],
-      [-Math.PI / 2, 0, 0],
-      { u: 0, v: 8, w: 24, h: 28, d: 2 },
-    ));
-    // Bow and stern.
-    group.add(this.panel(
-      [1.5, 0.375, PANEL_THICKNESS],
-      [0, 0.3125, -0.875],
-      [0, 0, 0],
-      { u: 0, v: 0, w: 24, h: 6, d: 2 },
-    ));
-    group.add(this.panel(
-      [1.5, 0.375, PANEL_THICKNESS],
-      [0, 0.3125, 0.875],
-      [0, Math.PI, 0],
-      { u: 0, v: 0, w: 24, h: 6, d: 2 },
-    ));
-    // Port and starboard.
-    group.add(this.panel(
-      [1.75, 0.375, PANEL_THICKNESS],
-      [-0.75, 0.3125, 0],
-      [0, Math.PI / 2, 0],
-      { u: 0, v: 0, w: 28, h: 6, d: 2 },
-    ));
-    group.add(this.panel(
-      [1.75, 0.375, PANEL_THICKNESS],
-      [0.75, 0.3125, 0],
-      [0, -Math.PI / 2, 0],
-      { u: 0, v: 0, w: 28, h: 6, d: 2 },
-    ));
+    // Beta boatSides[0]: addBox(-12, -8, -3, 24, 16, 4), rotateAngleX = PI/2.
+    const floor = this.panel(
+      [24 * T, 16 * T, 4 * T],
+      [0, 4 * T, 0],
+      [Math.PI / 2, 0, 0],
+      { u: 0, v: 8, w: 24, h: 16, d: 4 },
+    );
+    group.add(floor);
+
+    // Beta boatSides[1..4]: addBox(-10, -7, -1, 20, 6, 2) with per-side
+    // rotation points and yaw.
+    const wall = (
+      rotationPoint: [number, number, number],
+      yaw: number,
+    ): THREE.Mesh => {
+      const mesh = this.panel(
+        [20 * T, 6 * T, 2 * T],
+        [0, 0, 0],
+        [0, yaw, 0],
+        { u: 0, v: 0, w: 20, h: 6, d: 2 },
+      );
+      // The box sits above its rotation point (y from -7 to -1 in Beta's
+      // downward-positive space), so it is lifted into place here.
+      const holder = new THREE.Group();
+      holder.position.set(rotationPoint[0], rotationPoint[1], rotationPoint[2]);
+      holder.rotation.y = yaw;
+      mesh.rotation.set(0, 0, 0);
+      mesh.position.set(0, 4 * T, 0);
+      holder.add(mesh);
+      group.add(holder);
+      return mesh;
+    };
+
+    wall([-11 * T, 4 * T, 0], -Math.PI / 2);
+    wall([11 * T, 4 * T, 0], Math.PI / 2);
+    wall([0, 4 * T, -9 * T], Math.PI);
+    wall([0, 4 * T, 9 * T], 0);
 
     return group;
   }

@@ -9,6 +9,7 @@ import { HotbarUi } from './HotbarUi';
 import { ItemIconResolver } from './ItemIconResolver';
 import { BlockIconRenderer } from './BlockIconRenderer';
 import { SlotContentRenderer } from './SlotContentRenderer';
+import { AnimatedIconFrames, DEFAULT_ANIMATED_ICON_SOURCES } from './AnimatedIconFrames';
 
 /** One active hotbar coordinator: DOM items plus one shared cached 3D block-icon surface. */
 export class HotbarHudRenderer {
@@ -16,6 +17,9 @@ export class HotbarHudRenderer {
   private ui = new HotbarUi();
   private icons = new ItemIconResolver();
   private blocksIcons: BlockIconRenderer;
+  /** Shared single-frame source for the clock and compass icons. */
+  private readonly animatedIcons = new AnimatedIconFrames(DEFAULT_ANIMATED_ICON_SOURCES);
+
   private slotContentRenderer?: SlotContentRenderer;
   private resize = () => this.layout.resize();
 
@@ -40,9 +44,14 @@ export class HotbarHudRenderer {
     this.layout.setGuiScale(setting);
   }
 
+  /** Shared animated-icon frame source, driven by the engine from world time. */
+  public getAnimatedIcons(): AnimatedIconFrames {
+    return this.animatedIcons;
+  }
+
   public getSlotContentRenderer(): SlotContentRenderer {
     if (!this.slotContentRenderer) {
-      this.slotContentRenderer = new SlotContentRenderer(this.blocksIcons, this.icons, this.blocksRegistry);
+      this.slotContentRenderer = new SlotContentRenderer(this.blocksIcons, this.icons, this.blocksRegistry, this.animatedIcons);
     }
     return this.slotContentRenderer;
   }

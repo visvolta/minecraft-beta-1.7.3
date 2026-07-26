@@ -5,7 +5,7 @@ import type { ChunkManager } from './ChunkManager';
 import type { BlockBehaviourRegistry } from './BlockBehaviour';
 import { getBlockBounds } from './BlockBehaviour';
 import type { BlockUpdateWorld } from './BlockUpdateWorld';
-import type { AABB } from '../physics/AABB';
+import { AABB } from '../physics/AABB';
 import { worldToChunkLocal } from './worldToChunkCoords';
 
 /** Unit axis-aligned face normal. Exactly one component is +/-1. */
@@ -65,6 +65,13 @@ export class Raycaster {
     origin: { x: number; y: number; z: number },
     direction: { x: number; y: number; z: number },
     maxDistance: number,
+    /**
+     * When true, fluids are hittable. Beta's `World.rayTraceBlocks_do` takes
+     * the same flag: normal targeting ignores water so you can mine through
+     * it, but placing a block or a boat must be able to land *on* the fluid
+     * surface. Without this a submerged player can never target anything.
+     */
+    includeFluids = false,
   ): RaycastHit | undefined {
     const length = Math.sqrt(
       direction.x * direction.x + direction.y * direction.y + direction.z * direction.z,
@@ -112,8 +119,16 @@ export class Raycaster {
       if (blockId !== AIR_BLOCK_ID) {
         const blockDefinition = this.blockRegistry.getById(blockId);
 
-        if (blockDefinition !== undefined&&blockDefinition.isTargetable!==false) {
-          const aabbs = getBlockBounds(this.blockRegistry, this.behaviourRegistry, this.blockUpdateWorld, voxelX, voxelY, voxelZ, 'interaction');
+        const targetable = blockDefinition !== undefined
+          && (blockDefinition.isTargetable !== false
+            || (includeFluids && blockDefinition.isLiquid === true));
+        if (blockDefinition !== undefined && targetable) {
+          let aabbs = getBlockBounds(this.blockRegistry, this.behaviourRegistry, this.blockUpdateWorld, voxelX, voxelY, voxelZ, 'interaction');
+          // A fluid has no interaction shape of its own; treat its cell as a
+          // full cube so the surface can be targeted.
+          if (aabbs.length === 0 && blockDefinition.isLiquid === true) {
+            aabbs = [new AABB(voxelX, voxelY, voxelZ, voxelX + 1, voxelY + 1, voxelZ + 1)];
+          }
           let bestHit: { distance: number, face: FaceNormal, hitAabb: AABB } | undefined = undefined;
 
           for (const aabb of aabbs) {

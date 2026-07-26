@@ -137,6 +137,8 @@ import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
 import { MinecartRenderSystem } from '../rendering/MinecartRenderer';
 import { BoatRenderer } from '../rendering/BoatRenderer';
 import { registerBedBehaviour } from '../world/behaviours/BedBehaviour';
+import { SleepController, sleepPoseFor, type WakeReason } from '../player/SleepController';
+import { SleepOverlayRenderer } from '../player/SleepOverlayRenderer';
 import { BED_FOOT_TO_HEAD } from '../blocks/shapes/BlockShapes';
 import { FirstPersonHeldItemRenderer } from '../rendering/FirstPersonHeldItemRenderer.ts';
 import { FirstPersonMotionController } from '../player/FirstPersonMotionController';
@@ -515,7 +517,7 @@ export class Engine {
         return time >= 12541 && time <= 23458;
       },
       getPlayerPosition: () => this.player.position,
-      isPlayerSleeping: () => this.playerSleeping,
+      isPlayerSleeping: () => this.sleepController.isSleeping(),
       beginSleep: (bedX, bedY, bedZ, direction) => this.beginSleep(bedX, bedY, bedZ, direction),
     });
     this.weatherController = new WeatherController(worldSeed);
@@ -637,6 +639,9 @@ export class Engine {
       animalInteractions,
       this.foodUseController,
       (id, x, y, z) => this.audioManager.play({ type: 'block.action', id, x, y, z }),
+      (id, x, y, z, volume, pitch) => this.audioManager.play({
+        type: 'entity.legacy', id, kind: 'bow', x, y, z, volume, pitch, attenuationDistance: 16,
+      }),
     );
     this.blockHighlight = new BlockHighlight(this.renderer.scene);
     this.destroyOverlayRenderer = new DestroyOverlayRenderer(
@@ -1163,6 +1168,8 @@ export class Engine {
       this.playerModel.dispose();
       this.minecartRenderSystem.dispose();
       this.boatRenderer.dispose();
+      this.endSleep('teardown');
+      this.sleepOverlay.dispose();
       this.entityManager.dispose();
       this.entityParticles.dispose();
     });
@@ -1252,6 +1259,7 @@ export class Engine {
     while (this.simulationAccumulatorTicks >= 1) {
       this.simulationTick++;
       this.worldTickScheduler.beginTick(this.simulationTick);
+      this.tickSleep();
       this.player.tickCombatState(); this.playerController.tickSprintWindow(); this.foodUseController.tick();
       this.playerSurvivalController.tick(); this.interactionController.breakingController.tick();
       this.playerDeathController.update(); this.respawnController.update(); this.naturalMobSpawner.tick();
@@ -1276,7 +1284,12 @@ export class Engine {
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
     this.updateAnimatedItemIcons();
-    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.cameraController.update();
+    this.updateSleepPresentation();
+    if (this.animatedIconsDirty) {
+      this.animatedIconsDirty = false;
+      this.refreshOpenContainerIcons();
+    }
+    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen && !this.sleepController.isSleeping()) this.cameraController.update();
     if(!this.player.isAlive()){this.player.wishVelocity.x=this.player.wishVelocity.z=0;}
     else {
       const chunkX = Math.floor(this.player.position.x / 16);
@@ -1359,7 +1372,7 @@ export class Engine {
     );
     this.performanceProfiler.recordChunkCounts(this.chunkManager.size, this.chunkRenderer.getVisibleMeshCount(), this.chunkManager.countDirtyChunks());
 
-    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) this.interactionController.update(deltaSeconds);
+    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen && !this.sleepController.isSleeping()) this.interactionController.update(deltaSeconds);
 
     const currentSlot = this.interactionController.getSelectedSlotIndex();
     const currentStack = this.inventory.getStack(currentSlot);
@@ -1699,49 +1712,89 @@ export class Engine {
     geom.computeVertexNormals(); return geom;
   }
 
-  /** True while the player is asleep in a bed (Beta `isPlayerSleeping`). */
-  private playerSleeping = false;
-  /** Bed the player is currently occupying, for wake-up cleanup. */
-  private sleepingBed: { x: number; y: number; z: number } | null = null;
+  /** Owns the Beta sleep timeline, camera pose and screen fade. */
+  private readonly sleepController = new SleepController();
+  private readonly sleepOverlay = new SleepOverlayRenderer();
 
   /**
-   * Beta `EntityPlayer.sleepInBedAt` success path: the player is laid on the
-   * bed and, once asleep, the world skips to the next morning.
+   * Beta `EntityPlayer.sleepInBedAt` success path.
    *
-   * Beta runs a 100-tick fade before advancing time; this project applies the
-   * skip immediately on the next tick, which produces the same observable
-   * result (wake at dawn) without a partially-simulated sleep state.
+   * The player is laid on the bed and the sleep timeline starts; the dawn
+   * skip happens later, when the timer reaches Beta's 100-tick "fully asleep"
+   * point, rather than instantly.
    */
   private beginSleep(bedX: number, bedY: number, bedZ: number, direction: number): void {
-    this.playerSleeping = true;
-    this.sleepingBed = { x: bedX, y: bedY, z: bedZ };
+    this.sleepController.beginSleep({ x: bedX, y: bedY, z: bedZ, direction });
 
-    // Beta lays the player on the bed, facing along its direction.
-    this.player.position.x = bedX + 0.5;
-    this.player.position.y = bedY + 0.6;
-    this.player.position.z = bedZ + 0.5;
+    const pose = sleepPoseFor({ x: bedX, y: bedY, z: bedZ, direction });
+    this.player.position.x = pose.x;
+    this.player.position.y = pose.y;
+    this.player.position.z = pose.z;
     this.player.velocity.x = 0;
     this.player.velocity.y = 0;
     this.player.velocity.z = 0;
-    this.cameraController.setRotation(direction * Math.PI / 2, this.cameraController.getPitch());
+    this.player.isSprinting = false;
+    this.cameraController.setRotation(pose.yaw, 0);
+  }
 
-    this.wakeUpAtDawn();
+  /**
+   * Drives the sleep timeline each tick: holds the player in place, applies
+   * the dawn skip once fully asleep, and wakes them if the bed goes away.
+   */
+  private tickSleep(): void {
+    if (!this.sleepController.isSleeping() && this.sleepController.getPhase() === 'awake') {
+      this.sleepController.tick();
+      return;
+    }
+
+    if (this.sleepController.isSleeping()) {
+      const bed = this.sleepController.getBed();
+      // Losing the bed (broken, or the chunk unloaded) must not strand the
+      // player in the sleeping pose.
+      if (bed === null || this.blockUpdateWorld.getBlock(bed.x, bed.y, bed.z) !== BlockIds.Bed) {
+        this.endSleep('bed-destroyed');
+        return;
+      }
+      if (!this.player.isAlive()) {
+        this.endSleep('died');
+        return;
+      }
+      // Beta zeroes motion every tick while asleep.
+      this.player.velocity.x = 0;
+      this.player.velocity.y = 0;
+      this.player.velocity.z = 0;
+      const pose = sleepPoseFor(bed);
+      this.player.position.x = pose.x;
+      this.player.position.y = pose.y;
+      this.player.position.z = pose.z;
+    }
+
+    if (this.sleepController.tick() === 'advance-time') {
+      this.advanceToDawn();
+      this.endSleep('dawn');
+    }
   }
 
   /**
    * Beta `World.wakeUpAllPlayers`: advance to the start of the next day
-   * (`time + 24000` rounded down to a day boundary) and clear the occupied
-   * flag so the bed can be used again.
+   * (`time + 24000` rounded down to a day boundary).
    */
-  private wakeUpAtDawn(): void {
+  private advanceToDawn(): void {
     const total = this.worldTime.getTotalTicks();
     const nextDawn = total + 24000 - ((total + 24000) % 24000);
     this.worldTime.addTicks(nextDawn - total);
+  }
 
-    const bed = this.sleepingBed;
-    if (bed !== null) {
-      const metadata = this.blockUpdateWorld.getBlockMetadata(bed.x, bed.y, bed.z);
+  /**
+   * Ends sleep and restores normal state. Safe to call repeatedly and from
+   * any path (dawn, interruption, death, bed destruction, teardown), so the
+   * player and camera can never be left stuck asleep.
+   */
+  private endSleep(reason: WakeReason): void {
+    const bed = this.sleepController.getBed();
+    if (bed !== null && this.blockUpdateWorld.getBlock(bed.x, bed.y, bed.z) === BlockIds.Bed) {
       // Clear Beta's occupied bit (4) on both halves.
+      const metadata = this.blockUpdateWorld.getBlockMetadata(bed.x, bed.y, bed.z);
       this.blockUpdateWorld.setBlockMetadata(bed.x, bed.y, bed.z, metadata & ~4, { notifyNeighbours: false });
       const offset = BED_FOOT_TO_HEAD[metadata & 3] ?? [0, 1];
       const headX = bed.x + offset[0];
@@ -1750,10 +1803,32 @@ export class Engine {
         const headMeta = this.blockUpdateWorld.getBlockMetadata(headX, bed.y, headZ);
         this.blockUpdateWorld.setBlockMetadata(headX, bed.y, headZ, headMeta & ~4, { notifyNeighbours: false });
       }
+      // Beta stands the player beside the bed rather than inside it.
+      this.player.position.x = bed.x + 0.5;
+      this.player.position.y = bed.y + 1;
+      this.player.position.z = bed.z + 0.5;
     }
 
-    this.playerSleeping = false;
-    this.sleepingBed = null;
+    this.sleepController.wake(reason);
+  }
+
+  /**
+   * Applies the sleeping camera pose and screen fade. Beta pins the view to
+   * the bed and tints the screen; both are derived from the sleep timeline so
+   * they cannot desync from the simulation.
+   */
+  private updateSleepPresentation(): void {
+    this.sleepOverlay.setAlpha(this.sleepController.getOverlayAlpha());
+    const pose = this.sleepController.getCameraPose();
+    if (pose === null) return;
+    const camera = this.renderer.camera;
+    camera.position.set(pose.x, pose.y, pose.z);
+    this.cameraController.setRotation(pose.yaw, 0);
+  }
+
+  /** True while the player is in bed; suppresses normal input and camera. */
+  public isPlayerSleeping(): boolean {
+    return this.sleepController.isSleeping();
   }
 
   /**
@@ -1762,7 +1837,37 @@ export class Engine {
    * the shipped strip instead, so the atlas is only re-uploaded when the frame
    * actually changes.
    */
+  /** Set when a clock/compass frame changed and open UIs need a redraw. */
+  private animatedIconsDirty = false;
+
+  /**
+   * Re-renders whichever container screen is open so its clock/compass slots
+   * pick up the new frame. Cheap because it only runs on an actual change.
+   */
+  private refreshOpenContainerIcons(): void {
+    if (this.inventoryController.isOpen) this.inventoryController.renderAll();
+    else if (this.creativeInventoryController.isOpen) this.creativeInventoryController.render();
+  }
+
   private updateAnimatedItemIcons(): void {
+    // Drive the DOM icon frames (inventory, hotbar, containers). Beta shows
+    // one 16x16 frame at a time; the strip must never be rendered whole.
+    const frames = this.hotbarHudRenderer.getAnimatedIcons();
+    const clockFrames = frames.getFrameCount('clock');
+    if (clockFrames > 1) {
+      const angle = ((this.worldTime.getCelestialAngle() % 1) + 1) % 1;
+      if (frames.setFrame('clock', Math.floor(angle * clockFrames))) this.animatedIconsDirty = true;
+    }
+    const compassFrames = frames.getFrameCount('compass');
+    if (compassFrames > 1) {
+      const dx = this.worldSpawnPoint.x - this.player.position.x;
+      const dz = this.worldSpawnPoint.z - this.player.position.z;
+      const relative = Math.atan2(dz, dx) - this.cameraController.getYaw();
+      const turns = ((relative / (Math.PI * 2)) % 1 + 1) % 1;
+      if (frames.setFrame('compass', Math.floor(turns * compassFrames))) this.animatedIconsDirty = true;
+    }
+
+    // Keep the world-space atlas (held item, dropped items) in step.
     this.animatedIcons.updateClock(this.worldTime.getCelestialAngle());
     this.animatedIcons.updateCompass(
       this.cameraController.getYaw(),

@@ -80,12 +80,15 @@ export class SignBehaviour implements BlockBehaviour {
       return [new AABB(x + 0.25, y, z + 0.25, x + 0.75, y + 1, z + 0.75)];
     }
 
+    // Beta BlockSign wall bounds: y 0.28125..0.78125, 0.125 deep, full width.
     const meta = ctx.world.getBlockMetadata(x, y, z);
-    const d = 2/16;
-    if (meta === 2) return [new AABB(x, y + 0.25, z + 1 - d, x + 1, y + 0.75, z + 1)];
-    if (meta === 3) return [new AABB(x, y + 0.25, z, x + 1, y + 0.75, z + d)];
-    if (meta === 4) return [new AABB(x + 1 - d, y + 0.25, z, x + 1, y + 0.75, z + 1)];
-    if (meta === 5) return [new AABB(x, y + 0.25, z, x + d, y + 0.75, z + 1)];
+    const d = 0.125;
+    const lo = 0.28125;
+    const hi = 0.78125;
+    if (meta === 2) return [new AABB(x, y + lo, z + 1 - d, x + 1, y + hi, z + 1)];
+    if (meta === 3) return [new AABB(x, y + lo, z, x + 1, y + hi, z + d)];
+    if (meta === 4) return [new AABB(x + 1 - d, y + lo, z, x + 1, y + hi, z + 1)];
+    if (meta === 5) return [new AABB(x, y + lo, z, x + d, y + hi, z + 1)];
 
     return [new AABB(x, y, z, x + 1, y + 1, z + 1)];
   }

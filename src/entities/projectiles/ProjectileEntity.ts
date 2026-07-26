@@ -12,6 +12,12 @@ export abstract class ProjectileEntity extends Entity {
   protected abstract drag: number;
   protected abstract onBlockImpact(hit: ProjectileBlockHit): void;
   protected abstract onEntityImpact(entity: LivingEntity | 'player'): void;
+  /**
+   * Struck a collidable non-living entity (painting, boat, minecart).
+   * Return true to consume the projectile. Defaults to passing through, so
+   * existing projectiles keep their behaviour unless they opt in.
+   */
+  protected onNonLivingImpact(_entity: Entity): boolean { return false; }
 
   public launch(dx: number, dy: number, dz: number, speed: number, inaccuracy: number): void {
     const length = Math.hypot(dx, dy, dz) || 1;
@@ -34,8 +40,19 @@ export abstract class ProjectileEntity extends Entity {
       const bx = Math.floor(x); const by = Math.floor(y); const bz = Math.floor(z); const id = this.ctx.blockUpdateWorld.getBlock(bx, by, bz);
       if (this.ctx.blockRegistry.getById(id)?.solid) { this.setPosition(x, y, z); this.onBlockImpact({ x: bx, y: by, z: bz, blockId: id }); return; }
       const probe = this.getAABB().translated(x - this.position.x, y - this.position.y, z - this.position.z);
-      const hits = this.ctx.manager.getEntitiesInAABB(probe, (e): e is LivingEntity => e instanceof LivingEntity && (e !== this.owner || this.ticksInAir >= 5));
-      if (hits.length > 0 && (hits[0] !== this.owner || this.ticksInAir >= 5)) { this.setPosition(x, y, z); this.onEntityImpact(hits[0]!); return; }
+      // Beta tests every collidable entity, not just living ones, which is
+      // how an arrow knocks a painting off its wall.
+      const struck = this.ctx.manager.getEntitiesInAABB(
+        probe,
+        (e): e is Entity => e !== this && e.canBeCollidedWith() && (e !== this.owner || this.ticksInAir >= 5),
+      );
+      const living = struck.find((e): e is LivingEntity => e instanceof LivingEntity);
+      if (living !== undefined) { this.setPosition(x, y, z); this.onEntityImpact(living); return; }
+      const other = struck[0];
+      if (other !== undefined) {
+        this.setPosition(x, y, z);
+        if (this.onNonLivingImpact(other)) return;
+      }
       if (this.ctx.player && this.ctx.player.getAABB().intersects(probe)) { this.setPosition(x, y, z); this.onEntityImpact('player'); return; }
     }
     this.position.x += this.velocity.x; this.position.y += this.velocity.y; this.position.z += this.velocity.z;

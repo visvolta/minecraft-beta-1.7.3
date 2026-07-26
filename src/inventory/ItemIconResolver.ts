@@ -1,4 +1,5 @@
 import { ITEM_TEXTURE_LIST } from '../assets/itemTextureList';
+import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 
 const fallback = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#f0f"/></svg>');
 
@@ -234,14 +235,51 @@ export class ItemIconResolver {
       return blockFallback;
     }
 
-    // Step 4: Development missing-texture icon
+    // Step 4: Numeric id -> registered item id.
+    //
+    // Creative stacks and saved data address items by their Beta numeric id,
+    // but most icons are keyed by string id. Bridging through the registry
+    // here is what stops ~19 perfectly valid items (sign, doors, feather,
+    // wheat, compass, clock, shears...) rendering as the magenta placeholder.
+    const numeric = Number(id);
+    if (Number.isInteger(numeric)) {
+      const definition = DEFAULT_ITEM_DEFINITIONS.get(numeric);
+      const stringId = definition?.iconKey ?? definition?.id;
+      if (stringId !== undefined && stringId !== id) {
+        if (this.known.has(stringId)) {
+          const url = `/textures/items/${stringId}.png`;
+          this.cache.set(id, url);
+          return url;
+        }
+        const nestedAlias = ITEM_ALIASES[stringId];
+        if (nestedAlias && this.known.has(nestedAlias)) {
+          const url = `/textures/items/${nestedAlias}.png`;
+          this.cache.set(id, url);
+          return url;
+        }
+        const nestedBlock = BLOCK_TEXTURE_FALLBACKS[stringId];
+        if (nestedBlock) {
+          this.cache.set(id, nestedBlock);
+          return nestedBlock;
+        }
+      }
+    }
+
+    // Step 5: Development missing-texture icon
     console.warn(`[presentation] missing required icon mapping: ${id}`);
     this.cache.set(id, fallback);
     return fallback;
   }
 
   isKnown(id: string): boolean {
-    return this.known.has(id) || id in ITEM_ALIASES || id in BLOCK_TEXTURE_FALLBACKS;
+    if (this.known.has(id) || id in ITEM_ALIASES || id in BLOCK_TEXTURE_FALLBACKS) return true;
+    // Mirror resolve()'s numeric bridge so callers cannot disagree with it.
+    const numeric = Number(id);
+    if (!Number.isInteger(numeric)) return false;
+    const definition = DEFAULT_ITEM_DEFINITIONS.get(numeric);
+    const stringId = definition?.iconKey ?? definition?.id;
+    if (stringId === undefined || stringId === id) return false;
+    return this.known.has(stringId) || stringId in ITEM_ALIASES || stringId in BLOCK_TEXTURE_FALLBACKS;
   }
 
   public resolveTextureName(id: string | number): string {

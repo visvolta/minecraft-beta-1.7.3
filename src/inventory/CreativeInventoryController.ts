@@ -163,6 +163,11 @@ export class CreativeInventoryController {
     return this.getVisibleEntries()[this.ui.getPage() * this.ui.getPageSize() + sourceSlotIndex];
   }
 
+  /** Redraws every slot; used when animated icon frames advance. */
+  public render(): void {
+    this.renderAll();
+  }
+
   private renderAll(): void {
     this.ui.render(this.getVisibleEntries());
     this.ui.renderHotbar(Array.from({ length: 9 }, (_, index) => this.inventory.getStack(index)));

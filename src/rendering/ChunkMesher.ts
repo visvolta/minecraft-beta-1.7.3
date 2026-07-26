@@ -27,7 +27,7 @@ import { getBetaFluidCornerHeight } from './fluid/FluidSurfaceGeometry';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import { ChunkPassMask, classifyBlockPassMask, hasChunkPass } from './meshing/ChunkPassMask';
 import { getRailShapeForBlock } from '../world/rails/RailShapes';
-import { fenceSelectionShapes, stairShapes } from '../blocks/shapes/BlockShapes';
+import { BED_HEIGHT, fenceSelectionShapes, stairShapes } from '../blocks/shapes/BlockShapes';
 
 type Corner = readonly [number, number, number];
 type Quad4 = readonly [number, number, number, number];
@@ -1002,6 +1002,10 @@ export class ChunkMesher {
             }
             if (blockId === BlockIds.WallSign) {
               this.buildWallSign(buffers, chunk, x, y, z, blockId, definition);
+              continue;
+            }
+            if (blockId === BlockIds.Bed) {
+              this.buildBed(buffers, chunk, x, y, z, definition);
               continue;
             }
 
@@ -2367,35 +2371,125 @@ export class ChunkMesher {
     pushQuadDirect([x + blx, y + by, z + blz], [x + brx, y + by, z + brz], [x + trx, y + by, z + trz], [x + tlx, y + by, z + tlz], [0, -1, 0], 0.5);
   }
 
-  private buildWallSign(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, definition: BlockDefinition): void {
-    const meta = chunk.getBlockMetadata(x, y, z);
-    const textureName = resolveBlockTexture(definition, 'side') || 'oak_side';
-    const uvRect = this.getSafeUvRect(textureName);
-    const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
-    const light = this.getMaxNeighborLight(chunk, x, y, z);
+  /**
+   * Beta bed: a 9/16-tall slab whose top face uses the head or foot texture
+   * rotated to the bed's facing, with matching side and end textures.
+   *
+   * Beta renders this via `RenderBlocks.renderBlockBed`, picking texture
+   * indices per face from the metadata. The block previously fell through to
+   * the generic cutout cube path, so it was a full-height block with the
+   * wrong faces.
+   */
+  private buildBed(
+    buffers: MeshBuffers,
+    chunk: Chunk,
+    x: number, y: number, z: number,
+    definition: BlockDefinition,
+  ): void {
+    const metadata = chunk.getBlockMetadata(x, y, z);
+    const head = (metadata & 8) !== 0;
+    const facing = metadata & 3;
+    const height = BED_HEIGHT;
+
+    const topName = head ? 'bed_head_top' : 'bed_feet_top';
+    const sideName = head ? 'bed_head_side' : 'bed_feet_side';
+    const endName = head ? 'bed_head_end' : 'bed_feet_end';
+
+    const top = this.getSafeUvRect(topName);
+    const side = this.getSafeUvRect(sideName);
+    const end = this.getSafeUvRect(endName);
+    const bottom = this.getSafeUvRect(resolveBlockTexture(definition, 'bottom') ?? 'planks_oak');
+    if (top === undefined || side === undefined || end === undefined) return;
+
+    const tint = resolveBlockTint(definition, 'side');
+    const light = this.getLightComponentsAt(chunk, x, y, z);
     const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
     const b = [light.block, light.block, light.block, light.block] as Quad4;
 
-    const pushQuadFromBounds = (dir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
-      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+    const push = (
+      normal: readonly [number, number, number],
+      corners: [Corner, Corner, Corner, Corner],
+      rect: { u0: number; v0: number; u1: number; v1: number },
+      customUvs?: readonly [number, number, number, number, number, number, number, number],
+    ): void => {
+      buffers.pushQuad(corners, normal, rect, tint, light, 1, FluidTextureKind.WaterStill, customUvs);
+    };
+    void l; void b;
+
+    const x0 = x, x1 = x + 1, z0 = z, z1 = z + 1;
+    const y0 = y, y1 = y + height;
+
+    // Beta rotates the top texture so the pillow faces the head of the bed.
+    const rotateTopUv = (
+      rect: { u0: number; v0: number; u1: number; v1: number },
+      quarterTurns: number,
+    ): readonly [number, number, number, number, number, number, number, number] => {
+      const corners: [number, number][] = [
+        [rect.u0, rect.v1], [rect.u1, rect.v1], [rect.u1, rect.v0], [rect.u0, rect.v0],
+      ];
+      const turned = corners.slice(quarterTurns % 4).concat(corners.slice(0, quarterTurns % 4));
+      return [
+        turned[0]![0], turned[0]![1], turned[1]![0], turned[1]![1],
+        turned[2]![0], turned[2]![1], turned[3]![0], turned[3]![1],
+      ] as const;
     };
 
-    const bw = 12/32, bh = 12/32, bd = 2/32;
-    let minX = 0.5 - bw, maxX = 0.5 + bw;
-    let minY = 0.5 - bh/2, maxY = 0.5 + bh/2;
-    let minZ = 0.5 - bw, maxZ = 0.5 + bw;
+    push([0, 1, 0], [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], top, rotateTopUv(top, facing));
+    if (bottom !== undefined) {
+      push([0, -1, 0], [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], bottom);
+    }
 
-    if (meta === 2) { minZ = 1 - bd; maxZ = 1; }
-    else if (meta === 3) { minZ = 0; maxZ = bd; }
-    else if (meta === 4) { minX = 1 - bd; maxX = 1; minZ = 0.5 - bw; maxZ = 0.5 + bw; }
-    else if (meta === 5) { minX = 0; maxX = bd; minZ = 0.5 - bw; maxZ = 0.5 + bw; }
+    // The end texture goes on the outward face (foot end or headboard); the
+    // other three vertical faces use the side texture.
+    const endFace = facing;
+    const faces: { normal: readonly [number, number, number]; corners: [Corner, Corner, Corner, Corner]; dir: number }[] = [
+      { normal: [0, 0, 1], corners: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], dir: 0 },
+      { normal: [-1, 0, 0], corners: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], dir: 1 },
+      { normal: [0, 0, -1], corners: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]], dir: 2 },
+      { normal: [1, 0, 0], corners: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], dir: 3 },
+    ];
+    for (const face of faces) {
+      // The head's board faces opposite the foot's.
+      const outward = head ? (endFace + 2) & 3 : endFace;
+      push(face.normal, face.corners, face.dir === outward ? end : side);
+    }
+  }
 
-    pushQuadFromBounds(FaceDirection.EAST, [maxX, minY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [maxX, minY, maxZ], [1, 0, 0]);
-    pushQuadFromBounds(FaceDirection.WEST, [minX, minY, maxZ], [minX, maxY, maxZ], [minX, maxY, minZ], [minX, minY, minZ], [-1, 0, 0]);
-    pushQuadFromBounds(FaceDirection.TOP, [minX, maxY, maxZ], [maxX, maxY, maxZ], [maxX, maxY, minZ], [minX, maxY, minZ], [0, 1, 0]);
-    pushQuadFromBounds(FaceDirection.BOTTOM, [minX, minY, minZ], [maxX, minY, minZ], [maxX, minY, maxZ], [minX, minY, maxZ], [0, -1, 0]);
-    pushQuadFromBounds(FaceDirection.SOUTH, [minX, minY, maxZ], [maxX, minY, maxZ], [maxX, maxY, maxZ], [minX, maxY, maxZ], [0, 0, 1]);
-    pushQuadFromBounds(FaceDirection.NORTH, [maxX, minY, minZ], [minX, minY, minZ], [minX, maxY, minZ], [maxX, maxY, minZ], [0, 0, -1]);
+  /**
+   * Beta `BlockSign` wall variant.
+   *
+   * Beta's bounds are a full-width board from y=0.28125 to y=0.78125, 0.125
+   * deep, flush against the wall the sign hangs on — and with no standing
+   * post, which only exists on the freestanding sign. The previous model used
+   * a centred 12/32 cube with the wrong texture, so it floated mid-cell.
+   */
+  private buildWallSign(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, _blockId: BlockId, definition: BlockDefinition): void {
+    const meta = chunk.getBlockMetadata(x, y, z);
+    // Beta signs use the plank texture for the board.
+    const textureName = resolveBlockTexture(definition, 'side') ?? 'planks_oak';
+    const uvRect = this.getSafeUvRect(textureName);
+    if (uvRect === undefined) return;
+    const tint = resolveBlockTint(definition, 'side');
+    const light = this.getMaxNeighborLight(chunk, x, y, z);
+
+    // Beta BlockSign.setBlockBoundsBasedOnState (wall variant).
+    const minY = 0.28125;
+    const maxY = 0.78125;
+    const depth = 0.125;
+    let bounds: { minX: number; minZ: number; maxX: number; maxZ: number };
+    switch (meta) {
+      case 2: bounds = { minX: 0, minZ: 1 - depth, maxX: 1, maxZ: 1 }; break;
+      case 3: bounds = { minX: 0, minZ: 0, maxX: 1, maxZ: depth }; break;
+      case 4: bounds = { minX: 1 - depth, minZ: 0, maxX: 1, maxZ: 1 }; break;
+      case 5: bounds = { minX: 0, minZ: 0, maxX: depth, maxZ: 1 }; break;
+      default: bounds = { minX: 0, minZ: 1 - depth, maxX: 1, maxZ: 1 }; break;
+    }
+
+    this.pushLocalBox(
+      buffers, x, y, z,
+      { minX: bounds.minX, minY, minZ: bounds.minZ, maxX: bounds.maxX, maxY, maxZ: bounds.maxZ },
+      uvRect, tint, light,
+    );
   }
 
   private buildRail(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId): void {

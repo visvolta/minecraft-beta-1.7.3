@@ -5,6 +5,7 @@ import type { EntityTickContext, EntityWorldContext } from './core/EntityContext
 import { nbt, type NbtCompound, type NbtTag } from '../nbt/Nbt';
 import { attachEntityLighting } from '../rendering/ChunkRenderer';
 import { AABB } from '../physics/AABB';
+import { DroppedItemEntity } from './items/DroppedItemEntity';
 
 /**
  * Beta 1.7.3 `EntityPainting` and `EnumArt`.
@@ -128,8 +129,9 @@ export class PaintingEntity extends Entity {
     let y = this.tileY + 0.5;
     let z = this.tileZ + 0.5;
 
-    // Step off the wall face toward open air.
-    const inset = 0.5 + WALL_INSET;
+    // Step out of the anchor block onto its exposed face. `direction` is the
+    // way the painting looks: 0 = -Z, 1 = -X, 2 = +Z, 3 = +X.
+    const inset = 0.5 - WALL_INSET;
     if (this.direction === 0) z -= inset;
     if (this.direction === 1) x -= inset;
     if (this.direction === 2) z += inset;
@@ -182,18 +184,78 @@ export class PaintingEntity extends Entity {
     return true;
   }
 
-  /** Paintings are static; Beta only ticks them for the drop check. */
-  public onTick(_ctx: EntityTickContext): void {
-    this.age += 1;
+  /** Beta paintings can be hit and pushed against, so they are collidable. */
+  public override canBeCollidedWith(): boolean {
+    return !this.removed;
   }
 
-  /** Beta drops one painting item when broken. */
+  /**
+   * Beta `EntityPainting.onUpdate` re-checks its wall every 100 ticks and
+   * drops itself if the support is gone.
+   */
+  public onTick(ctx: EntityTickContext): void {
+    this.age += 1;
+    if (this.age % 100 !== 0) return;
+    const world = this.surfaceAccessFrom(ctx);
+    if (world === null) return;
+    if (!this.hasValidSurface(world)) this.breakPainting();
+  }
+
+  /** Builds a solidity probe from the tick context's world. */
+  private surfaceAccessFrom(ctx: EntityTickContext): PaintingWorldAccess | null {
+    const world = ctx.world.blockUpdateWorld;
+    const registry = ctx.world.blockRegistry;
+    if (world === undefined || registry === undefined) return null;
+    return {
+      isSolid: (x: number, y: number, z: number): boolean =>
+        registry.getById(world.getBlock(x, y, z))?.solid === true,
+    };
+  }
+
+  /**
+   * Beta `attackEntityFrom`: any hit knocks the painting down. Damage amount
+   * is ignored, matching Beta's `EntityPainting`.
+   */
+  public attackEntityFrom(): boolean {
+    if (this.removed) return false;
+    this.breakPainting();
+    return true;
+  }
+
+  /**
+   * Optional override for the drop. Left unset the painting spawns its own
+   * item through the shared entity system, so a painting restored from a save
+   * still drops correctly without the placer wiring anything up.
+   */
   public dropAsItem?: (x: number, y: number, z: number) => void;
 
+  /** Guards against a second drop if break is reached by two paths. */
+  private broken = false;
+
   public breakPainting(): void {
-    if (this.removed) return;
-    this.dropAsItem?.(this.position.x, this.position.y, this.position.z);
+    if (this.removed || this.broken) return;
+    this.broken = true;
+    if (this.dropAsItem !== undefined) {
+      this.dropAsItem(this.position.x, this.position.y, this.position.z);
+    } else {
+      this.spawnOwnDrop();
+    }
     this.markRemoved();
+  }
+
+  /** Default drop path, used by paintings loaded from a save. */
+  private spawnOwnDrop(): void {
+    const manager = this.ctx.manager;
+    if (manager === undefined) return;
+    const item = new DroppedItemEntity(
+      this.ctx,
+      { type: 'item', id: 'painting', count: 1, metadata: 0 },
+      this.position.x,
+      this.position.y,
+      this.position.z,
+      10,
+    );
+    manager.add(item);
   }
 
   private buildModel(): void {
