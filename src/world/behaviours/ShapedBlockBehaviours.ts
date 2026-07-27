@@ -103,8 +103,14 @@ export function registerShapedBlockBehaviours(registry: BlockBehaviourRegistry):
 
   mergeBounds(registry, BlockIds.Cactus, (_ctx, x, y, z) => toWorldBound(cactusShape(), x, y, z));
 
-  mergeBounds(registry, BlockIds.Snow, (ctx, x, y, z) =>
-    toWorldBound(snowLayerShape(ctx.world.getBlockMetadata(x, y, z)), x, y, z));
+  mergeBounds(registry, BlockIds.Snow, (ctx, x, y, z, type) => {
+    const metadata = ctx.world.getBlockMetadata(x, y, z);
+    if (type === 'collision') {
+      if ((metadata & 7) < 3) return [];
+      return toWorldBound({ minX: 0, minY: 0, minZ: 0, maxX: 1, maxY: 0.5, maxZ: 1 }, x, y, z);
+    }
+    return toWorldBound(snowLayerShape(metadata), x, y, z);
+  });
 
   mergeBounds(registry, BlockIds.Trapdoor, (ctx, x, y, z) =>
     toWorldBound(trapdoorShape(ctx.world.getBlockMetadata(x, y, z)), x, y, z));

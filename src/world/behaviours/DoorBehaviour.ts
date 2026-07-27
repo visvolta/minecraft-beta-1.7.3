@@ -217,11 +217,13 @@ export class DoorBehaviour implements BlockBehaviour {
    * block-drop resolver from the lower half only, so no duplicate item
    * appears when the pair is torn down.
    */
-  public onRemoved(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
-    const metadata = ctx.world.getBlockMetadata(x, y, z);
+  public onRemoved(ctx: BlockBehaviourContext, x: number, y: number, z: number, _oldBlockId: number, oldMetadata = ctx.world.getBlockMetadata(x, y, z)): void {
+    const metadata = oldMetadata;
     const doorId = this.blockId;
-    const partnerY = isDoorUpper(metadata) ? y - 1 : y + 1;
+    const upper = isDoorUpper(metadata);
+    const partnerY = upper ? y - 1 : y + 1;
     if (ctx.world.getBlock(x, partnerY, z) === doorId) {
+      if (upper) ctx.world.dropBlockAsItem(x, partnerY, z, doorId, ctx.world.getBlockMetadata(x, partnerY, z));
       ctx.world.setBlock(x, partnerY, z, BlockIds.Air, { notifyNeighbours: true });
     }
   }

@@ -19,6 +19,12 @@ export function resolveBlockDrops(blockId:number,blockMetadata=0,canHarvest=true
     case BlockIds.Grass:
       return [{ type: 'block', id: BlockIds.Dirt, count: 1, metadata: 0 }];
 
+    case BlockIds.Gravel:
+      return [{ type: random < 0.1 ? 'item' : 'block', id: random < 0.1 ? 'flint' : BlockIds.Gravel, count: 1, metadata: 0 }];
+
+    case BlockIds.Snow:
+      return [{ type: 'item', id: 'snowball', count: 1, metadata: 0 }];
+
     case BlockIds.Glass:
     case BlockIds.Ice:
       return []; // Glass and Ice drop nothing in Beta 1.7.3 when broken by hand
@@ -69,9 +75,20 @@ export function resolveBlockDrops(blockId:number,blockMetadata=0,canHarvest=true
     case BlockIds.RedstoneWire:
       return [{ type: 'item', id: 'redstone_dust', count: 1, metadata: 0 }];
 
+    case BlockIds.RedstoneTorchOff:
+      return [{ type: 'block', id: BlockIds.RedstoneTorchOn, count: 1, metadata: 0 }];
+
     case BlockIds.WoodDoor:
       if ((blockMetadata & 8) !== 0) return []; // Upper half drops nothing
       return [{ type: 'item', id: 'door_wood', count: 1, metadata: 0 }];
+
+    case BlockIds.SpruceDoor:
+      if ((blockMetadata & 8) !== 0) return [];
+      return [{ type: 'item', id: 'door_spruce', count: 1, metadata: 0 }];
+
+    case BlockIds.BirchDoor:
+      if ((blockMetadata & 8) !== 0) return [];
+      return [{ type: 'item', id: 'door_birch', count: 1, metadata: 0 }];
 
     case BlockIds.IronDoor:
       if ((blockMetadata & 8) !== 0) return []; // Upper half drops nothing

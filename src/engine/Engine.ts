@@ -135,6 +135,7 @@ import { PlayerModel } from '../player/PlayerModel';
 import { PlayerAnimator } from '../player/PlayerAnimator';
 import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer';
 import { MinecartRenderSystem } from '../rendering/MinecartRenderer';
+import { MinecartEntity } from '../entities/MinecartEntity';
 import { BoatRenderer } from '../rendering/BoatRenderer';
 import { registerBedBehaviour } from '../world/behaviours/BedBehaviour';
 import { SleepController, sleepPoseFor, type WakeReason } from '../player/SleepController';
@@ -318,6 +319,7 @@ export class Engine {
   private nextDebugGeometryMemorySampleMs = 0;
   private rawLightDebugMode = false;
   private ambientOcclusionDebugMode = false;
+  private readonly activeMinecartAudioLoops = new Set<string>();
 
   private simulationPaused = false;
   private running = false;
@@ -409,6 +411,7 @@ export class Engine {
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
     this.redstonePowerEngine = new RedstonePowerEngine(this.blockUpdateWorld, blockRegistry, this.blockBehaviourRegistry);
     this.blockUpdateWorld.setPowerEngine(this.redstonePowerEngine);
+    this.blockUpdateWorld.setBlockSoundSink((id, x, y, z) => this.audioManager.play({ type: 'block.action', id, x, y, z }));
     this.playerPhysics=new PlayerPhysics(blockRegistry,this.blockBehaviourRegistry,this.blockUpdateWorld);
     this.playerSurvivalController=new PlayerSurvivalController(this.player,this.blockUpdateWorld,blockRegistry,()=>metadata.difficulty);
     this.playerSurvivalController.setLandingSoundListener((event)=>{this.audioManager.play({type:'step',material:event.material,x:event.x,y:event.y,z:event.z,volume:event.volume,pitch:event.pitch});});
@@ -748,6 +751,7 @@ export class Engine {
     registerChestBehaviour(this.blockBehaviourRegistry, this.chestManager);
 
     this.signManager = new SignManager();
+    this.signManager.deserialize(metadata.signs);
     registerSignBehaviour(this.blockBehaviourRegistry, this.signManager);
 
     this.signUi = new SignUi();
@@ -899,6 +903,7 @@ export class Engine {
     const trustPersistedLighting = metadata.saveVersion === SAVE_VERSION && metadata.generatorVersion === GENERATOR_VERSION;
     this.chunkStreamer = new ChunkStreamer(this.chunkManager, this.worldGenerator, this.chunkRenderer, this.lightEngine, worldSeed, this.persistence, trustPersistedLighting, (chunk) => {
         this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
+        this.signManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
         this.worldTickScheduler.indexLoadedChunkTicks(chunk);
         this.worldTickScheduler.reconcileChunkBoundaries(chunk);
     }, (error) => this.onPersistenceError?.(error));
@@ -1347,21 +1352,27 @@ export class Engine {
     if(survivalUiSuppressed){this.player.isSprinting=false;this.foodUseController.cancel();this.interactionController.breakingController.reset();}
     this.sprintFovController.update(camera,this.player,deltaSeconds,survivalUiSuppressed);
 
+    const fishingRodCast = this.interactionController.getActiveBobber() !== null;
+    this.heldItemRenderer.setFishingRodCast(fishingRodCast);
+    this.thirdPersonHeldItemRenderer.setFishingRodCast(fishingRodCast);
+
     if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
       this.playerModel.setVisible(true); this.playerModel.setFirstPersonMode(true); this.firstPersonArmRenderer.setVisible(true);
       this.firstPersonMotionController.update(camera, this.player, this.firstPersonArmRenderer, 1.0);
       const hasHeldContent = this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
       this.firstPersonArmRenderer.setArmMeshVisible(!hasHeldContent);
-      const holdingItem = this.inventory.getStack(this.selectedSlot) !== null;
+      const currentHeldStack = this.inventory.getStack(this.selectedSlot);
+      const holdingItem = currentHeldStack !== null;
       this.applyHeldItemVisibility(holdingItem);
-      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds, holdingItem);
+      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds, holdingItem, this.thirdPersonHeldPose(currentHeldStack));
     } else {
       this.playerModel.setVisible(true); this.playerModel.setFirstPersonMode(false); this.firstPersonArmRenderer.setVisible(false);
       this.heldItemRenderer.update(this.selectedSlot, deltaSeconds);
       // Keep the third-person held item in step with the current slot.
-      const holdingItem = this.inventory.getStack(this.selectedSlot) !== null;
+      const currentHeldStack = this.inventory.getStack(this.selectedSlot);
+      const holdingItem = currentHeldStack !== null;
       this.applyHeldItemVisibility(holdingItem);
-      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds, holdingItem);
+      this.playerAnimator.update(this.player, this.playerModel, this.cameraController.getYaw(), this.cameraController.getPitch(), 1.0, deltaSeconds, holdingItem, this.thirdPersonHeldPose(currentHeldStack));
     }
     this.playerArmourRenderer.sync();
 
@@ -1539,6 +1550,19 @@ export class Engine {
     const entityAlpha = totalTicksForAlpha - Math.floor(totalTicksForAlpha);
     this.entityManager.render(entityAlpha);
     this.minecartRenderSystem.update(entityAlpha);
+    const minecartAudioSeen = new Set<string>();
+    this.entityManager.forEachActive((entity) => {
+      if (entity instanceof MinecartEntity) {
+        minecartAudioSeen.add(entity.uuid);
+        const speed = Math.hypot(entity.velocity.x, entity.velocity.z);
+        this.audioManager.setMinecartLoop(entity.uuid, entity.riddenByEntity === this.player, speed);
+      }
+    });
+    for (const uuid of this.activeMinecartAudioLoops) {
+      if (!minecartAudioSeen.has(uuid)) this.audioManager.stopMinecartLoops(uuid);
+    }
+    this.activeMinecartAudioLoops.clear();
+    for (const uuid of minecartAudioSeen) this.activeMinecartAudioLoops.add(uuid);
     this.boatRenderer.update(this.entityManager, entityAlpha);
     this.entityParticles.update(deltaSeconds);
     this.debugStatsCollector.recordFrame(deltaSeconds);
@@ -1648,7 +1672,7 @@ export class Engine {
 
   private snapshotMetadata(): WorldMetadata {
     const weather = this.weatherController.getState(); const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);
-    return { ...this.currentMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize() };
+    return { ...this.currentMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize(), signs: this.signManager.serialize() };
   }
 
   /**
@@ -1746,6 +1770,19 @@ export class Engine {
       // camera mode.
       this.applyHeldItemVisibility(true);
     }
+  }
+
+  private thirdPersonHeldPose(stack: ItemStack | null): 'none' | 'block' | 'flat' | 'tool' | 'bow' | 'fishing_rod' | 'food' | 'use' {
+    if (stack === null) return 'none';
+    const definition = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+    const id = definition?.id ?? String(stack.identity.id);
+    if (id === 'bow' || id.startsWith('bow_')) return 'bow';
+    if (id === 'fishing_rod' || id.startsWith('fishing_rod')) return 'fishing_rod';
+    if (definition?.useAction === 'eat') return 'food';
+    const category = classifyItemRender(stack.identity, this.blockRegistry);
+    if (category === 'block3d' || category === 'block_3d') return 'block';
+    if (category === 'tool') return 'tool';
+    return 'flat';
   }
 
   /**

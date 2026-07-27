@@ -1,11 +1,16 @@
 import { BlockIds } from '../../blocks/BlockId';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry, BoundingBoxType } from '../BlockBehaviour';
 import { AABB } from '../../physics/AABB';
-import { dropRailOnce, getRailSelectionBounds, railSupportLost } from './RailBehaviour';
+import { dropRailOnce, getRailSelectionBounds, railSupportLost, refreshRailShape } from './RailBehaviour';
 
 export class PoweredRailBehaviour implements BlockBehaviour {
     public canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
         return ctx.world.isNormalCube(x, y - 1, z);
+    }
+
+    public onPlaced(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+        refreshRailShape(ctx, x, y, z);
+        this.neighborChanged(ctx, x, y, z);
     }
 
     public getBoundingBoxes(ctx: BlockBehaviourContext, x: number, y: number, z: number, type: BoundingBoxType): AABB[] | undefined {
@@ -14,6 +19,7 @@ export class PoweredRailBehaviour implements BlockBehaviour {
     }
 
     public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+        refreshRailShape(ctx, x, y, z, false);
         const meta = ctx.world.getBlockMetadata(x, y, z);
         const orientation = meta & 7;
         

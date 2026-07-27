@@ -320,7 +320,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     transparent: false,
     replaceable: false,
     blocksWeather: true,
-    textures: { all: 'bedrock' },
+    textures: { all: 'obsidian' },
     renderType: 'opaque',
   });
 

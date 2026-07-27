@@ -5,6 +5,7 @@ import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { ItemIconResolver } from '../inventory/ItemIconResolver';
 import { BlockIds } from '../blocks/BlockId';
 import { ItemStack } from '../inventory/ItemStack';
+import { UNIMPLEMENTED_BEHAVIOUR, DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 
 function canRegister(id: string | number, blockRegistry: BlockRegistry, itemIcons: ItemIconResolver): boolean {
   if (typeof id === 'number') {
@@ -41,6 +42,11 @@ export function registerDefaultRecipes(
     mirrored = true
   ): void => {
     // Verify all ingredients and output exist
+    const outputDefinition = output.identity.type === 'item' ? DEFAULT_ITEM_DEFINITIONS.get(output.identity.id) : undefined;
+    if (outputDefinition !== undefined && UNIMPLEMENTED_BEHAVIOUR[outputDefinition.id] !== undefined) {
+      skippedRecipes.push(`${recipeName}: output "${outputDefinition.id}" is intentionally hidden until behaviour is implemented`);
+      return;
+    }
     if (!canRegister(output.identity.id, blockRegistry, itemIcons)) {
       skippedRecipes.push(`${recipeName}: missing output "${String(output.identity.id)}"`);
       return;
@@ -59,6 +65,11 @@ export function registerDefaultRecipes(
     ingredients: readonly { id: string | number; metadata?: number | undefined }[],
     output: ItemStack
   ): void => {
+    const outputDefinition = output.identity.type === 'item' ? DEFAULT_ITEM_DEFINITIONS.get(output.identity.id) : undefined;
+    if (outputDefinition !== undefined && UNIMPLEMENTED_BEHAVIOUR[outputDefinition.id] !== undefined) {
+      skippedRecipes.push(`${recipeName}: output "${outputDefinition.id}" is intentionally hidden until behaviour is implemented`);
+      return;
+    }
     if (!canRegister(output.identity.id, blockRegistry, itemIcons)) {
       skippedRecipes.push(`${recipeName}: missing output "${String(output.identity.id)}"`);
       return;

@@ -9,6 +9,7 @@ import { BlockIds } from '../blocks/BlockId';
 import { resolveBlockTexture } from '../blocks/resolveBlockTexture';
 import { resolveBlockTint } from '../blocks/resolveBlockTint';
 import { DroppedItemEntity } from './items/DroppedItemEntity';
+import { attachEntityLighting } from '../rendering/ChunkRenderer';
 
 /** Beta `EntityFallingSand` is 0.98×0.98; position here is the block CENTRE. */
 const FALLING_BLOCK_SIZE = 0.98;
@@ -95,6 +96,7 @@ export class FallingBlockEntity extends Entity {
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
     this.material = new THREE.MeshBasicMaterial({ map: this.ctx.blockAtlas.texture, vertexColors: true });
+    attachEntityLighting(this.material);
     this.mesh = new THREE.Mesh(geometry, this.material);
     this.mesh.renderOrder = 5;
     this.mesh.position.set(this.position.x, this.position.y, this.position.z);

@@ -6,6 +6,7 @@ import { AABB } from '../physics/AABB';
 import { nbt, type NbtCompound, type NbtTag } from '../nbt/Nbt';
 import { BlockIds } from '../blocks/BlockId';
 import { resolveBlockTexture } from '../blocks/resolveBlockTexture';
+import { attachEntityLighting } from '../rendering/ChunkRenderer';
 
 /** Beta Primed TNT size is 0.98. */
 const TNT_SIZE = 0.98;
@@ -77,6 +78,7 @@ export class PrimedTntEntity extends Entity {
     uv.needsUpdate = true;
 
     this.material = new THREE.MeshBasicMaterial({ map: this.ctx.blockAtlas.texture });
+    attachEntityLighting(this.material);
     this.mesh = new THREE.Mesh(geometry, this.material);
     this.mesh.renderOrder = 5;
     this.mesh.position.set(this.position.x, this.position.y, this.position.z);

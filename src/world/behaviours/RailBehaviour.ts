@@ -1,6 +1,8 @@
 import { BlockIds, type BlockId } from '../../blocks/BlockId';
 import { AABB } from '../../physics/AABB';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry, BoundingBoxType } from '../BlockBehaviour';
+import type { PowerQueryContext, RedstonePower } from '../redstone/RedstonePower';
+import { FaceDirection } from '../../blocks/BlockFace';
 import { getRailBlockInfoAt } from '../rails/RailShapes';
 import {
   combineRailMetadata, computeRailShape, isRailBlock, splitRailMetadata,
@@ -112,8 +114,56 @@ export class RailBehaviour implements BlockBehaviour {
   }
 }
 
+export class DetectorRailBehaviour extends RailBehaviour {
+  public readonly canProvidePower = true;
+
+  public override onPlaced(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+    refreshRailShape(ctx, x, y, z);
+    this.updateDetectorState(ctx, x, y, z);
+  }
+
+  public override neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+    super.neighborChanged(ctx, x, y, z);
+    if (ctx.world.getBlock(x, y, z) === BlockIds.DetectorRail) this.updateDetectorState(ctx, x, y, z);
+  }
+
+  public onEntityCollidedWithBlock(ctx: BlockBehaviourContext, x: number, y: number, z: number, _aabb: AABB, entity?: unknown): void {
+    if ((entity as { readonly typeStringId?: string } | undefined)?.typeStringId === 'Minecart') {
+      this.setActive(ctx, x, y, z, true);
+    }
+  }
+
+  public scheduledTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+    this.updateDetectorState(ctx, x, y, z);
+  }
+
+  private updateDetectorState(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+    const box = new AABB(x + 0.125, y, z + 0.125, x + 0.875, y + 0.25, z + 0.875);
+    const occupied = ctx.entities?.getEntitiesInAABB(box, (candidate) => candidate.typeStringId === 'Minecart').length ? true : false;
+    this.setActive(ctx, x, y, z, occupied);
+  }
+
+  private setActive(ctx: BlockBehaviourContext, x: number, y: number, z: number, active: boolean): void {
+    const meta = ctx.world.getBlockMetadata(x, y, z);
+    const currentlyActive = (meta & 8) !== 0;
+    if (currentlyActive !== active) {
+      ctx.world.setBlockMetadataWithNotify(x, y, z, (meta & 7) | (active ? 8 : 0));
+      ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5);
+    }
+    if (active) ctx.world.scheduleBlockTick(x, y, z, BlockIds.DetectorRail, 20);
+  }
+
+  public getWeakPower(ctx: PowerQueryContext): RedstonePower {
+    return (ctx.sourceMetadata & 8) !== 0 ? 15 as RedstonePower : 0 as RedstonePower;
+  }
+
+  public getStrongPower(ctx: PowerQueryContext): RedstonePower {
+    return (ctx.sourceMetadata & 8) !== 0 && ctx.directionToSource === FaceDirection.TOP ? 15 as RedstonePower : 0 as RedstonePower;
+  }
+}
+
 export function registerRailBehaviour(registry: BlockBehaviourRegistry): void {
   const behaviour = new RailBehaviour();
   registry.register(BlockIds.Rail, behaviour);
-  registry.register(BlockIds.DetectorRail, behaviour);
+  registry.register(BlockIds.DetectorRail, new DetectorRailBehaviour());
 }

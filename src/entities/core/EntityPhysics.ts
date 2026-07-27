@@ -107,6 +107,26 @@ export class EntityPhysics {
     body.onGround = grounded;
     body.isCollidedHorizontally = collidedX || collidedZ;
     body.isCollidedVertically = collidedY;
+    this.dispatchBlockCollisionHooks(body);
+  }
+
+  private dispatchBlockCollisionHooks(body: PhysicsMovable): void {
+    const box = body.getAABB();
+    const range = this.blockRangeCoveringBox(box);
+    for (let bx = range.minX; bx <= range.maxX; bx++) {
+      for (let by = range.minY; by <= range.maxY; by++) {
+        for (let bz = range.minZ; bz <= range.maxZ; bz++) {
+          if (by < 0 || by >= CHUNK_SIZE_Y) continue;
+          const blockId = this.world.getBlock(bx, by, bz);
+          const behaviour = this.behaviourRegistry.get(blockId);
+          if (behaviour.onEntityCollidedWithBlock === undefined) continue;
+          const bounds = getBlockBounds(this.blockRegistry, this.behaviourRegistry, this.world, bx, by, bz, 'interaction');
+          if (bounds.some((bound) => box.intersects(bound))) {
+            behaviour.onEntityCollidedWithBlock({ world: this.world, gameTick: 0 } as any, bx, by, bz, box, body);
+          }
+        }
+      }
+    }
   }
 
   /**

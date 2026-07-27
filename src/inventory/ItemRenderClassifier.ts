@@ -87,8 +87,6 @@ export function classifyItemRender(
     def.id === BlockIds.RedstoneTorchOn ||
     def.id === BlockIds.RedstoneTorchOff ||
     def.renderType === 'cross' ||
-    def.renderType === 'cactus' ||
-    def.renderType === 'snow' ||
     def.id === 66 || // Rail
     def.id === 27 || // PoweredRail
     def.id === 28    // DetectorRail

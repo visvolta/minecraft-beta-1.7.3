@@ -63,6 +63,8 @@ export class AssetManager {
     textureNames.add('rail_detector');
     textureNames.add('door_wood_upper');
     textureNames.add('door_iron_upper');
+    textureNames.add('door_spruce_upper');
+    textureNames.add('door_birch_upper');
 
     // Redstone wire shapes and overlays (Beta 1.7.3)
     textureNames.add('redstone_dust_cross');

@@ -87,7 +87,7 @@ export class WorldEventQueue {
     return this.tntIgniteAttempts.splice(0, this.tntIgniteAttempts.length);
   }
 
-  public enqueueBlockDrop(gameTick: number, sourceEntityId: number, blockId: number, metadata: number, x: number, y: number, z: number, reason: 'placement_failed' | 'lifetime_expired'): void {
+  public enqueueBlockDrop(gameTick: number, sourceEntityId: number, blockId: number, metadata: number, x: number, y: number, z: number, reason: 'placement_failed' | 'lifetime_expired' | 'support-loss' | 'block-removal'): void {
     if (this.count + this.blockDrops.length + this.itemDrops.length >= CAPACITY) {
       this.discarded += 1;
       return;

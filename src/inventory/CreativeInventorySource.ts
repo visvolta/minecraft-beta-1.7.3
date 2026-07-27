@@ -3,6 +3,7 @@ import type { ItemDefinitionRegistry } from '../items/ItemDefinitionRegistry';
 import { ItemStack, getMaxStackSize } from './ItemStack';
 import { ItemIconResolver } from './ItemIconResolver';
 import { BlockIds } from '../blocks/BlockId';
+import { UNIMPLEMENTED_BEHAVIOUR } from '../items/ItemDefinitionRegistry';
 
 const SLAB_BLOCK_ID: number = BlockIds.Slab;
 
@@ -118,6 +119,7 @@ export function buildCreativeInventoryEntries(blocks: BlockRegistry, items: Item
   }
   for (const item of items.values()) {
     if (item.creativeVisible !== true) continue;
+    if (UNIMPLEMENTED_BEHAVIOUR[item.id] !== undefined) continue;
     const id = item.numericId ?? item.id;
     if (!itemIcons.isKnown(String(id)) && !itemIcons.isKnown(item.id)) continue;
     const stack = new ItemStack(id, 'item', getMaxStackSize({ type: 'item', id }), 0);

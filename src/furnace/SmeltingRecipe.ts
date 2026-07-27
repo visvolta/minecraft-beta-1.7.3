@@ -1,4 +1,5 @@
 import type { ItemStack } from '../inventory/ItemStack';
+import { idsMatch } from '../items/ItemIdentityResolver';
 
 export interface SmeltingRecipeIngredient {
   readonly id: string | number;
@@ -17,7 +18,7 @@ export class SmeltingRecipe {
 
   public matches(stack: ItemStack | null): boolean {
     if (stack === null || stack.count <= 0) return false;
-    if (String(stack.identity.id) !== String(this.input.id)) return false;
+    if (!idsMatch(stack.identity, this.input.id)) return false;
     if (this.input.metadata !== undefined && this.input.metadata !== -1) {
       if (stack.metadata !== this.input.metadata) return false;
     }

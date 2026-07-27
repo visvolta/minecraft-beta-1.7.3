@@ -1,5 +1,4 @@
 import type { BlockId } from '../blocks/BlockId';
-import { BlockIds } from '../blocks/BlockId';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { BlockBehaviourContext, BlockBehaviourRegistry } from './BlockBehaviour';
 import { ALL_BLOCK_DIRECTIONS, offsetBlockPosition, oppositeDirection, type BlockPosition } from './BlockDirections';
@@ -39,6 +38,7 @@ export class BlockUpdateWorld {
   private eventQueue: WorldEventQueue | undefined;
   private entityManager: EntityManager | undefined;
   private powerEngine: RedstonePowerEngine | undefined;
+  private blockSoundSink: BlockBehaviourContext['playBlockSound'] | undefined;
   private getGameTick: (() => number) | undefined;
   private getNextInt: ((bound: number) => number) | undefined;
   private nextGenerationId = 1;
@@ -73,6 +73,10 @@ export class BlockUpdateWorld {
 
   public setPowerEngine(powerEngine: RedstonePowerEngine): void {
     this.powerEngine = powerEngine;
+  }
+
+  public setBlockSoundSink(sink: BlockBehaviourContext['playBlockSound']): void {
+    this.blockSoundSink = sink;
   }
 
   public setGameTickProvider(provider: () => number): void {
@@ -166,7 +170,7 @@ export class BlockUpdateWorld {
       this.withMutationContext(mutation, () => {
         const ctx = this.createBehaviourContext(options.player);
         if (previousBlockId !== 0 && previousBlockId !== blockId) {
-          registry.get(previousBlockId).onRemoved?.(ctx, worldX, worldY, worldZ, previousBlockId);
+          registry.get(previousBlockId).onRemoved?.(ctx, worldX, worldY, worldZ, previousBlockId, previousMetadata);
         }
         if (blockId !== 0 && previousBlockId !== blockId) {
           registry.get(blockId).onPlaced?.(ctx, worldX, worldY, worldZ, blockId);
@@ -243,13 +247,9 @@ export class BlockUpdateWorld {
     }
   }
 
-  public dropBlockAsItem(worldX: number, worldY: number, worldZ: number, blockId: BlockId): void {
+  public dropBlockAsItem(worldX: number, worldY: number, worldZ: number, blockId: BlockId, metadata = this.getBlockMetadata(worldX, worldY, worldZ)): void {
     if (this.eventQueue && this.getGameTick) {
-      if (blockId === BlockIds.RedstoneWire) {
-        this.eventQueue.enqueueItemDrop(this.getGameTick(), worldX, worldY, worldZ, 331, 0, 1, 'support-loss');
-      } else if (blockId === BlockIds.Rail || blockId === BlockIds.PoweredRail || blockId === BlockIds.DetectorRail) {
-        this.eventQueue.enqueueItemDrop(this.getGameTick(), worldX, worldY, worldZ, blockId, 0, 1, 'support-loss');
-      }
+      this.eventQueue.enqueueBlockDrop(this.getGameTick(), 0, blockId, metadata, worldX, worldY, worldZ, 'support-loss');
     }
   }
 
@@ -286,7 +286,9 @@ export class BlockUpdateWorld {
       nextInt,
       nextLong,
       ...(events === undefined ? {} : { events }),
+      ...(this.entityManager === undefined ? {} : { entities: this.entityManager }),
       ...(this.powerEngine === undefined ? {} : { power: this.powerEngine }),
+      ...(this.blockSoundSink === undefined ? {} : { playBlockSound: this.blockSoundSink }),
     };
   }
 
@@ -361,6 +363,7 @@ export class BlockUpdateWorld {
       ...(this.eventQueue === undefined ? {} : { events: this.eventQueue }),
       ...(this.entityManager === undefined ? {} : { entities: this.entityManager }),
       ...(this.powerEngine === undefined ? {} : { power: this.powerEngine }),
+      ...(this.blockSoundSink === undefined ? {} : { playBlockSound: this.blockSoundSink }),
       ...(player === undefined ? {} : { player }),
     } as BlockBehaviourContext;
   }

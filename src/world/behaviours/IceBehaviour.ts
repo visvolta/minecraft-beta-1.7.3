@@ -45,6 +45,8 @@ export class IceBehaviour implements BlockBehaviour {
   public onRemoved(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
     // Beta: Material var7 = getBlockMaterial(x, y-1, z);
     // if (var7.getIsSolid() || var7.getIsLiquid()) setBlockWithNotify(waterMoving)
+    const current = ctx.world.getBlock(x, y, z);
+    if (current !== BlockIds.Air && current !== BlockIds.Ice) return;
     const below = ctx.world.getBlock(x, y - 1, z);
     if (isSolidOrLiquid(below)) {
       ctx.world.setBlock(x, y, z, BlockIds.WaterFlowing, {

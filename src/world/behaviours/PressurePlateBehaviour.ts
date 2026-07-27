@@ -22,11 +22,8 @@ export class PressurePlateBehaviour implements BlockBehaviour {
     }
   }
 
-  public onEntityCollidedWithBlock(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
-    const meta = ctx.world.getBlockMetadata(x, y, z);
-    if (meta === 0) {
-      this.setStateIfMobInteractsWithPlate(ctx, x, y, z);
-    }
+  public onEntityCollidedWithBlock(ctx: BlockBehaviourContext, x: number, y: number, z: number, entityAABB?: AABB, entity?: unknown): void {
+    this.setStateIfMobInteractsWithPlate(ctx, x, y, z, entityAABB, entity);
   }
 
   public scheduledTick(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
@@ -36,15 +33,14 @@ export class PressurePlateBehaviour implements BlockBehaviour {
     }
   }
 
-  private setStateIfMobInteractsWithPlate(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+  private setStateIfMobInteractsWithPlate(ctx: BlockBehaviourContext, x: number, y: number, z: number, entityAABB?: AABB, entity?: unknown): void {
     const currentMeta = ctx.world.getBlockMetadata(x, y, z);
     const isPressed = currentMeta === 1;
-    let wantsPressed = false;
+    const padding = 0.125;
+    const box = new AABB(x + padding, y, z + padding, x + 1 - padding, y + 0.25, z + 1 - padding);
+    let wantsPressed = entityAABB !== undefined && entityAABB.intersects(box) && (this.isWood || entity instanceof LivingEntity || (entity as { readonly typeStringId?: string } | undefined)?.typeStringId === 'Player');
 
-    if (ctx.entities) {
-        const padding = 0.125;
-        const box = new AABB(x + padding, y, z + padding, x + 1 - padding, y + 0.25, z + 1 - padding);
-        
+    if (!wantsPressed && ctx.entities) {
         let entities;
         if (this.isWood) {
             // Everything
@@ -63,14 +59,14 @@ export class PressurePlateBehaviour implements BlockBehaviour {
       ctx.world.setBlockMetadataWithNotify(x, y, z, 1);
       this.notifyNeighbors(ctx, x, y, z);
       ctx.world.markDirty(x, z);
-      // ctx.world.playSound(...)
+      ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5);
     }
 
     if (!wantsPressed && isPressed) {
       ctx.world.setBlockMetadataWithNotify(x, y, z, 0);
       this.notifyNeighbors(ctx, x, y, z);
       ctx.world.markDirty(x, z);
-      // ctx.world.playSound(...)
+      ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5);
     }
 
     if (wantsPressed) {

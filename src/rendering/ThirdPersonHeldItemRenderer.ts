@@ -65,6 +65,7 @@ export class ThirdPersonHeldItemRenderer {
   private readonly blockMaterial: THREE.MeshBasicMaterial;
   private readonly spriteMaterial: THREE.MeshBasicMaterial;
   private readonly icons = new ItemIconResolver();
+  private fishingRodCast = false;
   /**
    * Anchor at the tip of a held fishing rod. The fishing line is attached
    * here so it leaves the rod rather than the player's body.
@@ -117,7 +118,8 @@ export class ThirdPersonHeldItemRenderer {
     const frameTag = this.animatedIcons?.isAnimated(animatedName) === true
       ? `:${this.animatedIcons.getFrame(animatedName)}`
       : '';
-    const key = stack ? `${stack.identity.type}:${stack.identity.id}:${stack.metadata}${frameTag}` : '';
+    const castTag = definition?.id === 'fishing_rod' && this.fishingRodCast ? ':cast' : '';
+    const key = stack ? `${stack.identity.type}:${stack.identity.id}:${stack.metadata}${frameTag}${castTag}` : '';
     if (key === this.key) return stack !== null;
     this.key = key;
 
@@ -139,7 +141,7 @@ export class ThirdPersonHeldItemRenderer {
     } else {
       // Animated icons must use the shared current frame, never the strip.
       const iconUrl = this.animatedFrameUrl(stack.identity.id)
-        ?? this.icons.resolve(String(stack.identity.id));
+        ?? (definition?.id === 'fishing_rod' && this.fishingRodCast ? this.icons.resolve('fishing_rod_cast') : this.icons.resolve(String(stack.identity.id)));
       const texture = new THREE.TextureLoader().load(iconUrl);
       texture.magFilter = THREE.NearestFilter;
       texture.minFilter = THREE.NearestFilter;
@@ -190,6 +192,12 @@ export class ThirdPersonHeldItemRenderer {
         uniforms.uSunBrightnessFactor.value = sunBrightnessFactor;
       }
     }
+  }
+
+  public setFishingRodCast(cast: boolean): void {
+    if (this.fishingRodCast === cast) return;
+    this.fishingRodCast = cast;
+    this.key = '';
   }
 
   /** Hides the held item (used while the player model itself is hidden). */

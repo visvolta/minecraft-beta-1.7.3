@@ -59,14 +59,17 @@ export class BedBehaviour implements BlockBehaviour {
   }
 
   /** Beta drops nothing from the head half; the foot yields the bed item. */
-  public onRemoved(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
-    const metadata = ctx.world.getBlockMetadata(x, y, z);
+  public onRemoved(ctx: BlockBehaviourContext, x: number, y: number, z: number, _oldBlockId?: number, oldMetadata = ctx.world.getBlockMetadata(x, y, z)): void {
+    const metadata = oldMetadata;
     const direction = BED_FOOT_TO_HEAD[metadata & 3] ?? [0, 1];
     const head = isBedHead(metadata);
     const partnerX = x + (head ? -direction[0] : direction[0]);
     const partnerZ = z + (head ? -direction[1] : direction[1]);
-    // Breaking either half removes the other without a second drop.
+    // Breaking either half removes the other. If the head was broken directly,
+    // emit the foot-half drop before removing it; normal breaking of the foot
+    // is already handled by the breaking controller's drop resolver.
     if (ctx.world.getBlock(partnerX, y, partnerZ) === BlockIds.Bed) {
+      if (head) ctx.world.dropBlockAsItem(partnerX, y, partnerZ, BlockIds.Bed, ctx.world.getBlockMetadata(partnerX, y, partnerZ));
       ctx.world.setBlock(partnerX, y, partnerZ, BlockIds.Air, { notifyNeighbours: true, updateLighting: true });
     }
   }

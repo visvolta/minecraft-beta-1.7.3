@@ -1,5 +1,6 @@
 import type { SerializedFurnace } from '../furnace/FurnaceManager';
 import type { SerializedChest } from '../chest/ChestContainer';
+import type { SerializedSign } from '../sign/SignManager';
 import { Difficulty, isDifficulty } from './Difficulty';
 import { GameMode, parseGameMode } from '../player/GameMode';
 
@@ -49,6 +50,7 @@ export interface WorldMetadata {
   readonly selectedHotbarSlot?: number;
   readonly furnaces?: SerializedFurnace[];
   readonly chests?: SerializedChest[];
+  readonly signs?: SerializedSign[];
 }
 export function validateWorldMetadata(value: unknown): WorldMetadata {
   if (typeof value !== 'object' || value === null) throw new Error('World metadata must be an object');

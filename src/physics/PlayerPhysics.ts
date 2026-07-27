@@ -38,6 +38,8 @@ export const SPLASH_ENTRY_MIN_DOWNWARD_SPEED = 3;
  * the order is a one-line change if ever revisited.
  */
 const COLLISION_AXIS_ORDER: readonly ('x' | 'y' | 'z')[] = ['y', 'x', 'z'];
+/** Beta-style maximum height the player can step up without jumping. */
+const PLAYER_STEP_HEIGHT = 0.6;
 
 /**
  * Gravity integration, horizontal acceleration toward wish velocity, and
@@ -105,7 +107,7 @@ export class PlayerPhysics {
                 isClimbing = true;
               }
               if (behaviour.onEntityCollidedWithBlock) {
-                behaviour.onEntityCollidedWithBlock({ world: this.blockUpdateWorld, gameTick: 0 } as any, bx, by, bz, playerBox);
+                behaviour.onEntityCollidedWithBlock({ world: this.blockUpdateWorld, gameTick: 0 } as any, bx, by, bz, playerBox, player);
               }
             }
           }
@@ -200,6 +202,10 @@ export class PlayerPhysics {
       y: displacementVelocityY * deltaSeconds,
       z: player.velocity.z * deltaSeconds,
     };
+    const startX = player.position.x;
+    const startY = player.position.y;
+    const startZ = player.position.z;
+    const wasGrounded = player.grounded;
 
     let grounded=false,collidedHorizontally=false,collidedVertically=false;
 
@@ -232,9 +238,98 @@ export class PlayerPhysics {
       }
     }
 
+    if (collidedHorizontally && wasGrounded) {
+      const stepped = this.tryStepUp(player, startX, startY, startZ, delta.x, delta.z);
+      if (stepped) {
+        grounded = true;
+        collidedHorizontally = false;
+        collidedVertically = false;
+      }
+    }
+
     player.grounded=grounded;player.onGround=grounded;player.collidedHorizontally=collidedHorizontally;player.isCollidedHorizontally=collidedHorizontally;player.isCollidedVertically=collidedVertically;
 
     this.applyWalkedBlockDrag(player);
+  }
+
+  private tryStepUp(player: Player, startX: number, startY: number, startZ: number, requestedX: number, requestedZ: number): boolean {
+    const nonStepX = player.position.x;
+    const nonStepY = player.position.y;
+    const nonStepZ = player.position.z;
+    const nonStepDistanceSq = (nonStepX - startX) ** 2 + (nonStepZ - startZ) ** 2;
+    const savedVelocityX = player.velocity.x;
+    const savedVelocityZ = player.velocity.z;
+
+    player.position.x = startX;
+    player.position.y = startY;
+    player.position.z = startZ;
+
+    const raised = this.resolveAxis(player.getAABB(), 'y', PLAYER_STEP_HEIGHT);
+    if (raised <= 0 || raised > PLAYER_STEP_HEIGHT) {
+      player.position.x = nonStepX;
+      player.position.y = nonStepY;
+      player.position.z = nonStepZ;
+      return false;
+    }
+    player.position.y += raised;
+    if (this.intersectsAnySolid(player.getAABB())) {
+      player.position.x = nonStepX;
+      player.position.y = nonStepY;
+      player.position.z = nonStepZ;
+      return false;
+    }
+
+    const movedX = this.resolveAxis(player.getAABB(), 'x', requestedX);
+    player.position.x += movedX;
+    const movedZ = this.resolveAxis(player.getAABB(), 'z', requestedZ);
+    player.position.z += movedZ;
+
+    const settled = this.resolveAxis(player.getAABB(), 'y', -raised);
+    player.position.y += settled;
+    const stepHeight = player.position.y - startY;
+    const stepDistanceSq = (player.position.x - startX) ** 2 + (player.position.z - startZ) ** 2;
+    const accepted = stepHeight > COLLISION_EPSILON
+      && stepHeight <= PLAYER_STEP_HEIGHT + COLLISION_EPSILON
+      && stepDistanceSq > nonStepDistanceSq + COLLISION_EPSILON * COLLISION_EPSILON;
+
+    if (!accepted) {
+      player.position.x = nonStepX;
+      player.position.y = nonStepY;
+      player.position.z = nonStepZ;
+      return false;
+    }
+
+    if (Math.abs(movedX - requestedX) > COLLISION_EPSILON) player.velocity.x = 0;
+    else player.velocity.x = savedVelocityX;
+    if (Math.abs(movedZ - requestedZ) > COLLISION_EPSILON) player.velocity.z = 0;
+    else player.velocity.z = savedVelocityZ;
+    player.velocity.y = 0;
+    return true;
+  }
+
+  private intersectsAnySolid(box: AABB): boolean {
+    const range = this.blockRangeCoveringBox(box);
+    for (let bx = range.minX; bx <= range.maxX; bx++) {
+      for (let by = range.minY; by <= range.maxY; by++) {
+        for (let bz = range.minZ; bz <= range.maxZ; bz++) {
+          if (by < 0 || by >= CHUNK_SIZE_Y) continue;
+          let hit = false;
+          forEachBlockBounds(
+            this.blockRegistry,
+            this.behaviourRegistry,
+            this.blockUpdateWorld,
+            bx,
+            by,
+            bz,
+            'collision',
+            this.fullCubeCollisionScratch,
+            (blockBox) => { if (box.intersects(blockBox)) hit = true; },
+          );
+          if (hit) return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**

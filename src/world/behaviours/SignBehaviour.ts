@@ -3,44 +3,25 @@ import type { BlockBehaviour, BlockBehaviourContext } from '../BlockBehaviour';
 import type { BlockBehaviourRegistry } from '../BlockBehaviour';
 import { AABB } from '../../physics/AABB';
 import type { SignManager } from '../../sign/SignManager';
+import { supportDirectionFromAttachedMetadata, supportOffset } from '../../blocks/BlockOrientation';
 
 export class SignBehaviour implements BlockBehaviour {
   public constructor(private readonly signManager: SignManager) {}
 
-  public canPlaceBlockAt(_ctx: BlockBehaviourContext, _x: number, _y: number, _z: number): boolean {
-    return true; // Simple check for now, can refine if needed based on attached face
+  public canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+    return ctx.world.isNormalCube(x, y - 1, z)
+      || ctx.world.isNormalCube(x - 1, y, z)
+      || ctx.world.isNormalCube(x + 1, y, z)
+      || ctx.world.isNormalCube(x, y, z - 1)
+      || ctx.world.isNormalCube(x, y, z + 1);
   }
 
-  public onPlaced(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void {
-    const player = (ctx as any).player;
-    if (!player) return;
-
-    let meta = 0;
-    if (blockId === BlockIds.SignPost) {
-      let yaw = Math.atan2(-player.lookDirection.x, -player.lookDirection.z);
-      while (yaw < 0) yaw += Math.PI * 2;
-      while (yaw >= Math.PI * 2) yaw -= Math.PI * 2;
-      meta = Math.floor((yaw / (Math.PI * 2)) * 16 + 0.5) & 15;
-    } else {
-      let yaw = Math.atan2(-player.lookDirection.x, -player.lookDirection.z);
-      while (yaw < 0) yaw += Math.PI * 2;
-      while (yaw >= Math.PI * 2) yaw -= Math.PI * 2;
-      if (yaw >= Math.PI * 0.25 && yaw < Math.PI * 0.75) meta = 5; // +X (East)
-      else if (yaw >= Math.PI * 0.75 && yaw < Math.PI * 1.25) meta = 2; // -Z (North)
-      else if (yaw >= Math.PI * 1.25 && yaw < Math.PI * 1.75) meta = 4; // -X (West)
-      else meta = 3; // +Z (South)
-
-      // Beta Wall Sign Metadata
-      // 2: Attached to South (+Z), faces North (-Z)
-      // 3: Attached to North (-Z), faces South (+Z)
-      // 4: Attached to East (+X), faces West (-X)
-      // 5: Attached to West (-X), faces East (+X)
-    }
-
-    ctx.world.setBlockMetadata(x, y, z, meta, { affectsMesh: true, affectsLight: false });
+  public onPlaced(_ctx: BlockBehaviourContext, x: number, y: number, z: number, _blockId: BlockId): void {
+    // Placement metadata is authored by InteractionController from the clicked
+    // face/player yaw using the shared orientation convention. Do not recompute
+    // from Player here: the behaviour is also used by chunk load/tests and the
+    // Player object does not own a lookDirection.
     this.signManager.getOrCreate(x, y, z);
-    
-    // UI trigger happens handled by InteractionController opening the GUI
   }
 
   public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number, _sourceX: number, _sourceY: number, _sourceZ: number): void {
@@ -49,16 +30,14 @@ export class SignBehaviour implements BlockBehaviour {
 
     let drop = false;
     if (blockId === BlockIds.SignPost) {
-      const def = ctx.world['blockRegistry']?.getById(ctx.world.getBlock(x, y - 1, z));
-      if (!def || !def.solid) drop = true;
+      if (!ctx.world.isNormalCube(x, y - 1, z)) drop = true;
     } else {
-      let dx = 0, dz = 0;
-      if (meta === 2) dz = 1;
-      if (meta === 3) dz = -1;
-      if (meta === 4) dx = 1;
-      if (meta === 5) dx = -1;
-      const def = ctx.world['blockRegistry']?.getById(ctx.world.getBlock(x + dx, y, z + dz));
-      if (!def || !def.solid) drop = true;
+      const support = supportDirectionFromAttachedMetadata(meta);
+      if (support === undefined) drop = true;
+      else {
+        const offset = supportOffset(support);
+        if (!ctx.world.isNormalCube(x + offset.x, y, z + offset.z)) drop = true;
+      }
     }
 
     if (drop) {

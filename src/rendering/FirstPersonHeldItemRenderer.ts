@@ -20,6 +20,7 @@ export class FirstPersonHeldItemRenderer {
   private blockMat: THREE.MeshBasicMaterial;
   private spriteMat: THREE.MeshBasicMaterial;
   private icons = new ItemIconResolver();
+  private fishingRodCast = false;
 
   constructor(
     arm: FirstPersonArmRenderer,
@@ -72,7 +73,8 @@ export class FirstPersonHeldItemRenderer {
     const frameTag = this.animatedIcons?.isAnimated(animatedName) === true
       ? `:${this.animatedIcons.getFrame(animatedName)}`
       : '';
-    const key = s ? `${s.identity.type}:${s.identity.id}:${s.metadata}${frameTag}` : '';
+    const castTag = definition?.id === 'fishing_rod' && this.fishingRodCast ? ':cast' : '';
+    const key = s ? `${s.identity.type}:${s.identity.id}:${s.metadata}${frameTag}${castTag}` : '';
     if (key === this.key) return Boolean(s);
     this.key = key;
 
@@ -95,7 +97,7 @@ export class FirstPersonHeldItemRenderer {
     } else {
       // Animated icons must use the shared current frame, never the strip.
       const iconUrl = this.animatedFrameUrl(s.identity.id)
-        ?? this.icons.resolve(String(s.identity.id));
+        ?? (definition?.id === 'fishing_rod' && this.fishingRodCast ? this.icons.resolve('fishing_rod_cast') : this.icons.resolve(String(s.identity.id)));
       const texture = new THREE.TextureLoader().load(iconUrl);
       texture.magFilter = THREE.NearestFilter;
       texture.minFilter = THREE.NearestFilter;
@@ -114,6 +116,12 @@ export class FirstPersonHeldItemRenderer {
     this.mesh.scale.setScalar(d.firstPerson.scale);
     this.root.add(this.mesh);
     return true;
+  }
+
+  public setFishingRodCast(cast: boolean): void {
+    if (this.fishingRodCast === cast) return;
+    this.fishingRodCast = cast;
+    this.key = '';
   }
 
   public updateLighting(skyLight: number, blockLight: number, skylightSubtracted: number, sunBrightnessFactor: number): void {

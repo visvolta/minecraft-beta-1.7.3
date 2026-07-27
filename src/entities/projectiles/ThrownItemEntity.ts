@@ -7,6 +7,7 @@ import type { LivingEntity } from '../living/LivingEntity';
 import { ProjectileEntity, type ProjectileBlockHit } from './ProjectileEntity';
 import { ItemIconResolver } from '../../inventory/ItemIconResolver';
 import { DamageSource } from '../damage/DamageSource';
+import { useOpaqueEntityQueue } from '../../rendering/RenderOrder';
 import { ChickenEntity } from '../living/ChickenEntity';
 
 /**
@@ -79,7 +80,8 @@ export abstract class ThrownItemEntity extends ProjectileEntity {
   }
 
   private buildModel(): void {
-    const material = new THREE.SpriteMaterial({ transparent: true, alphaTest: 0.1 });
+    const material = new THREE.SpriteMaterial({ transparent: false, alphaTest: 0.1, depthWrite: true, depthTest: true });
+    useOpaqueEntityQueue(material);
     const iconUrl = new ItemIconResolver().resolve(this.iconName);
     const texture = new THREE.TextureLoader().load(iconUrl);
     texture.magFilter = THREE.NearestFilter;

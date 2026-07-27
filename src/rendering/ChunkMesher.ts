@@ -34,6 +34,7 @@ import {
   bedHiddenFace,
   bedOutwardFace,
   doorShape,
+  trapdoorShape,
   fenceSelectionShapes,
   stairShapes,
 } from '../blocks/shapes/BlockShapes';
@@ -1893,31 +1894,31 @@ export class ChunkMesher {
     // Side faces (1.0 height quads, tilted)
     // -X face
     buffers.pushQuad([
-        [px - w, y + 1 + oy, pz + 0.5],
-        [px - w + dx, y + oy, pz + 0.5 + dz],
-        [px - w + dx, y + oy, pz - 0.5 + dz],
-        [px - w, y + 1 + oy, pz - 0.5]
+        [px - w, y + 1 + oy, pz + w],
+        [px - w + dx, y + oy, pz + w + dz],
+        [px - w + dx, y + oy, pz - w + dz],
+        [px - w, y + 1 + oy, pz - w]
     ], [-1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
     // +X face
     buffers.pushQuad([
-        [px + w, y + 1 + oy, pz - 0.5],
-        [px + w + dx, y + oy, pz - 0.5 + dz],
-        [px + w + dx, y + oy, pz + 0.5 + dz],
-        [px + w, y + 1 + oy, pz + 0.5]
+        [px + w, y + 1 + oy, pz - w],
+        [px + w + dx, y + oy, pz - w + dz],
+        [px + w + dx, y + oy, pz + w + dz],
+        [px + w, y + 1 + oy, pz + w]
     ], [1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
     // -Z face
     buffers.pushQuad([
-        [px - 0.5, y + 1 + oy, pz - w],
-        [px + 0.5, y + 1 + oy, pz - w],
-        [px + 0.5 + dx, y + oy, pz - w + dz],
-        [px - 0.5 + dx, y + oy, pz - w + dz]
+        [px - w, y + 1 + oy, pz - w],
+        [px + w, y + 1 + oy, pz - w],
+        [px + w + dx, y + oy, pz - w + dz],
+        [px - w + dx, y + oy, pz - w + dz]
     ], [0, 0, -1], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
     // +Z face
     buffers.pushQuad([
-        [px - 0.5, y + 1 + oy, pz + w],
-        [px - 0.5 + dx, y + oy, pz + w + dz],
-        [px + 0.5 + dx, y + oy, pz + w + dz],
-        [px + 0.5, y + 1 + oy, pz + w]
+        [px - w, y + 1 + oy, pz + w],
+        [px - w + dx, y + oy, pz + w + dz],
+        [px + w + dx, y + oy, pz + w + dz],
+        [px + w, y + 1 + oy, pz + w]
     ], [0, 0, 1], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
   }
 
@@ -2121,18 +2122,13 @@ export class ChunkMesher {
 
   private buildTrapdoor(buffers: MeshBuffers, chunk: Chunk, x: number, y: number, z: number, blockId: BlockId, definition: BlockDefinition): void {
     const meta = chunk.getBlockMetadata(x, y, z);
-    const isOpened = (meta & 4) !== 0;
-    const attachMeta = meta & 3;
-    const thickness = 3 / 16;
-    
-    let minX = 0, minZ = 0, maxX = 1, maxZ = 1, minY = 0, maxY = thickness;
-
-    if (isOpened) {
-      if (attachMeta === 0) { minX = 0; maxX = thickness; minY = 0; maxY = 1; }
-      else if (attachMeta === 1) { minX = 1 - thickness; maxX = 1; minY = 0; maxY = 1; }
-      else if (attachMeta === 2) { minZ = 0; maxZ = thickness; minY = 0; maxY = 1; }
-      else if (attachMeta === 3) { minZ = 1 - thickness; maxZ = 1; minY = 0; maxY = 1; }
-    }
+    const shape = trapdoorShape(meta);
+    const minX = shape.minX;
+    const minY = shape.minY;
+    const minZ = shape.minZ;
+    const maxX = shape.maxX;
+    const maxY = shape.maxY;
+    const maxZ = shape.maxZ;
 
     const textureName = resolveBlockTexture(definition, 'side') || 'trapdoor';
     const uvRect = this.getSafeUvRect(textureName);

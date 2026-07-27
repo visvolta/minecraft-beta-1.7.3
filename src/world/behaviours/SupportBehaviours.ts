@@ -12,6 +12,9 @@ abstract class SupportedBehaviour implements BlockBehaviour {
   public abstract canSurvive(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean;
   public neighborChanged(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
     if (!this.canSurvive(ctx, x, y, z)) {
+      const blockId = ctx.world.getBlock(x, y, z);
+      const metadata = ctx.world.getBlockMetadata(x, y, z);
+      ctx.world.dropBlockAsItem(x, y, z, blockId, metadata);
       ctx.world.setBlock(x, y, z, BlockIds.Air, { reason: 'neighbour', notifyNeighbours: true, updateLighting: true });
     }
   }

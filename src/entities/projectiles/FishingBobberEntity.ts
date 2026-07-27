@@ -5,6 +5,7 @@ import { EntityTypeIds } from '../core/EntityType';
 import type { EntityTickContext, EntityWorldContext } from '../core/EntityContext';
 import { BlockIds } from '../../blocks/BlockId';
 import type { NbtCompound, NbtTag } from '../../nbt/Nbt';
+import { useOpaqueEntityQueue } from '../../rendering/RenderOrder';
 
 /**
  * Beta 1.7.3 `EntityFish` — the fishing bobber.
@@ -330,13 +331,14 @@ export class FishingBobberEntity extends Entity {
     // it can never present edge-on as an invisible sliver.
     const material = new THREE.SpriteMaterial({
       color: 0xffffff,
-      transparent: true,
+      transparent: false,
       alphaTest: 0.1,
       // Beta draws the bobber unfogged at full brightness.
       fog: false,
       depthTest: true,
-      depthWrite: false,
+      depthWrite: true,
     });
+    useOpaqueEntityQueue(material);
     const texture = this.ctx.entityTextures?.get('fishingBobber');
     if (texture !== undefined) material.map = texture;
     this.ownMaterial = material;

@@ -27,12 +27,12 @@ export class SignTextRenderer {
 
     for (const c of containers) {
       const key = c.getPosKey();
-      activeKeys.add(key);
 
       const blockId = this.blockUpdateWorld.getBlock(c.x, c.y, c.z);
       if (blockId !== BlockIds.SignPost && blockId !== BlockIds.WallSign) {
         continue; // Unloaded chunk or mismatched state.
       }
+      activeKeys.add(key);
 
       if (c.needsTextureUpdate || !this.meshes.has(key)) {
         c.needsTextureUpdate = false;

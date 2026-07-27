@@ -27,6 +27,13 @@ import { BED_FOOT_TO_HEAD } from '../blocks/shapes/BlockShapes';
 import { doorFacingFromYaw, resolveDoorPlacementMetadata } from '../world/behaviours/DoorBehaviour';
 import { stairFacingFromYaw } from '../blocks/shapes/BlockShapes';
 import { railShapeFromPlayerYaw } from '../world/rails/RailConnectivity';
+import {
+  attachedMetadataFromSupport,
+  bedDirectionFromYaw,
+  supportDirectionFromHitFace,
+  trapdoorMetadataFromSupport,
+  wallControlMetadataFromSupport,
+} from '../blocks/BlockOrientation';
 
 /** Maps a hit wall normal onto Beta's painting direction index. */
 function paintingDirectionFromFace(faceX: number, faceZ: number): number {
@@ -478,7 +485,7 @@ export class InteractionController {
   private usePlacementBucket(fluidBlockId: number): boolean {
     // Beta passes `this.isFull == 0` as the fluid flag, so a filled bucket
     // traces past fluids and lands on the first solid surface.
-    const hit = this.currentHit ?? this.currentPlacementHit;
+    const hit = this.currentHit;
     if (hit === undefined) return false;
 
     const targetX = hit.blockPos.x + hit.face.x;
@@ -828,7 +835,7 @@ export class InteractionController {
     // Beta orients the bed by the player's facing quadrant.
     // Beta `ItemBed.onItemUse`: floor(yaw * 4 / 360 + 0.5) & 3, in Beta's own
     // yaw convention.
-    const direction = Math.floor((this.betaYawDegrees() * 4 / 360) + 0.5) & 3;
+    const direction = bedDirectionFromYaw(this.betaYawDegrees());
     const offset = BED_FOOT_TO_HEAD[direction] ?? [0, 1];
     const headX = footX + offset[0];
     const headZ = footZ + offset[1];
@@ -1028,22 +1035,11 @@ export class InteractionController {
       return false;
     }
 
-    const targetBoxAABB = new AABB(targetX, targetY, targetZ, targetX + 1, targetY + 1, targetZ + 1);
-
-    if (targetBoxAABB.intersects(this.player.getAABB())) {
-      return false;
-    }
-
     if (isDoorBlockId(selectedId)) {
       if (targetY + 1 >= CHUNK_SIZE_Y) return false;
       const upperId = this.blockUpdateWorld.getBlock(targetX, targetY + 1, targetZ);
       const upperDef = this.blockRegistry.getById(upperId);
       if (upperDef === undefined || !upperDef.replaceable) return false;
-
-      const upperBoxAABB = new AABB(targetX, targetY + 1, targetZ, targetX + 1, targetY + 2, targetZ + 1);
-      if (upperBoxAABB.intersects(this.player.getAABB())) {
-        return false;
-      }
 
       // Beta `BlockDoor.canPlaceBlockAt` requires solid ground under the door.
       if (!this.blockUpdateWorld.isNormalCube(targetX, targetY - 1, targetZ)) return false;
@@ -1059,6 +1055,11 @@ export class InteractionController {
         this.blockUpdateWorld.getBlock(targetX + dx, targetY + dy, targetZ + dz) === selectedId;
 
       const lowerMeta = resolveDoorPlacementMetadata(facing, isSolidAt, isDoorAt);
+
+      if (this.placedBlocksIntersectPlayer([
+        { x: targetX, y: targetY, z: targetZ, blockId: selectedId, metadata: lowerMeta },
+        { x: targetX, y: targetY + 1, z: targetZ, blockId: selectedId, metadata: (lowerMeta & 7) | 8 },
+      ])) return false;
 
       this.blockUpdateWorld.setBlock(targetX, targetY, targetZ, selectedId, {
         metadata: lowerMeta, reason: 'player', notifyNeighbours: true, updateLighting: true, player: this.player,
@@ -1082,9 +1083,42 @@ export class InteractionController {
 
     const stack = this.inventory.getStack(this.selectedSlotIndex);
     const heldMeta = stack ? stack.metadata : 0;
+    const metadata = this.getPlacementMetadata(selectedId, targetX, targetY, targetZ, hit, heldMeta);
+    if (this.placedBlocksIntersectPlayer([{ x: targetX, y: targetY, z: targetZ, blockId: selectedId, metadata }])) return false;
     this.setBlock(targetX, targetY, targetZ, selectedId, hit, heldMeta);
     this.blockPlacedHandler?.(selectedId, targetX, targetY, targetZ);
     return true;
+  }
+
+  private placedBlocksIntersectPlayer(placements: readonly { readonly x: number; readonly y: number; readonly z: number; readonly blockId: BlockId; readonly metadata: number }[]): boolean {
+    const playerBox = this.player.getAABB();
+    const virtualWorld = {
+      getBlock: (x: number, y: number, z: number): number => placements.find((p) => p.x === x && p.y === y && p.z === z)?.blockId ?? this.blockUpdateWorld.getBlock(x, y, z),
+      getBlockMetadata: (x: number, y: number, z: number): number => placements.find((p) => p.x === x && p.y === y && p.z === z)?.metadata ?? this.blockUpdateWorld.getBlockMetadata(x, y, z),
+      isNormalCube: (x: number, y: number, z: number): boolean => {
+        const placed = placements.find((p) => p.x === x && p.y === y && p.z === z);
+        if (placed !== undefined) {
+          const def = this.blockRegistry.getById(placed.blockId);
+          return def !== undefined && def.solid && !def.transparent && def.renderType === 'opaque';
+        }
+        return this.blockUpdateWorld.isNormalCube(x, y, z);
+      },
+      isLoaded: (x: number, z: number): boolean => this.blockUpdateWorld.isLoaded(x, z),
+      getBlocklight: (x: number, y: number, z: number): number => this.blockUpdateWorld.getBlocklight(x, y, z),
+      getSkylight: (x: number, y: number, z: number): number => this.blockUpdateWorld.getSkylight(x, y, z),
+    };
+
+    for (const placement of placements) {
+      const definition = this.blockRegistry.getById(placement.blockId);
+      if (definition === undefined) return true;
+      const behaviour = this.behaviourRegistry.get(placement.blockId);
+      let bounds = behaviour.getBoundingBoxes?.({ world: virtualWorld as any, gameTick: 0 } as any, placement.x, placement.y, placement.z, 'collision');
+      if (bounds === undefined) {
+        bounds = definition.solid ? [new AABB(placement.x, placement.y, placement.z, placement.x + 1, placement.y + 1, placement.z + 1)] : [];
+      }
+      for (const bound of bounds) if (playerBox.intersects(bound)) return true;
+    }
+    return false;
   }
 
   /**
@@ -1102,11 +1136,8 @@ export class InteractionController {
     // the board sits flat on the exact face the player targeted. Without this
     // every wall sign defaulted to one orientation.
     if (blockId === BlockIds.WallSign) {
-      if (hit.face.z === -1) return 2;
-      if (hit.face.z === 1) return 3;
-      if (hit.face.x === -1) return 4;
-      if (hit.face.x === 1) return 5;
-      return 2;
+      const support = supportDirectionFromHitFace(hit.face);
+      return support === undefined ? 2 : attachedMetadataFromSupport(support);
     }
 
     // Beta `BlockSign` standing variant: 16 rotation steps from the yaw.
@@ -1126,40 +1157,30 @@ export class InteractionController {
     }
 
     if (blockId === BlockIds.Ladder) {
-      if (hit.face.z === -1) return 2;
-      if (hit.face.z === 1) return 3;
-      if (hit.face.x === -1) return 4;
-      if (hit.face.x === 1) return 5;
+      const support = supportDirectionFromHitFace(hit.face);
+      if (support !== undefined) return attachedMetadataFromSupport(support);
     }
 
     if (blockId === BlockIds.RedstoneTorchOn || blockId === BlockIds.Torch) {
         if (hit.face.y === 1) return 5;
-        if (hit.face.z === 1) return 3;
-        if (hit.face.z === -1) return 4;
-        if (hit.face.x === 1) return 1;
-        if (hit.face.x === -1) return 2;
+        const support = supportDirectionFromHitFace(hit.face);
+        if (support !== undefined) return wallControlMetadataFromSupport(support);
     }
 
     if (blockId === BlockIds.StoneButton) {
-      if (hit.face.x === -1) return 2;
-      if (hit.face.x === 1) return 1;
-      if (hit.face.z === -1) return 4;
-      if (hit.face.z === 1) return 3;
+      const support = supportDirectionFromHitFace(hit.face);
+      if (support !== undefined) return wallControlMetadataFromSupport(support);
     }
 
     if (blockId === BlockIds.Lever) {
       if (hit.face.y === 1) return 5;
-      if (hit.face.x === -1) return 2;
-      if (hit.face.x === 1) return 1;
-      if (hit.face.z === -1) return 4;
-      if (hit.face.z === 1) return 3;
+      const support = supportDirectionFromHitFace(hit.face);
+      if (support !== undefined) return wallControlMetadataFromSupport(support);
     }
 
     if (blockId === BlockIds.Trapdoor) {
-      if (hit.face.z === 1) return 0;
-      if (hit.face.z === -1) return 1;
-      if (hit.face.x === 1) return 2;
-      if (hit.face.x === -1) return 3;
+      const support = supportDirectionFromHitFace(hit.face);
+      if (support !== undefined) return trapdoorMetadataFromSupport(support);
     }
 
     if (blockId === BlockIds.Chest) {

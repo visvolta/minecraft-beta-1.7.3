@@ -2,6 +2,7 @@ import type { CraftingGrid } from './CraftingGrid';
 import type { CraftingRecipe, RecipeIngredient, RecipeMatchResult, RecipeConsumption } from './CraftingRecipe';
 import { getContainerReturn } from './CraftingRecipe';
 import type { ItemStack } from '../inventory/ItemStack';
+import { idsMatch } from '../items/ItemIdentityResolver';
 
 export class ShapelessRecipe implements CraftingRecipe {
   public constructor(
@@ -54,7 +55,7 @@ export class ShapelessRecipe implements CraftingRecipe {
       if (usedIndices.has(i)) continue;
 
       const stack = slots[i]!.stack;
-      if (String(stack.identity.id) !== String(ing.id)) continue;
+      if (!idsMatch(stack.identity, ing.id)) continue;
       if (ing.metadata !== undefined && ing.metadata !== -1 && stack.metadata !== ing.metadata) continue;
 
       usedIndices.add(i);

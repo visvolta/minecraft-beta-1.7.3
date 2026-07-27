@@ -6,6 +6,14 @@ import { FaceDirection } from '../../blocks/BlockFace';
 export class LeverBehaviour implements BlockBehaviour {
     public readonly canProvidePower = true;
 
+    public canPlaceBlockAt(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+        return ctx.world.isNormalCube(x - 1, y, z)
+            || ctx.world.isNormalCube(x + 1, y, z)
+            || ctx.world.isNormalCube(x, y, z - 1)
+            || ctx.world.isNormalCube(x, y, z + 1)
+            || ctx.world.isNormalCube(x, y - 1, z);
+    }
+
     public onInteract(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
         const meta = ctx.world.getBlockMetadata(x, y, z);
         const orientation = meta & 7;
@@ -13,7 +21,7 @@ export class LeverBehaviour implements BlockBehaviour {
         const newMeta = orientation | (active ? 8 : 0);
         
         ctx.world.setBlockMetadataWithNotify(x, y, z, newMeta);
-        // Play click sound if possible? For now just notify.
+        ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5);
         this.notifyNeighbors(ctx, x, y, z, orientation);
         return true;
     }

@@ -41,9 +41,9 @@ export interface BlockBehaviour {
   stateChanged?(ctx: BlockBehaviourContext, event: BlockMutationEvent): void;
   canPlaceBlockAt?(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean;
   onPlaced?(ctx: BlockBehaviourContext, x: number, y: number, z: number, blockId: BlockId): void;
-  onRemoved?(ctx: BlockBehaviourContext, x: number, y: number, z: number, oldBlockId: BlockId): void;
+  onRemoved?(ctx: BlockBehaviourContext, x: number, y: number, z: number, oldBlockId: BlockId, oldMetadata?: number): void;
   onInteract?(ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean;
-  onEntityCollidedWithBlock?(ctx: BlockBehaviourContext, x: number, y: number, z: number, entityAABB: AABB): void;
+  onEntityCollidedWithBlock?(ctx: BlockBehaviourContext, x: number, y: number, z: number, entityAABB: AABB, entity?: unknown): void;
   getBoundingBoxes?(ctx: BlockBehaviourContext, x: number, y: number, z: number, type: BoundingBoxType): AABB[] | undefined;
 }
 

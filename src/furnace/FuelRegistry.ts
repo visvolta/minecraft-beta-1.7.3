@@ -1,5 +1,6 @@
 import type { ItemStack } from '../inventory/ItemStack';
 import { getContainerReturn } from '../crafting/CraftingRecipe';
+import { idsMatch } from '../items/ItemIdentityResolver';
 
 export interface FuelDefinition {
   readonly id: string | number;
@@ -20,7 +21,7 @@ export class FuelRegistry {
   public getBurnTime(stack: ItemStack | null): number {
     if (stack === null || stack.count <= 0) return 0;
     for (const fuel of this.fuels) {
-      if (String(stack.identity.id) === String(fuel.id)) {
+      if (idsMatch(stack.identity, fuel.id)) {
         if (fuel.metadata === undefined || fuel.metadata === -1 || stack.metadata === fuel.metadata) {
           return fuel.burnTime;
         }

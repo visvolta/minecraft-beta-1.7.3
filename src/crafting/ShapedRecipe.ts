@@ -2,6 +2,7 @@ import type { CraftingGrid } from './CraftingGrid';
 import type { CraftingRecipe, RecipeIngredient, RecipeMatchResult, RecipeConsumption } from './CraftingRecipe';
 import { getContainerReturn } from './CraftingRecipe';
 import type { ItemStack } from '../inventory/ItemStack';
+import { idsMatch } from '../items/ItemIdentityResolver';
 
 export class ShapedRecipe implements CraftingRecipe {
   public constructor(
@@ -69,9 +70,7 @@ export class ShapedRecipe implements CraftingRecipe {
         }
 
         // Check ID match (`match primarily by id with wildcard/optional metadata -1 support as approved`)
-        const stackIdStr = String(stack.identity.id);
-        const ingIdStr = String(ingredient.id);
-        if (stackIdStr !== ingIdStr) {
+        if (!idsMatch(stack.identity, ingredient.id)) {
           return null;
         }
 

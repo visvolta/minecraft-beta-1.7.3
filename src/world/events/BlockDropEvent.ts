@@ -9,5 +9,5 @@ export interface BlockDropEvent {
   readonly x: number;
   readonly y: number;
   readonly z: number;
-  readonly reason: 'placement_failed' | 'lifetime_expired';
+  readonly reason: 'placement_failed' | 'lifetime_expired' | 'support-loss' | 'block-removal';
 }

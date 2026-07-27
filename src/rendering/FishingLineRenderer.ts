@@ -24,9 +24,10 @@ export class FishingLineRenderer {
     this.material = new THREE.LineBasicMaterial({
       // Beta's line is a plain dark strand, unaffected by fog or lighting.
       color: 0x000000,
-      transparent: true,
-      opacity: 0.85,
+      transparent: false,
+      opacity: 1,
       depthTest: true,
+      depthWrite: true,
       fog: false,
     });
     this.line = new THREE.Line(this.geometry, this.material);
