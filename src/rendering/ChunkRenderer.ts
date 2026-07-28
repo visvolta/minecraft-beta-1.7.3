@@ -109,7 +109,7 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
   material.needsUpdate = true;
 }
 
-/** Leaf foliage surface opacity (~65%). */
+/** Leaf foliage surface opacity (100%)(DO NOT CHNAGE). */
 export const LEAF_SURFACE_OPACITY = 1;
 
 /** Multiply cutout/leaf atlas alpha after sampling (keeps alphaTest holes). */
