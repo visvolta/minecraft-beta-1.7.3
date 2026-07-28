@@ -202,6 +202,21 @@ function getLinearTint(tint: readonly [number, number, number]): readonly [numbe
 }
 
 class MeshBuffers {
+  /**
+   * Whether this buffer emits the fluid-only attributes.
+   *
+   * The layout is a property of the RENDER PASS, never of the data that
+   * happens to be in it. A fluid pass that emits zero vertices must still
+   * declare fluidTextureKind/fluidFrameUv, and a fluid pass that mixes
+   * pushFace and pushQuad must write them for every vertex, or the geometry
+   * ends up with attribute counts that disagree with `position`.
+   */
+  public readonly fluidLayout: boolean;
+
+  public constructor(fluidLayout = false) {
+    this.fluidLayout = fluidLayout;
+  }
+
   public readonly positions = new FloatBuilder(4096);
   public readonly uvs = new FloatBuilder(4096);
   public readonly tintColors = new FloatBuilder(4096);
@@ -265,6 +280,7 @@ class MeshBuffers {
 
       this.tintColors.push3(tintR, tintG, tintB);
       this.packedLight.push4(packLightByte(sky), packLightByte(block), packUnitByte(ao), packUnitByte(1));
+      this.pushFluidPlaceholder();
     }
 
     if (flipDiagonal) {
@@ -296,6 +312,7 @@ class MeshBuffers {
     for (let i = 0; i < 4; i++) {
       this.tintColors.push3(tintR, tintG, tintB);
       this.packedLight.push4(packLightByte(light.sky), packLightByte(light.block), packUnitByte(1), packUnitByte(1));
+      this.pushFluidPlaceholder();
     }
     this.uvs.push2(u0, v1);
     this.uvs.push2(u1, v1);
@@ -311,6 +328,7 @@ class MeshBuffers {
     for (let i = 0; i < 4; i++) {
       this.tintColors.push3(tintR, tintG, tintB);
       this.packedLight.push4(packLightByte(light.sky), packLightByte(light.block), packUnitByte(1), packUnitByte(1));
+      this.pushFluidPlaceholder();
     }
     this.uvs.push2(u0, v1);
     this.uvs.push2(u1, v1);
@@ -429,6 +447,7 @@ class MeshBuffers {
       this.uvs.push2(faceUvs[i * 2]!, faceUvs[i * 2 + 1]!);
       this.tintColors.push3(tintR, tintG, tintB);
       this.packedLight.push4(packLightByte(sky), packLightByte(block), packUnitByte(ao), packUnitByte(1));
+      this.pushFluidPlaceholder();
     }
     if (flipDiagonal) {
       this.indices.push6(vertexOffset, vertexOffset + 1, vertexOffset + 3, vertexOffset + 1, vertexOffset + 2, vertexOffset + 3);
@@ -466,10 +485,23 @@ class MeshBuffers {
       this.uvs.push2(uvs[i * 2]!, uvs[i * 2 + 1]!);
       this.tintColors.push3(tintR, tintG, tintB);
       this.packedLight.push4(packLightByte(light.sky), packLightByte(light.block), packUnitByte(ao), packUnitByte(faceBrightness));
-      this.fluidTextureKinds.push(fluidTextureKind);
-      this.fluidFrameUvs.push2(frameUv[i * 2]!, frameUv[i * 2 + 1]!);
+      if (this.fluidLayout) {
+        this.fluidTextureKinds.push(fluidTextureKind);
+        this.fluidFrameUvs.push2(frameUv[i * 2]!, frameUv[i * 2 + 1]!);
+      }
     }
     this.indices.push6(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset, vertexOffset + 2, vertexOffset + 3);
+  }
+
+  /**
+   * Keeps the fluid attributes in lockstep with `position` on fluid passes
+   * that also emit plain faces (fire mixes pushFace and pushQuad). No-op on
+   * non-fluid passes, which never declare these attributes at all.
+   */
+  private pushFluidPlaceholder(): void {
+    if (!this.fluidLayout) return;
+    this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
+    this.fluidFrameUvs.push2(0, 0);
   }
 
   public toGeometry(): THREE.BufferGeometry {
@@ -483,7 +515,7 @@ class MeshBuffers {
     geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(tc, 3));
     // Normalized so the shader reads sky/block as 0..15 and ao/brightness as 0..1.
     geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(pl, 4, true));
-    if (this.fluidTextureKinds.count > 0) {
+    if (this.fluidLayout) {
       const fk = new Float32Array(this.fluidTextureKinds.view());
       const ff = new Float32Array(this.fluidFrameUvs.view());
       geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(fk, 1));
@@ -1123,10 +1155,10 @@ export class ChunkMesher {
     const terrain = new MeshBuffers();
     const cutout = new MeshBuffers();
     const leaves = new MeshBuffers();
-    const fire = new MeshBuffers();
+    const fire = new MeshBuffers(true);
     const translucent = new MeshBuffers();
-    const water = new MeshBuffers();
-    const lava = new MeshBuffers();
+    const water = new MeshBuffers(true);
+    const lava = new MeshBuffers(true);
 
     for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
       if (chunk.isSectionEmpty(sectionIndex)) continue;
@@ -1419,7 +1451,7 @@ export class ChunkMesher {
    */
 
   public buildFires(chunk: Chunk): THREE.BufferGeometry {
-    const buffers = new MeshBuffers();
+    const buffers = new MeshBuffers(true);
     this.vegetationColors?.beginMeshBuild();
 
     // All fire planes use the SAME texture row (row 0).
@@ -1813,7 +1845,7 @@ export class ChunkMesher {
   }
 
   public buildWater(chunk: Chunk): THREE.BufferGeometry {
-    const buffers = new MeshBuffers();
+    const buffers = new MeshBuffers(true);
     this.vegetationColors?.beginMeshBuild();
 
     const sectionPassMasks = this.getSectionPassMasks(chunk);
@@ -1838,7 +1870,7 @@ export class ChunkMesher {
   }
 
   public buildLava(chunk: Chunk): THREE.BufferGeometry {
-    const buffers = new MeshBuffers();
+    const buffers = new MeshBuffers(true);
     this.vegetationColors?.beginMeshBuild();
 
     const sectionPassMasks = this.getSectionPassMasks(chunk);

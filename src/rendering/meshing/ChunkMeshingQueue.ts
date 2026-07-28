@@ -74,12 +74,23 @@ export interface ChunkMeshGeometrySet {
 
 import { chunkKey } from '../../world/chunkKey';
 
-function emptyGeometryFromBuffers(): THREE.BufferGeometry {
+/**
+ * An empty geometry for a pass that produced no vertices.
+ *
+ * `fluidLayout` must match the pass, not the data: a fluid pass always
+ * declares fluidTextureKind/fluidFrameUv even when empty, so downstream
+ * geometry validation sees a consistent layout for that pass.
+ */
+function emptyGeometryFromBuffers(fluidLayout: boolean): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(), 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
   geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
   geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(new Uint8Array(), 4, true));
+  if (fluidLayout) {
+    geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+    geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
+  }
   geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(), 1));
   return geometry;
 }
@@ -89,14 +100,14 @@ function isPopulatedMeshAttributeBuffers(buffers: MeshAttributeBuffers): buffers
 }
 
 /** Adopt transferred ArrayBuffers without copying. Ownership moves to the geometry. */
-function geometryFromBuffers(buffers: MeshAttributeBuffers): THREE.BufferGeometry {
-  if (!isPopulatedMeshAttributeBuffers(buffers)) return emptyGeometryFromBuffers();
+function geometryFromBuffers(buffers: MeshAttributeBuffers, fluidLayout: boolean): THREE.BufferGeometry {
+  if (!isPopulatedMeshAttributeBuffers(buffers)) return emptyGeometryFromBuffers(fluidLayout);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buffers.positions), 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(buffers.uvs), 2));
   geometry.setAttribute('tintColor', new THREE.BufferAttribute(new Float32Array(buffers.tintColors), 3));
   geometry.setAttribute('packedLight', new THREE.BufferAttribute(new Uint8Array(buffers.packedLight), 4, true));
-  if (buffers.fluidTextureKinds.byteLength > 0) {
+  if (fluidLayout) {
     geometry.setAttribute('fluidTextureKind', new THREE.BufferAttribute(new Float32Array(buffers.fluidTextureKinds), 1));
     geometry.setAttribute('fluidFrameUv', new THREE.BufferAttribute(new Float32Array(buffers.fluidFrameUvs), 2));
   }
@@ -277,13 +288,13 @@ export class ChunkMeshingQueue {
         chunkX: result.chunkX,
         chunkZ: result.chunkZ,
         targetRevision: result.targetRevision,
-        terrain: geometryFromBuffers(result.terrain),
-        water: geometryFromBuffers(result.water),
-        lava: geometryFromBuffers(result.lava),
-        cutout: geometryFromBuffers(result.cutout),
-        leaves: geometryFromBuffers(result.leaves),
-        fire: geometryFromBuffers(result.fire),
-        translucent: geometryFromBuffers(result.translucent),
+        terrain: geometryFromBuffers(result.terrain, false),
+        water: geometryFromBuffers(result.water, true),
+        lava: geometryFromBuffers(result.lava, true),
+        cutout: geometryFromBuffers(result.cutout, false),
+        leaves: geometryFromBuffers(result.leaves, false),
+        fire: geometryFromBuffers(result.fire, true),
+        translucent: geometryFromBuffers(result.translucent, false),
       });
     }
     this.lastUploadTime = performance.now() - start;

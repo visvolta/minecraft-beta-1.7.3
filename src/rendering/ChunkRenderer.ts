@@ -45,12 +45,23 @@ export const CHUNK_BOUNDING_SPHERE_RADIUS = Math.sqrt(
 );
 const RUNTIME_GEOMETRY_VALIDATION_ENABLED = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
 
-function createEmptyGeometry(): THREE.BufferGeometry {
+/**
+ * Placeholder geometry for a pass this chunk does not use.
+ *
+ * `fluidLayout` mirrors the pass, not the (absent) data, so an unused fluid
+ * pass still declares the fluid attributes and geometry validation sees a
+ * layout consistent with every other chunk's version of that pass.
+ */
+function createEmptyGeometry(fluidLayout: boolean): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(), 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
   geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
   geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(new Uint8Array(), 4, true));
+  if (fluidLayout) {
+    geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(), 1));
+    geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
+  }
   geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(), 1));
   return geometry;
 }
@@ -932,13 +943,13 @@ export class ChunkRenderer {
     const key = chunkKey(chunk.chunkX, chunk.chunkZ);
     const mask = computeChunkPassMask(chunk.getBlockDataView(), this.blockRegistry);
 
-    const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? this.mesher.build(chunk) : createEmptyGeometry();
+    const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? this.mesher.build(chunk) : createEmptyGeometry(false);
     this.applyColorModeToGeometry(terrainGeometry);
     this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, terrainGeometry, 'terrain');
 
-    const waterGeometry = hasChunkPass(mask, ChunkPassMask.Water) ? this.mesher.buildWater(chunk) : createEmptyGeometry();
-    const lavaGeometry = hasChunkPass(mask, ChunkPassMask.Lava) ? this.mesher.buildLava(chunk) : createEmptyGeometry();
-    const translucentGeometry = hasChunkPass(mask, ChunkPassMask.Translucent) ? this.mesher.buildTranslucent(chunk) : createEmptyGeometry();
+    const waterGeometry = hasChunkPass(mask, ChunkPassMask.Water) ? this.mesher.buildWater(chunk) : createEmptyGeometry(true);
+    const lavaGeometry = hasChunkPass(mask, ChunkPassMask.Lava) ? this.mesher.buildLava(chunk) : createEmptyGeometry(true);
+    const translucentGeometry = hasChunkPass(mask, ChunkPassMask.Translucent) ? this.mesher.buildTranslucent(chunk) : createEmptyGeometry(false);
 
     this.applyColorModeToGeometry(waterGeometry);
     this.upsertColorDepthPair(chunk, key, waterGeometry, this.waterMeshes, this.waterGroup, this.waterMaterial, this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, 'water');
@@ -947,14 +958,14 @@ export class ChunkRenderer {
     this.applyColorModeToGeometry(translucentGeometry);
     this.upsertColorDepthPair(chunk, key, translucentGeometry, this.translucentMeshes, this.translucentGroup, this.translucentMaterial, this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, 'translucent');
 
-    const cutoutGeometry = hasChunkPass(mask, ChunkPassMask.Cutout) ? this.mesher.buildCutouts(chunk) : createEmptyGeometry();
-    const leavesGeometry = hasChunkPass(mask, ChunkPassMask.Leaves) ? this.mesher.buildLeaves(chunk) : createEmptyGeometry();
+    const cutoutGeometry = hasChunkPass(mask, ChunkPassMask.Cutout) ? this.mesher.buildCutouts(chunk) : createEmptyGeometry(false);
+    const leavesGeometry = hasChunkPass(mask, ChunkPassMask.Leaves) ? this.mesher.buildLeaves(chunk) : createEmptyGeometry(false);
     this.applyColorModeToGeometry(cutoutGeometry);
     this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, cutoutGeometry, 'cutout');
     this.applyColorModeToGeometry(leavesGeometry);
     this.upsertMesh(this.leavesMeshes, this.leavesGroup, this.leavesMaterial, chunk, key, leavesGeometry, 'leaves');
 
-    const fireGeometry = hasChunkPass(mask, ChunkPassMask.Fire) ? this.mesher.buildFires(chunk) : createEmptyGeometry();
+    const fireGeometry = hasChunkPass(mask, ChunkPassMask.Fire) ? this.mesher.buildFires(chunk) : createEmptyGeometry(true);
     this.applyColorModeToGeometry(fireGeometry);
     this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, fireGeometry, 'fire');
 
