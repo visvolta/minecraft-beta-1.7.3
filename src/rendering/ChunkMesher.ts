@@ -811,55 +811,7 @@ export class ChunkMesher {
     return this.contributesAmbientOcclusion(this.getBlockAt(chunk, lx, ly, lz));
   }
 
-  private sampleCornerLightComponents(
-    chunk: Chunk,
-    x: number,
-    y: number,
-    z: number,
-    face: FaceDef,
-    corner: Corner,
-  ): LightSample {
-    if (face.dx !== 0) {
-      const yStep = corner[1] === 0 ? -1 : 1;
-      const zStep = corner[2] === 0 ? -1 : 1;
-      const planeX = x + face.dx;
-      const l0 = this.getLightComponentsAt(chunk, planeX, y, z);
-      const l1 = this.getLightComponentsAt(chunk, planeX, y + yStep, z);
-      const l2 = this.getLightComponentsAt(chunk, planeX, y, z + zStep);
-      const l3 = this.getLightComponentsAt(chunk, planeX, y + yStep, z + zStep);
-      return {
-        sky: (l0.sky + l1.sky + l2.sky + l3.sky) / 4,
-        block: (l0.block + l1.block + l2.block + l3.block) / 4,
-      };
-    }
-
-    if (face.dy !== 0) {
-      const xStep = corner[0] === 0 ? -1 : 1;
-      const zStep = corner[2] === 0 ? -1 : 1;
-      const planeY = y + face.dy;
-      const l0 = this.getLightComponentsAt(chunk, x, planeY, z);
-      const l1 = this.getLightComponentsAt(chunk, x + xStep, planeY, z);
-      const l2 = this.getLightComponentsAt(chunk, x, planeY, z + zStep);
-      const l3 = this.getLightComponentsAt(chunk, x + xStep, planeY, z + zStep);
-      return {
-        sky: (l0.sky + l1.sky + l2.sky + l3.sky) / 4,
-        block: (l0.block + l1.block + l2.block + l3.block) / 4,
-      };
-    }
-
-    const xStep = corner[0] === 0 ? -1 : 1;
-    const yStep = corner[1] === 0 ? -1 : 1;
-    const planeZ = z + face.dz;
-    const l0 = this.getLightComponentsAt(chunk, x, y, planeZ);
-    const l1 = this.getLightComponentsAt(chunk, x + xStep, y, planeZ);
-    const l2 = this.getLightComponentsAt(chunk, x, y + yStep, planeZ);
-    const l3 = this.getLightComponentsAt(chunk, x + xStep, y + yStep, planeZ);
-    return {
-      sky: (l0.sky + l1.sky + l2.sky + l3.sky) / 4,
-      block: (l0.block + l1.block + l2.block + l3.block) / 4,
-    };
-  }
-
+  // retained for reference / parity debugging
   private sampleCornerAoFactor(
     chunk: Chunk,
     x: number,
@@ -916,21 +868,419 @@ export class ChunkMesher {
       };
     }
 
-    const l0 = this.sampleCornerLightComponents(chunk, x, y, z, face, face.corners[0]!);
-    const l1 = this.sampleCornerLightComponents(chunk, x, y, z, face, face.corners[1]!);
-    const l2 = this.sampleCornerLightComponents(chunk, x, y, z, face, face.corners[2]!);
-    const l3 = this.sampleCornerLightComponents(chunk, x, y, z, face, face.corners[3]!);
+    // Cache a 3×3 of light samples on the face plane covering all corner 2×2 windows.
+    // Index: (u+1) + (v+1)*3 where u,v in -1..1 along the two face axes.
+    const plane: LightSample[] = new Array(9);
+    if (face.dx !== 0) {
+      const planeX = x + face.dx;
+      for (let dv = -1; dv <= 1; dv++) {
+        for (let du = -1; du <= 1; du++) {
+          // u along Y, v along Z
+          plane[(du + 1) + (dv + 1) * 3] = this.getLightComponentsAt(chunk, planeX, y + du, z + dv);
+        }
+      }
+    } else if (face.dy !== 0) {
+      const planeY = y + face.dy;
+      for (let dv = -1; dv <= 1; dv++) {
+        for (let du = -1; du <= 1; du++) {
+          // u along X, v along Z
+          plane[(du + 1) + (dv + 1) * 3] = this.getLightComponentsAt(chunk, x + du, planeY, z + dv);
+        }
+      }
+    } else {
+      const planeZ = z + face.dz;
+      for (let dv = -1; dv <= 1; dv++) {
+        for (let du = -1; du <= 1; du++) {
+          // u along X, v along Y
+          plane[(du + 1) + (dv + 1) * 3] = this.getLightComponentsAt(chunk, x + du, y + dv, planeZ);
+        }
+      }
+    }
 
-    const ao0 = this.sampleCornerAoFactor(chunk, x, y, z, face, face.corners[0]!);
-    const ao1 = this.sampleCornerAoFactor(chunk, x, y, z, face, face.corners[1]!);
-    const ao2 = this.sampleCornerAoFactor(chunk, x, y, z, face, face.corners[2]!);
-    const ao3 = this.sampleCornerAoFactor(chunk, x, y, z, face, face.corners[3]!);
+    const at = (du: number, dv: number): LightSample => plane[(du + 1) + (dv + 1) * 3]!;
+    const cornerFromSteps = (su: number, sv: number): LightSample => {
+      // su,sv are -1 or +1 from the face center toward the corner in plane axes
+      const a = at(0, 0);
+      const b = at(su, 0);
+      const c = at(0, sv);
+      const d = at(su, sv);
+      return {
+        sky: (a.sky + b.sky + c.sky + d.sky) / 4,
+        block: (a.block + b.block + c.block + d.block) / 4,
+      };
+    };
 
+    // Map each face corner's local 0/1 into plane steps -1/+1 matching sampleCornerLightComponents.
+    const lights: LightSample[] = [];
+    const aos: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      const corner = face.corners[i]!;
+      let su: number;
+      let sv: number;
+      if (face.dx !== 0) {
+        su = corner[1] === 0 ? -1 : 1; // Y
+        sv = corner[2] === 0 ? -1 : 1; // Z
+      } else if (face.dy !== 0) {
+        su = corner[0] === 0 ? -1 : 1; // X
+        sv = corner[2] === 0 ? -1 : 1; // Z
+      } else {
+        su = corner[0] === 0 ? -1 : 1; // X
+        sv = corner[1] === 0 ? -1 : 1; // Y
+      }
+      lights.push(cornerFromSteps(su, sv));
+      aos.push(this.sampleCornerAoFactor(chunk, x, y, z, face, corner));
+    }
+
+    const ao0 = aos[0]!;
+    const ao1 = aos[1]!;
+    const ao2 = aos[2]!;
+    const ao3 = aos[3]!;
     return {
-      skyLevels: [l0.sky, l1.sky, l2.sky, l3.sky],
-      blockLevels: [l0.block, l1.block, l2.block, l3.block],
+      skyLevels: [lights[0]!.sky, lights[1]!.sky, lights[2]!.sky, lights[3]!.sky],
+      blockLevels: [lights[0]!.block, lights[1]!.block, lights[2]!.block, lights[3]!.block],
       aoFactors: [ao0, ao1, ao2, ao3],
       flipDiagonal: ao0 + ao2 > ao1 + ao3,
+    };
+  }
+
+
+  public lastVoxelVisits = 0;
+
+  /**
+   * Single voxel traversal → modular pass builders (no greedy meshing).
+   * Visits each non-empty section once; classifies each block once; emits only
+   * into the builders that need that block.
+   */
+
+  private emitTerrainBlock(
+    chunk: Chunk,
+    buffers: MeshBuffers,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+    definition: BlockDefinition,
+  ): void {
+    if (!this.isOpaqueMeshBlock(blockId)) return;
+    for (const face of FACES) {
+      const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+      if (this.hidesOpaqueFace(neighbourId)) continue;
+      let textureName = resolveBlockTexture(definition, face.slot!);
+      if (blockId === BlockIds.DoubleSlab) {
+        const metadata = chunk.getBlockMetadata(x, y, z);
+        textureName = resolveSlabTexture(
+          face.slot! === 'front' || face.slot! === 'back' ? 'side' : face.slot!,
+          metadata,
+        );
+      }
+      if (blockId === BlockIds.Grass && face.slot! === 'side') {
+        const above = this.getBlockAt(chunk, x, y + 1, z);
+        if (above === BlockIds.Snow || above === BlockIds.SnowBlock) textureName = 'grass_side_snowed';
+      }
+      const uvRect = this.getSafeUvRect(textureName);
+      const tint = this.resolveVegetationTint(
+        blockId,
+        face.slot!,
+        resolveBlockTint(definition, face.slot!),
+        chunk.chunkX * CHUNK_SIZE_X + x,
+        chunk.chunkZ * CHUNK_SIZE_Z + z,
+      );
+      const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
+      buffers.pushFace(
+        face, x, y, z, uvRect, tint,
+        smoothLighting.skyLevels, smoothLighting.blockLevels,
+        smoothLighting.aoFactors, smoothLighting.flipDiagonal,
+      );
+    }
+  }
+
+  private emitLeavesBlock(
+    chunk: Chunk,
+    buffers: MeshBuffers,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+    definition: BlockDefinition,
+  ): void {
+    for (const face of FACES) {
+      const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+      buffers.leafStats.tested += 1;
+      const hide = this.hidesLeafFace(neighbourId, face);
+      if (hide === 'opaque') {
+        buffers.leafStats.culledOpaque += 1;
+        continue;
+      }
+      buffers.leafStats.emitted += 1;
+      const textureName = resolveBlockTexture(definition, face.slot!);
+      const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+      const tint = this.resolveVegetationTint(
+        blockId, face.slot!, resolveBlockTint(definition, face.slot!),
+        chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z,
+      );
+      const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
+      buffers.pushFace(
+        face, x, y, z, uvRect, tint,
+        smoothLighting.skyLevels, smoothLighting.blockLevels,
+        smoothLighting.aoFactors, smoothLighting.flipDiagonal,
+      );
+    }
+  }
+
+  private emitCutoutBlock(
+    chunk: Chunk,
+    buffers: MeshBuffers,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+    definition: BlockDefinition,
+  ): void {
+    const renderType = definition.renderType;
+    if (renderType === undefined || renderType === 'leaves') return;
+    if (renderType === 'cutout') {
+      if (blockId === BlockIds.RedstoneTorchOff || blockId === BlockIds.RedstoneTorchOn || blockId === BlockIds.Torch) {
+        this.buildTorch(buffers, chunk, x, y, z, blockId, definition); return;
+      }
+      if (blockId === BlockIds.Slab) { this.buildSlab(buffers, chunk, x, y, z, blockId, definition); return; }
+      if (isDoorBlockId(blockId)) { this.buildDoor(buffers, chunk, x, y, z, blockId, definition); return; }
+      if (blockId === BlockIds.Trapdoor) { this.buildTrapdoor(buffers, chunk, x, y, z, blockId, definition); return; }
+      if (blockId === BlockIds.WoodStairs || blockId === BlockIds.CobblestoneStairs) {
+        this.buildStairs(buffers, chunk, x, y, z, definition); return;
+      }
+      if (blockId === BlockIds.Fence) { this.buildFence(buffers, chunk, x, y, z, definition); return; }
+      if (blockId === BlockIds.Rail || blockId === BlockIds.PoweredRail || blockId === BlockIds.DetectorRail) {
+        this.buildRail(buffers, chunk, x, y, z, blockId); return;
+      }
+      if (blockId === BlockIds.StonePressurePlate || blockId === BlockIds.WoodPressurePlate) {
+        this.buildPressurePlate(buffers, chunk, x, y, z, blockId, definition); return;
+      }
+      if (blockId === BlockIds.StoneButton) { this.buildButton(buffers, chunk, x, y, z, blockId, definition); return; }
+      if (blockId === BlockIds.Lever) { this.buildLever(buffers, chunk, x, y, z, blockId, definition); return; }
+      if (blockId === BlockIds.SignPost) { this.buildStandingSign(buffers, chunk, x, y, z, blockId, definition); return; }
+      if (blockId === BlockIds.WallSign) { this.buildWallSign(buffers, chunk, x, y, z, blockId, definition); return; }
+      if (blockId === BlockIds.Bed) { this.buildBed(buffers, chunk, x, y, z, definition); return; }
+      if (blockId === BlockIds.Ladder) {
+        const textureName = resolveBlockTexture(definition, 'side') ?? 'ladder';
+        let uvRect = this.atlas.getUvRect(textureName);
+        if (uvRect === undefined) uvRect = this.atlas.getUvRect('missing_texture');
+        const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+        const light = this.getMaxNeighborLight(chunk, x, y, z);
+        const metadata = chunk.getBlockMetadata(x, y, z);
+        buffers.pushLadder(x, y, z, metadata, uvRect, tint, light);
+        return;
+      }
+      for (const face of FACES) {
+        const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+        if (this.hidesCutoutFace(neighbourId)) continue;
+        const textureName = resolveBlockTexture(definition, face.slot!);
+        const uvRect = this.getSafeUvRect(textureName);
+        const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+        const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+        buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
+      }
+      return;
+    }
+    if (renderType === 'redstone_wire') {
+      this.buildRedstoneWire(buffers, chunk, x, y, z, blockId, definition);
+      return;
+    }
+    if (renderType === 'cross' && blockId !== BlockIds.Fire) {
+      const crossMeta = chunk.getBlockMetadata(x, y, z);
+      let textureName = resolveBlockTexture(definition, 'side');
+      if (blockId === BlockIds.TallGrass && (crossMeta & 0xf) === 2) textureName = 'fern';
+      else if (blockId === BlockIds.TallGrass) textureName = textureName ?? 'tall_grass';
+      const uvRect = this.getSafeUvRect(textureName);
+      const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z, crossMeta);
+      const light = this.getLightComponentsAt(chunk, x, y, z);
+      buffers.pushCross(x, y, z, uvRect, tint, light);
+      return;
+    }
+    if (renderType === 'cactus') {
+      for (let i = 0; i < 6; i++) {
+        const face = FACES[i]!;
+        const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+        if (this.hidesCactusFace(i, neighbourId)) continue;
+        const slot = i === 2 ? 'top' : i === 3 ? 'bottom' : 'side';
+        const textureName = resolveBlockTexture(definition, slot);
+        const uvRect = this.getSafeUvRect(textureName);
+        const tint = resolveBlockTint(definition, slot);
+        const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
+        buffers.pushCactusFace(i, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
+      }
+      return;
+    }
+    if (renderType === 'snow') {
+      const textureName = resolveBlockTexture(definition, 'side');
+      const uvRect = this.getSafeUvRect(textureName);
+      const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+      const light = this.getLightComponentsAt(chunk, x, y, z);
+      this.pushSnowBlock(buffers, x, y, z, uvRect, tint, light);
+    }
+  }
+
+  private emitFireBlock(
+    chunk: Chunk,
+    buffers: MeshBuffers,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+    _definition: BlockDefinition,
+  ): void {
+    if (blockId !== BlockIds.Fire) return;
+    // Reuse full fire builder for one cell by temporary isolation is heavy;
+    // call existing multi-block path via building only this fire: use buildFires logic inline by scanning one block.
+    // Simplest parity: run buildFires on chunk is wrong. Port ground/wall fire for one cell:
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const lightSample: LightSample = { sky: light.sky, block: light.block };
+    const below = this.getBlockAt(chunk, x, y - 1, z);
+    const isGroundFire = this.isBlockNormalCube(below) || this.canBlockCatchFire(below);
+    const flipUvs = ((Math.floor(x / 2) + Math.floor(y / 2) + Math.floor(z / 2)) & 1) === 1;
+    const uL = flipUvs ? 1 : 0;
+    const uR = flipUvs ? 0 : 1;
+    const V0 = 0;
+    const V1 = 1;
+    const H = 1.4;
+    const Y_OFF = 0.0625;
+    if (!isGroundFire) {
+      if (this.canBlockCatchFire(this.getBlockAt(chunk, x - 1, y, z))) {
+        buffers.pushQuad([[x + 0.2, y + H + Y_OFF, z + 1], [x, y + Y_OFF, z + 1], [x, y + Y_OFF, z], [x + 0.2, y + H + Y_OFF, z]], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1, FluidTextureKind.WaterStill, undefined, [uR, V0, uR, V1, uL, V1, uL, V0]);
+      }
+      if (this.canBlockCatchFire(this.getBlockAt(chunk, x + 1, y, z))) {
+        buffers.pushQuad([[x + 0.8, y + H + Y_OFF, z], [x + 1, y + Y_OFF, z], [x + 1, y + Y_OFF, z + 1], [x + 0.8, y + H + Y_OFF, z + 1]], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1, FluidTextureKind.WaterStill, undefined, [uL, V0, uL, V1, uR, V1, uR, V0]);
+      }
+      if (this.canBlockCatchFire(this.getBlockAt(chunk, x, y, z - 1))) {
+        buffers.pushQuad([[x, y + H + Y_OFF, z + 0.2], [x, y + Y_OFF, z], [x + 1, y + Y_OFF, z], [x + 1, y + H + Y_OFF, z + 0.2]], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1, FluidTextureKind.WaterStill, undefined, [uR, V0, uR, V1, uL, V1, uL, V0]);
+      }
+      if (this.canBlockCatchFire(this.getBlockAt(chunk, x, y, z + 1))) {
+        buffers.pushQuad([[x + 1, y + H + Y_OFF, z + 0.8], [x + 1, y + Y_OFF, z + 1], [x, y + Y_OFF, z + 1], [x, y + H + Y_OFF, z + 0.8]], [0, 0, -1], undefined, [1, 1, 1], lightSample, 1, FluidTextureKind.WaterStill, undefined, [uL, V0, uL, V1, uR, V1, uR, V0]);
+      }
+    } else {
+      buffers.pushQuad([[x + 1, y + H + Y_OFF, z + 1], [x + 1, y, z + 1], [x + 1, y, z], [x + 1, y + H + Y_OFF, z]], [1, 0, 0], undefined, [1, 1, 1], lightSample, 1, FluidTextureKind.WaterStill, undefined, [uR, V0, uR, V1, uL, V1, uL, V0]);
+      buffers.pushQuad([[x + 0.0, y + H + Y_OFF, z + 1], [x + 0.0, y, z + 1], [x + 0.0, y, z], [x + 0.0, y + H + Y_OFF, z]], [-1, 0, 0], undefined, [1, 1, 1], lightSample, 1, FluidTextureKind.WaterStill, undefined, [uL, V0, uL, V1, uR, V1, uR, V0]);
+      buffers.pushQuad([[x, y + H + Y_OFF, z + 0], [x, y, z + 0], [x + 1, y, z + 0], [x + 1, y + H + Y_OFF, z + 0]], [0, 0, 1], undefined, [1, 1, 1], lightSample, 1, FluidTextureKind.WaterStill, undefined, [uR, V0, uR, V1, uL, V1, uL, V0]);
+      buffers.pushQuad([[x + 1, y + H + Y_OFF, z + 1], [x + 1, y, z + 1], [x, y, z + 1], [x, y + H + Y_OFF, z + 1]], [0, 0, -1], undefined, [1, 1, 1], lightSample, 1, FluidTextureKind.WaterStill, undefined, [uL, V0, uL, V1, uR, V1, uR, V0]);
+    }
+  }
+
+  private emitTranslucentBlock(
+    chunk: Chunk,
+    buffers: MeshBuffers,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+    definition: BlockDefinition,
+  ): void {
+    // Ice and glass-like: use opaque-style faces with translucent pass rules
+    for (const face of FACES) {
+      const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+      if (neighbourId === blockId) continue;
+      if (this.hidesOpaqueFace(neighbourId)) continue;
+      const textureName = resolveBlockTexture(definition, face.slot!);
+      const uvRect = this.getSafeUvRect(textureName);
+      const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+      const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+      buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
+    }
+  }
+
+  private emitWaterBlock(
+    chunk: Chunk,
+    buffers: MeshBuffers,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+    definition: BlockDefinition,
+  ): void {
+    if (!this.isWater(blockId)) return;
+    this.buildFluidBlock(buffers, chunk, x, y, z, blockId, definition);
+  }
+
+  private emitLavaBlock(
+    chunk: Chunk,
+    buffers: MeshBuffers,
+    x: number,
+    y: number,
+    z: number,
+    blockId: BlockId,
+    definition: BlockDefinition,
+  ): void {
+    if (!this.isLava(blockId)) return;
+    this.buildFluidBlock(buffers, chunk, x, y, z, blockId, definition);
+  }
+
+
+  public buildAllPasses(chunk: Chunk): {
+    terrain: THREE.BufferGeometry;
+    cutout: THREE.BufferGeometry;
+    leaves: THREE.BufferGeometry;
+    fire: THREE.BufferGeometry;
+    translucent: THREE.BufferGeometry;
+    water: THREE.BufferGeometry;
+    lava: THREE.BufferGeometry;
+  } {
+    this.vegetationColors?.beginMeshBuild();
+    this.lastVoxelVisits = 0;
+    const terrain = new MeshBuffers();
+    const cutout = new MeshBuffers();
+    const leaves = new MeshBuffers();
+    const fire = new MeshBuffers();
+    const translucent = new MeshBuffers();
+    const water = new MeshBuffers();
+    const lava = new MeshBuffers();
+
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (chunk.isSectionEmpty(sectionIndex)) continue;
+      const { startY, endY } = this.sectionYRange(sectionIndex);
+      for (let y = startY; y < endY; y++) {
+        for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+          for (let x = 0; x < CHUNK_SIZE_X; x++) {
+            const blockId = chunk.getBlock(x, y, z);
+            if (blockId === AIR_BLOCK_ID) continue;
+            this.lastVoxelVisits += 1;
+            const definition = this.blockRegistry.getById(blockId);
+            if (definition === undefined) continue;
+            const pass = classifyBlockPassMask(blockId, this.blockRegistry);
+            if (pass === ChunkPassMask.None) continue;
+
+            if ((pass & ChunkPassMask.Terrain) !== 0) {
+              this.emitTerrainBlock(chunk, terrain, x, y, z, blockId, definition);
+            }
+            if ((pass & ChunkPassMask.Cutout) !== 0) {
+              this.emitCutoutBlock(chunk, cutout, x, y, z, blockId, definition);
+            }
+            if ((pass & ChunkPassMask.Leaves) !== 0) {
+              this.emitLeavesBlock(chunk, leaves, x, y, z, blockId, definition);
+            }
+            if ((pass & ChunkPassMask.Fire) !== 0) {
+              this.emitFireBlock(chunk, fire, x, y, z, blockId, definition);
+            }
+            if ((pass & ChunkPassMask.Translucent) !== 0) {
+              this.emitTranslucentBlock(chunk, translucent, x, y, z, blockId, definition);
+            }
+            if ((pass & ChunkPassMask.Water) !== 0) {
+              this.emitWaterBlock(chunk, water, x, y, z, blockId, definition);
+            }
+            if ((pass & ChunkPassMask.Lava) !== 0) {
+              this.emitLavaBlock(chunk, lava, x, y, z, blockId, definition);
+            }
+          }
+        }
+      }
+    }
+
+    this.lastLeafCullStats = { ...leaves.leafStats };
+    return {
+      terrain: terrain.toGeometry(),
+      cutout: cutout.toGeometry(),
+      leaves: leaves.toGeometry(),
+      fire: fire.toGeometry(),
+      translucent: translucent.toGeometry(),
+      water: water.toGeometry(),
+      lava: lava.toGeometry(),
     };
   }
 

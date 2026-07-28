@@ -5,7 +5,6 @@ import { ChunkManager } from '../world/ChunkManager';
 import { ChunkMesher } from '../rendering/ChunkMesher';
 import type { AtlasUvRect } from '../assets/TextureAtlas';
 import { VegetationColorProvider } from '../world/generation/climate/VegetationColors';
-import { ChunkPassMask, computeChunkPassMask, hasChunkPass } from '../rendering/meshing/ChunkPassMask';
 import type {
   ChunkMeshResult,
   ChunkMeshWorkerError,
@@ -162,37 +161,31 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
     if (seed === null) throw new Error('Chunk meshing worker received mesh job before init.');
     const mesher = getMesher(seed);
     mesher.beginBuild();
-    const mask = computeChunkPassMask(target.getBlockDataView(), registry);
-    const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? mesher.build(target) : null;
-    const waterGeometry = hasChunkPass(mask, ChunkPassMask.Water) ? mesher.buildWater(target) : null;
-    const lavaGeometry = hasChunkPass(mask, ChunkPassMask.Lava) ? mesher.buildLava(target) : null;
-    const cutoutGeometry = hasChunkPass(mask, ChunkPassMask.Cutout) ? mesher.buildCutouts(target) : null;
-    const leavesGeometry = hasChunkPass(mask, ChunkPassMask.Leaves) ? mesher.buildLeaves(target) : null;
-    const fireGeometry = hasChunkPass(mask, ChunkPassMask.Fire) ? mesher.buildFires(target) : null;
-    const translucentGeometry = hasChunkPass(mask, ChunkPassMask.Translucent) ? mesher.buildTranslucent(target) : null;
-
+    // Single-pass classify-and-emit (one voxel walk).
+    const passes = mesher.buildAllPasses(target);
     const result: ChunkMeshResult = {
       type: 'meshResult',
       jobId: job.jobId,
       chunkX: job.targetChunkX,
       chunkZ: job.targetChunkZ,
       targetRevision: job.targetRevision,
-      terrain: terrainGeometry ? extractGeometry(terrainGeometry) : createEmptyMeshAttributeBuffers(),
-      water: waterGeometry ? extractGeometry(waterGeometry) : createEmptyMeshAttributeBuffers(),
-      lava: lavaGeometry ? extractGeometry(lavaGeometry) : createEmptyMeshAttributeBuffers(),
-      cutout: cutoutGeometry ? extractGeometry(cutoutGeometry) : createEmptyMeshAttributeBuffers(),
-      leaves: leavesGeometry ? extractGeometry(leavesGeometry) : createEmptyMeshAttributeBuffers(),
-      fire: fireGeometry ? extractGeometry(fireGeometry) : createEmptyMeshAttributeBuffers(),
-      translucent: translucentGeometry ? extractGeometry(translucentGeometry) : createEmptyMeshAttributeBuffers(),
+      terrain: extractGeometry(passes.terrain),
+      water: extractGeometry(passes.water),
+      lava: extractGeometry(passes.lava),
+      cutout: extractGeometry(passes.cutout),
+      leaves: extractGeometry(passes.leaves),
+      fire: extractGeometry(passes.fire),
+      translucent: extractGeometry(passes.translucent),
       durationMs: performance.now() - start,
+      voxelVisits: mesher.lastVoxelVisits,
     };
-    terrainGeometry?.dispose();
-    waterGeometry?.dispose();
-    lavaGeometry?.dispose();
-    cutoutGeometry?.dispose();
-    leavesGeometry?.dispose();
-    fireGeometry?.dispose();
-    translucentGeometry?.dispose();
+    passes.terrain.dispose();
+    passes.water.dispose();
+    passes.lava.dispose();
+    passes.cutout.dispose();
+    passes.leaves.dispose();
+    passes.fire.dispose();
+    passes.translucent.dispose();
     workerSelf.postMessage(result, transferList(result));
   } catch (error) {
     workerSelf.postMessage({

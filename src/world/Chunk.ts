@@ -119,6 +119,16 @@ export class Chunk {
     if (!wasDirty) this.renderDirtyListener?.(this, true);
   }
 
+  /** Alias for full mesh rebuild (topology or unknown). */
+  public markTopologyDirty(): void {
+    this.markDirty();
+  }
+
+  /** Lighting-only dirty: still full remesh until light-only GPU path is complete. */
+  public markLightingDirty(): void {
+    this.markDirty();
+  }
+
   /** Batch many light writes; one mesh dirty at most when the batch ends. */
   public beginLightBatch(): void {
     this.lightBatchDepth += 1;
@@ -512,6 +522,14 @@ export class Chunk {
    */
   public getBlockDataView(): Uint8Array {
     return this.blocks;
+  }
+
+  public getMetadataDataView(): Uint8Array {
+    return this.metadata;
+  }
+
+  public getLightDataView(): Uint8Array {
+    return this.light;
   }
 
   /**

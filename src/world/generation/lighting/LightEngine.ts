@@ -1,7 +1,7 @@
 import type { ChunkManager } from '../../ChunkManager';
 import type { BlockRegistry } from '../../../blocks/BlockRegistry';
 import type { Chunk } from '../../Chunk';
-import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../../chunkConstants';
+import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, CHUNK_SECTION_HEIGHT, CHUNK_SECTION_COUNT } from '../../chunkConstants';
 import { chunkKey } from '../../chunkKey';
 
 export interface LightEngineMetrics {
@@ -558,79 +558,123 @@ export class LightEngine {
    * Reconciles borders between a newly loaded chunk and its loaded neighbors,
    * enqueuing boundary blocks from both chunks to propagate light bidirectionally.
    */
+  /**
+   * Conservative Y range for border light enqueue: all non-empty sections plus
+   * a pad, and always include Y bands that may hold skylight under the heightmap.
+   * Never assumes "below surface = no light" (caves/torches/lava).
+   */
+  private borderScanYRange(chunk: Chunk): { minY: number; maxY: number } {
+    let minSection = CHUNK_SECTION_COUNT;
+    let maxSection = -1;
+    for (let s = 0; s < CHUNK_SECTION_COUNT; s++) {
+      if (!chunk.isSectionEmpty(s)) {
+        if (s < minSection) minSection = s;
+        if (s > maxSection) maxSection = s;
+      }
+    }
+    // If chunk looks empty, still scan a small band near sea level for safety.
+    if (maxSection < 0) {
+      return { minY: 0, maxY: Math.min(CHUNK_SIZE_Y - 1, 80) };
+    }
+    const pad = CHUNK_SECTION_HEIGHT; // one section pad for light bleed
+    const minY = Math.max(0, minSection * CHUNK_SECTION_HEIGHT - pad);
+    const maxY = Math.min(CHUNK_SIZE_Y - 1, (maxSection + 1) * CHUNK_SECTION_HEIGHT - 1 + pad);
+    return { minY, maxY };
+  }
+
+  /**
+   * Result of border reconciliation: which neighbor chunks had light writes.
+   * Callers use this for lighting-dirty neighbor remesh decisions.
+   */
+  public lastBorderLightDirtyNeighbors: Array<{ chunkX: number; chunkZ: number }> = [];
+
   public reconcileChunkBorders(chunk: Chunk): void {
     const metricsStart = performance.now();
     const startX = chunk.chunkX * CHUNK_SIZE_X;
     const startZ = chunk.chunkZ * CHUNK_SIZE_Z;
+    this.lastBorderLightDirtyNeighbors = [];
 
     const skyQueue: number[] = [];
     const blockQueue: number[] = [];
+    const touchedNeighbors = new Map<number, { chunkX: number; chunkZ: number }>();
+    const lightRevBefore = new Map<number, number>();
+
     this.beginGlobalLightBatch();
     this.trackLightBatchChunk(chunk);
     try {
+      const ownRange = this.borderScanYRange(chunk);
 
-    // 1. Scan our own chunk border blocks
-    for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
-      for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
-        const isBorder = lx === 0 || lx === CHUNK_SIZE_X - 1 || lz === 0 || lz === CHUNK_SIZE_Z - 1;
-        if (!isBorder) continue;
-
-        const wx = startX + lx;
-        const wz = startZ + lz;
-
-        for (let y = 0; y < CHUNK_SIZE_Y; y++) {
-          const sky = chunk.getSkylight(lx, y, lz);
-          if (sky > 0) this.pushLightQueue(skyQueue, wx, y, wz);
-
-          const block = chunk.getBlocklight(lx, y, lz);
-          if (block > 0) this.pushLightQueue(blockQueue, wx, y, wz);
+      // 1. Scan our own chunk border blocks (Y-bounded)
+      for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
+        for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
+          const isBorder = lx === 0 || lx === CHUNK_SIZE_X - 1 || lz === 0 || lz === CHUNK_SIZE_Z - 1;
+          if (!isBorder) continue;
+          const wx = startX + lx;
+          const wz = startZ + lz;
+          for (let y = ownRange.minY; y <= ownRange.maxY; y++) {
+            const sky = chunk.getSkylight(lx, y, lz);
+            if (sky > 0) this.pushLightQueue(skyQueue, wx, y, wz);
+            const block = chunk.getBlocklight(lx, y, lz);
+            if (block > 0) this.pushLightQueue(blockQueue, wx, y, wz);
+          }
         }
       }
-    }
 
-    // 2. Scan border blocks of loaded orthogonal neighbors
-    const neighborOffsets = [
-      { dx: -1, dz: 0 },
-      { dx: 1, dz: 0 },
-      { dx: 0, dz: -1 },
-      { dx: 0, dz: 1 },
-    ];
-    for (const { dx, dz } of neighborOffsets) {
-      const neighbor = this.chunkManager.getChunk(chunk.chunkX + dx, chunk.chunkZ + dz);
-      if (neighbor) {
+      // 2. Scan border blocks of loaded orthogonal neighbors (Y-bounded per neighbor)
+      const neighborOffsets = [
+        { dx: -1, dz: 0 },
+        { dx: 1, dz: 0 },
+        { dx: 0, dz: -1 },
+        { dx: 0, dz: 1 },
+      ];
+      for (const { dx, dz } of neighborOffsets) {
+        const neighbor = this.chunkManager.getChunk(chunk.chunkX + dx, chunk.chunkZ + dz);
+        if (!neighbor) continue;
+        const key = chunkKey(neighbor.chunkX, neighbor.chunkZ);
+        lightRevBefore.set(key, neighbor.getLightRevision());
+        touchedNeighbors.set(key, { chunkX: neighbor.chunkX, chunkZ: neighbor.chunkZ });
+        this.trackLightBatchChunk(neighbor);
+
         const nStartX = neighbor.chunkX * CHUNK_SIZE_X;
         const nStartZ = neighbor.chunkZ * CHUNK_SIZE_Z;
-        
         let nMinX = 0, nMaxX = CHUNK_SIZE_X - 1;
         let nMinZ = 0, nMaxZ = CHUNK_SIZE_Z - 1;
-
         if (dx === -1) { nMinX = CHUNK_SIZE_X - 1; nMaxX = CHUNK_SIZE_X - 1; }
         else if (dx === 1) { nMinX = 0; nMaxX = 0; }
         if (dz === -1) { nMinZ = CHUNK_SIZE_Z - 1; nMaxZ = CHUNK_SIZE_Z - 1; }
         else if (dz === 1) { nMinZ = 0; nMaxZ = 0; }
 
+        const nRange = this.borderScanYRange(neighbor);
         for (let lx = nMinX; lx <= nMaxX; lx++) {
           for (let lz = nMinZ; lz <= nMaxZ; lz++) {
             const wx = nStartX + lx;
             const wz = nStartZ + lz;
-            for (let y = 0; y < CHUNK_SIZE_Y; y++) {
+            for (let y = nRange.minY; y <= nRange.maxY; y++) {
               const sky = neighbor.getSkylight(lx, y, lz);
               if (sky > 0) this.pushLightQueue(skyQueue, wx, y, wz);
-
               const block = neighbor.getBlocklight(lx, y, lz);
               if (block > 0) this.pushLightQueue(blockQueue, wx, y, wz);
             }
           }
         }
       }
+
+      this.propagateSkylightQueue(skyQueue);
+      this.propagateBlocklightQueue(blockQueue);
+    } finally {
+      // Do not auto mesh-dirty every touched chunk; streamer decides via light delta + topology.
+      this.endGlobalLightBatch(false);
     }
 
-    this.propagateSkylightQueue(skyQueue);
-    this.propagateBlocklightQueue(blockQueue);
-    } finally {
-      // Border reconcile may alter neighbor light; mark those mesh-dirty once each.
-      this.endGlobalLightBatch(true);
+    for (const [key, pos] of touchedNeighbors) {
+      const neighbor = this.chunkManager.getChunk(pos.chunkX, pos.chunkZ);
+      if (!neighbor) continue;
+      const before = lightRevBefore.get(key) ?? -1;
+      if (neighbor.getLightRevision() !== before) {
+        this.lastBorderLightDirtyNeighbors.push(pos);
+      }
     }
+
     this.borderReconcileTimeMs += performance.now() - metricsStart;
   }
 

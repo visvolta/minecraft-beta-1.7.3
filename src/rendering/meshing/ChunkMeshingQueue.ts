@@ -123,6 +123,18 @@ function geometryFromBuffers(buffers: MeshAttributeBuffers): THREE.BufferGeometr
   return geometry;
 }
 
+const SNAPSHOT_BYTES = 16 * 128 * 16; // chunk volume
+
+class SnapshotBufferPool {
+  private readonly free: Uint8Array[] = [];
+  public acquire(): Uint8Array {
+    return this.free.pop() ?? new Uint8Array(SNAPSHOT_BYTES);
+  }
+  public release(buf: Uint8Array): void {
+    if (buf.length === SNAPSHOT_BYTES && this.free.length < 64) this.free.push(buf);
+  }
+}
+
 export class ChunkMeshingQueue {
   private readonly chunkManager: ChunkManager;
   private readonly atlas: TextureAtlas;
@@ -158,6 +170,9 @@ export class ChunkMeshingQueue {
   private totalBytesTransferred = 0;
   private totalBytesReturned = 0;
   private lastTransferLatencyMs = 0;
+  private readonly snapshotPool = new SnapshotBufferPool();
+  private inFlightSnapshotBytes = 0;
+  private readonly maxInFlightSnapshotBytes = 48 * 1024 * 1024; // 48 MiB soft cap
 
   public constructor(chunkManager: ChunkManager, atlas: TextureAtlas, private readonly worldSeed: bigint) {
     this.chunkManager = chunkManager;
@@ -373,6 +388,7 @@ export class ChunkMeshingQueue {
     this.lastBytesCopied = 0;
     this.lastBytesTransferred = 0;
     while (this.idleWorkers.length > 0) {
+      if (this.inFlightSnapshotBytes >= this.maxInFlightSnapshotBytes) return;
       const next = this.takeNextPending();
       if (next === undefined) return;
       const chunk = this.chunkManager.getChunk(next.chunkX, next.chunkZ);
@@ -380,7 +396,7 @@ export class ChunkMeshingQueue {
         this.stale += 1;
         continue;
       }
-      const worker = this.idleWorkers.pop()!;
+      const worker = this.pickIdleWorker(chunk.chunkX, chunk.chunkZ);
       const jobId = this.nextJobId++;
       const revision = chunk.getRevision();
       const jobStart = performance.now();
@@ -428,6 +444,8 @@ export class ChunkMeshingQueue {
         this.activeChunkKeys.delete(chunkKey(active.chunkX, active.chunkZ));
         this.idleWorkers.push(active.worker);
         this.lastWorkerDurationMs = result.durationMs;
+        // Snapshots were transferred (detached); account release of estimate.
+        this.inFlightSnapshotBytes = Math.max(0, this.inFlightSnapshotBytes - active.bytesTransferred);
         this.lastTransferLatencyMs = Math.max(0, performance.now() - active.sentAtMs - result.durationMs);
       }
       const returnedBytes = this.resultBytes(result);
@@ -448,6 +466,36 @@ export class ChunkMeshingQueue {
     this.lastDrainMs = performance.now() - drainStart;
   }
 
+  private pickIdleWorker(chunkX: number, chunkZ: number): Worker {
+    if (this.idleWorkers.length === 0) throw new Error('No idle meshing worker');
+    // Prefer worker whose snapshot cache already holds nearby chunks.
+    let bestIdx = this.idleWorkers.length - 1;
+    let bestScore = -1;
+    for (let i = 0; i < this.idleWorkers.length; i++) {
+      const w = this.idleWorkers[i]!;
+      const cache = this.workerSnapshotRevisions.get(w);
+      let score = 0;
+      if (cache) {
+        for (const entry of cache.values()) {
+          const dx = Math.abs(entry.chunkX - chunkX);
+          const dz = Math.abs(entry.chunkZ - chunkZ);
+          if (dx <= 1 && dz <= 1) score += 3;
+          else if (dx <= 2 && dz <= 2) score += 1;
+        }
+      }
+      if (score >= bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+    const [worker] = this.idleWorkers.splice(bestIdx, 1);
+    return worker!;
+  }
+
+  public getInFlightSnapshotBytes(): number {
+    return this.inFlightSnapshotBytes;
+  }
+
   private buildJob(jobId: number, target: Chunk, revision: number, worker: Worker): ChunkMeshJob {
     const chunks = [];
     const cached = this.workerSnapshotRevisions.get(worker);
@@ -466,9 +514,13 @@ export class ChunkMeshingQueue {
         const previous = cached.get(key);
         if (previous?.revision === chunkRevision) continue;
 
-        const blocks = chunk.copyBlocks();
-        const metadata = chunk.copyMetadata();
-        const light = chunk.copyLight();
+        const blocks = this.snapshotPool.acquire();
+        blocks.set(chunk.getBlockDataView());
+        const metadata = this.snapshotPool.acquire();
+        metadata.set(chunk.getMetadataDataView());
+        const light = this.snapshotPool.acquire();
+        light.set(chunk.getLightDataView());
+        this.inFlightSnapshotBytes += blocks.byteLength + metadata.byteLength + light.byteLength;
         chunks.push({
           chunkX: chunk.chunkX,
           chunkZ: chunk.chunkZ,

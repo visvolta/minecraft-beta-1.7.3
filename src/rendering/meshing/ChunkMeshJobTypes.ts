@@ -78,6 +78,7 @@ export interface ChunkMeshResult {
   readonly fire: MeshAttributeBuffers;
   readonly translucent: MeshAttributeBuffers;
   readonly durationMs: number;
+  readonly voxelVisits?: number;
 }
 
 export interface ChunkMeshWorkerError {

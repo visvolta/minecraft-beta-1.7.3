@@ -297,7 +297,7 @@ export class ChunkStreamer {
         if (!chunk.isPersistenceDirty()) {
           this.chunkRenderer.removeChunkMesh(x, z);
           this.chunkManager.removeChunk(x, z);
-          this.markNeighboursDirty(x, z);
+          this.markNeighboursDirty(x, z, { forceAll: true });
         } else {
           // State-transition unload: save the final revision once and remove the
           // chunk only after the write succeeds (no save-until-clean loop). The
@@ -308,7 +308,7 @@ export class ChunkStreamer {
             if (!this.quiescing && !this.desiredChunks.has(unloadKey)) {
               this.chunkRenderer.removeChunkMesh(x, z);
               this.chunkManager.removeChunk(x, z);
-              this.markNeighboursDirty(x, z);
+              this.markNeighboursDirty(x, z, { forceAll: true });
             }
           }).catch((error) => {
             // Record the failure so settleAcceptedUnloads can abort the final save
@@ -385,16 +385,47 @@ export class ChunkStreamer {
     this.activeReads.set(k, readPromise);
   }
 
-  private markNeighboursDirty(chunkX: number, chunkZ: number): number {
-    let count = 0;
-    for (const [dx, dz] of NEIGHBOUR_OFFSETS) {
-      const neighbour = this.chunkManager.getChunk(chunkX + dx, chunkZ + dz);
-      if (neighbour !== undefined) {
-        neighbour.markDirty();
-        count += 1;
+  /**
+   * After integrating `chunkX,chunkZ`, decide neighbor remeshes:
+   * - topology seam: neighbor always needs remesh so its outer faces cull against the new chunk
+   * - light delta: neighbors listed by LightEngine.lastBorderLightDirtyNeighbors
+   * Unload path still force-dirties all neighbors (pass forceAll=true).
+   */
+  private markNeighboursDirty(
+    chunkX: number,
+    chunkZ: number,
+    options: { readonly forceAll?: boolean; readonly topologySeam?: boolean } = {},
+  ): number {
+    const forceAll = options.forceAll === true;
+    // A newly present neighbor changes face-culling against "missing chunk = solid occluder?"
+    // Our mesher treats missing neighbors as air — so a new chunk ALWAYS creates a topology seam
+    // for existing neighbors (faces that were emitted outward must be re-evaluated).
+    const topologySeam = options.topologySeam !== false;
+
+    const dirtyKeys = new Set<string>();
+    if (forceAll || topologySeam) {
+      for (const [dx, dz] of NEIGHBOUR_OFFSETS) {
+        const neighbour = this.chunkManager.getChunk(chunkX + dx, chunkZ + dz);
+        if (neighbour !== undefined) {
+          neighbour.markTopologyDirty();
+          dirtyKeys.add(`${neighbour.chunkX},${neighbour.chunkZ}`);
+        }
       }
     }
-    return count;
+
+    if (!forceAll) {
+      for (const pos of this.lightEngine.lastBorderLightDirtyNeighbors) {
+        // Don't double-count; light-only still full remesh for now.
+        const neighbour = this.chunkManager.getChunk(pos.chunkX, pos.chunkZ);
+        if (neighbour === undefined) continue;
+        const key = `${pos.chunkX},${pos.chunkZ}`;
+        if (dirtyKeys.has(key)) continue;
+        neighbour.markLightingDirty();
+        dirtyKeys.add(key);
+      }
+    }
+
+    return dirtyKeys.size;
   }
 
 }

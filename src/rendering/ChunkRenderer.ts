@@ -3,7 +3,7 @@ import { useOpaqueEntityQueue } from './RenderOrder';
 import { RENDER_ORDER } from './RenderOrder';
 import type { Chunk } from '../world/Chunk';
 import type { ChunkManager } from '../world/ChunkManager';
-import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from '../world/chunkConstants';
+import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../world/chunkConstants';
 import { chunkKey } from '../world/chunkKey';
 import { ChunkMesher } from './ChunkMesher';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
@@ -48,17 +48,6 @@ function geometryIsEmpty(geometry: THREE.BufferGeometry): boolean {
   if (index !== null) return index.count === 0;
   const position = geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
   return position === undefined || position.count === 0;
-}
-
-function createDepthGeometry(source: THREE.BufferGeometry): THREE.BufferGeometry {
-  const depth = new THREE.BufferGeometry();
-  const position = source.getAttribute('position');
-  if (position !== undefined) depth.setAttribute('position', position);
-  const index = source.getIndex();
-  if (index !== null) depth.setIndex(index);
-  if (source.boundingBox !== null) depth.boundingBox = source.boundingBox.clone();
-  if (source.boundingSphere !== null) depth.boundingSphere = source.boundingSphere.clone();
-  return depth;
 }
 
 export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
@@ -109,33 +98,50 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
   material.needsUpdate = true;
 }
 
-/** Leaf foliage surface opacity (100%)(DO NOT CHNAGE). */
-export const LEAF_SURFACE_OPACITY = 1;
+/** Leaf foliage surface opacity (~65%). */
+/**
+ * Leaf material multiplier stays fully opaque (1.0). Visual density is adjusted
+ * by reshaping *texture* alpha: holes stay transparent; semi-see-through foliage
+ * pixels are pushed toward opaque so canopies look denser without solid slabs.
+ */
+export const LEAF_SURFACE_OPACITY = 1.0;
 
-/** Multiply cutout/leaf atlas alpha after sampling (keeps alphaTest holes). */
-export function attachCutoutOpacity(material: THREE.MeshBasicMaterial, opacity: number): void {
+/**
+ * Densify leaf atlas alpha after sampling:
+ * - alpha near 0 stays discarded (cutout holes)
+ * - mid alphas are remapped toward higher opacity
+ * Material.opacity remains 1.0 — no global 0.65 surface multiplier.
+ */
+export function attachLeafFoliageAlpha(material: THREE.MeshBasicMaterial): void {
   const previous = material.onBeforeCompile;
+  // densifyPower > 1 lifts mid-alphas; holeThreshold keeps empty texels out
   const uniforms = {
-    uCutoutOpacity: { value: opacity },
+    uLeafAlphaDensify: { value: 0.55 }, // 0 = unchanged, 1 = strong densify
   };
-  material.userData.cutoutOpacityUniforms = uniforms;
-  material.transparent = opacity < 0.999;
-  material.opacity = 1; // per-texel alpha handles it
+  material.userData.leafFoliageUniforms = uniforms;
+  material.transparent = true;
+  material.opacity = LEAF_SURFACE_OPACITY;
   material.depthWrite = true;
-  material.alphaTest = Math.min(material.alphaTest || 0.5, 0.1);
+  material.alphaTest = 0.1;
   material.onBeforeCompile = (shader, renderer): void => {
-    if (typeof previous === 'function') previous.call(material, shader, renderer);
-    shader.uniforms.uCutoutOpacity = uniforms.uCutoutOpacity;
-    if (!shader.fragmentShader.includes('uCutoutOpacity')) {
+    if (typeof previous === 'function') {
+      previous.call(material, shader, renderer);
+    }
+    shader.uniforms.uLeafAlphaDensify = uniforms.uLeafAlphaDensify;
+    if (!shader.fragmentShader.includes('uLeafAlphaDensify')) {
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
           `#include <common>
-        uniform float uCutoutOpacity;`,
+        uniform float uLeafAlphaDensify;`,
         )
         .replace(
           '#include <alphatest_fragment>',
-          `diffuseColor.a *= uCutoutOpacity;
+          `// Densify foliage alpha: a' = a + (1-a)*d*a  => keeps 0 at 0, lifts mid-tones
+        if (uLeafAlphaDensify > 0.001) {
+          float a = diffuseColor.a;
+          diffuseColor.a = a + (1.0 - a) * uLeafAlphaDensify * a;
+        }
         #include <alphatest_fragment>`,
         );
     }
@@ -397,6 +403,8 @@ export class ChunkRenderer {
   private readonly translucentMeshes = new Map<number, THREE.Mesh>();
   private readonly cutoutMeshes = new Map<number, THREE.Mesh>();
   private readonly leavesMeshes = new Map<number, THREE.Mesh>();
+  /** Geometries shared by color+depth meshes; disposed once via pass owner. */
+  private readonly ownedPassGeometries = new Map<string, THREE.BufferGeometry>();
   private readonly fireMeshes = new Map<number, THREE.Mesh>();
   private readonly waterDepthMeshes = new Map<number, THREE.Mesh>();
   private readonly lavaDepthMeshes = new Map<number, THREE.Mesh>();
@@ -496,7 +504,7 @@ export class ChunkRenderer {
       side: THREE.DoubleSide,
     });
     attachHeightAwareFog(this.leavesMaterial);
-    attachCutoutOpacity(this.leavesMaterial, LEAF_SURFACE_OPACITY);
+    attachLeafFoliageAlpha(this.leavesMaterial);
 
     this.waterDepthMaterial = new THREE.MeshBasicMaterial({
       colorWrite: false,
@@ -664,25 +672,21 @@ export class ChunkRenderer {
 
   public removeChunkMesh(chunkX: number, chunkZ: number): void {
     const key = chunkKey(chunkX, chunkZ);
-    const groups: Array<[Map<number, THREE.Mesh>, THREE.Group]> = [
-      [this.terrainMeshes, this.terrainGroup],
-      [this.waterMeshes, this.waterGroup],
-      [this.lavaMeshes, this.lavaGroup],
-      [this.cutoutMeshes, this.cutoutGroup],
-      [this.leavesMeshes, this.leavesGroup],
-      [this.fireMeshes, this.fireGroup],
-      [this.translucentMeshes, this.translucentGroup],
-      [this.waterDepthMeshes, this.waterDepthGroup],
-      [this.lavaDepthMeshes, this.lavaDepthGroup],
-      [this.translucentDepthMeshes, this.translucentDepthGroup],
-    ];
-    for (const [map, group] of groups) {
+    this.removeSharedPassMeshes(this.waterMeshes, this.waterGroup, this.waterDepthMeshes, this.waterDepthGroup, key, 'water');
+    this.removeSharedPassMeshes(this.lavaMeshes, this.lavaGroup, this.lavaDepthMeshes, this.lavaDepthGroup, key, 'lava');
+    this.removeSharedPassMeshes(this.translucentMeshes, this.translucentGroup, this.translucentDepthMeshes, this.translucentDepthGroup, key, 'translucent');
+    for (const [map, group, pass] of [
+      [this.terrainMeshes, this.terrainGroup, 'terrain'],
+      [this.cutoutMeshes, this.cutoutGroup, 'cutout'],
+      [this.leavesMeshes, this.leavesGroup, 'leaves'],
+      [this.fireMeshes, this.fireGroup, 'fire'],
+    ] as const) {
       const mesh = map.get(key);
       if (mesh !== undefined) {
         group.remove(mesh);
-        mesh.geometry.dispose();
         map.delete(key);
       }
+      this.disposeOwnedGeometry(key, pass);
     }
   }
 
@@ -855,28 +859,22 @@ export class ChunkRenderer {
     }
 
     this.applyColorModeToGeometry(result.terrain);
-    this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, result.terrain);
-    // Depth clones — same geometry data but separate instances for depth pre-pass.
-    // Empty passes are removed instead of retained as zero-geometry meshes.
-    if (geometryIsEmpty(result.translucent)) this.removeMesh(this.translucentDepthMeshes, this.translucentDepthGroup, key);
-    else this.upsertMesh(this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, chunk, key, result.translucent.clone());
-    if (geometryIsEmpty(result.water)) this.removeMesh(this.waterDepthMeshes, this.waterDepthGroup, key);
-    else this.upsertMesh(this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, chunk, key, result.water.clone());
-    if (geometryIsEmpty(result.lava)) this.removeMesh(this.lavaDepthMeshes, this.lavaDepthGroup, key);
-    else this.upsertMesh(this.lavaDepthMeshes, this.lavaDepthGroup, this.lavaDepthMaterial, chunk, key, result.lava.clone());
+    this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, result.terrain, 'terrain');
 
+    // Shared geometry for color + depth (no BufferGeometry.clone / second GPU upload).
     this.applyColorModeToGeometry(result.water);
-    this.upsertMesh(this.waterMeshes, this.waterGroup, this.waterMaterial, chunk, key, result.water);
+    this.upsertColorDepthPair(chunk, key, result.water, this.waterMeshes, this.waterGroup, this.waterMaterial, this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, 'water');
     this.applyColorModeToGeometry(result.lava);
-    this.upsertMesh(this.lavaMeshes, this.lavaGroup, this.lavaMaterial, chunk, key, result.lava);
-    this.applyColorModeToGeometry(result.cutout);
-    this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, result.cutout);
-    this.applyColorModeToGeometry(result.leaves);
-    this.upsertMesh(this.leavesMeshes, this.leavesGroup, this.leavesMaterial, chunk, key, result.leaves);
-    this.applyColorModeToGeometry(result.fire);
-    this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, result.fire);
+    this.upsertColorDepthPair(chunk, key, result.lava, this.lavaMeshes, this.lavaGroup, this.lavaMaterial, this.lavaDepthMeshes, this.lavaDepthGroup, this.lavaDepthMaterial, 'lava');
     this.applyColorModeToGeometry(result.translucent);
-    this.upsertMesh(this.translucentMeshes, this.translucentGroup, this.translucentMaterial, chunk, key, result.translucent);
+    this.upsertColorDepthPair(chunk, key, result.translucent, this.translucentMeshes, this.translucentGroup, this.translucentMaterial, this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, 'translucent');
+
+    this.applyColorModeToGeometry(result.cutout);
+    this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, result.cutout, 'cutout');
+    this.applyColorModeToGeometry(result.leaves);
+    this.upsertMesh(this.leavesMeshes, this.leavesGroup, this.leavesMaterial, chunk, key, result.leaves, 'leaves');
+    this.applyColorModeToGeometry(result.fire);
+    this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, result.fire, 'fire');
 
     this.meshQueue.markUploaded(result.chunkX, result.chunkZ, result.targetRevision);
     chunk.markClean();
@@ -940,40 +938,29 @@ export class ChunkRenderer {
 
     const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? this.mesher.build(chunk) : createEmptyGeometry();
     this.applyColorModeToGeometry(terrainGeometry);
-    this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, terrainGeometry);
+    this.upsertMesh(this.terrainMeshes, this.terrainGroup, this.terrainMaterial, chunk, key, terrainGeometry, 'terrain');
 
     const waterGeometry = hasChunkPass(mask, ChunkPassMask.Water) ? this.mesher.buildWater(chunk) : createEmptyGeometry();
     const lavaGeometry = hasChunkPass(mask, ChunkPassMask.Lava) ? this.mesher.buildLava(chunk) : createEmptyGeometry();
     const translucentGeometry = hasChunkPass(mask, ChunkPassMask.Translucent) ? this.mesher.buildTranslucent(chunk) : createEmptyGeometry();
 
-    // Depth pre-pass — clones, colorWrite false, depthWrite true.
-    // Empty passes are removed instead of retained as zero-geometry meshes.
-    if (geometryIsEmpty(translucentGeometry)) this.removeMesh(this.translucentDepthMeshes, this.translucentDepthGroup, key);
-    else this.upsertMesh(this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, chunk, key, translucentGeometry.clone());
-    if (geometryIsEmpty(waterGeometry)) this.removeMesh(this.waterDepthMeshes, this.waterDepthGroup, key);
-    else this.upsertMesh(this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, chunk, key, createDepthGeometry(waterGeometry));
-    if (geometryIsEmpty(lavaGeometry)) this.removeMesh(this.lavaDepthMeshes, this.lavaDepthGroup, key);
-    else this.upsertMesh(this.lavaDepthMeshes, this.lavaDepthGroup, this.lavaDepthMaterial, chunk, key, lavaGeometry.clone());
-
     this.applyColorModeToGeometry(waterGeometry);
-    this.upsertMesh(this.waterMeshes, this.waterGroup, this.waterMaterial, chunk, key, waterGeometry);
-
+    this.upsertColorDepthPair(chunk, key, waterGeometry, this.waterMeshes, this.waterGroup, this.waterMaterial, this.waterDepthMeshes, this.waterDepthGroup, this.waterDepthMaterial, 'water');
     this.applyColorModeToGeometry(lavaGeometry);
-    this.upsertMesh(this.lavaMeshes, this.lavaGroup, this.lavaMaterial, chunk, key, lavaGeometry);
+    this.upsertColorDepthPair(chunk, key, lavaGeometry, this.lavaMeshes, this.lavaGroup, this.lavaMaterial, this.lavaDepthMeshes, this.lavaDepthGroup, this.lavaDepthMaterial, 'lava');
+    this.applyColorModeToGeometry(translucentGeometry);
+    this.upsertColorDepthPair(chunk, key, translucentGeometry, this.translucentMeshes, this.translucentGroup, this.translucentMaterial, this.translucentDepthMeshes, this.translucentDepthGroup, this.translucentDepthMaterial, 'translucent');
 
     const cutoutGeometry = hasChunkPass(mask, ChunkPassMask.Cutout) ? this.mesher.buildCutouts(chunk) : createEmptyGeometry();
     const leavesGeometry = hasChunkPass(mask, ChunkPassMask.Leaves) ? this.mesher.buildLeaves(chunk) : createEmptyGeometry();
     this.applyColorModeToGeometry(cutoutGeometry);
-    this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, cutoutGeometry);
+    this.upsertMesh(this.cutoutMeshes, this.cutoutGroup, this.cutoutMaterial, chunk, key, cutoutGeometry, 'cutout');
     this.applyColorModeToGeometry(leavesGeometry);
-    this.upsertMesh(this.leavesMeshes, this.leavesGroup, this.leavesMaterial, chunk, key, leavesGeometry);
+    this.upsertMesh(this.leavesMeshes, this.leavesGroup, this.leavesMaterial, chunk, key, leavesGeometry, 'leaves');
 
     const fireGeometry = hasChunkPass(mask, ChunkPassMask.Fire) ? this.mesher.buildFires(chunk) : createEmptyGeometry();
     this.applyColorModeToGeometry(fireGeometry);
-    this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, fireGeometry);
-
-    this.applyColorModeToGeometry(translucentGeometry);
-    this.upsertMesh(this.translucentMeshes, this.translucentGroup, this.translucentMaterial, chunk, key, translucentGeometry);
+    this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, fireGeometry, 'fire');
 
     chunk.markClean();
   }
@@ -1151,16 +1138,100 @@ export class ChunkRenderer {
     this.translucentMaterial.needsUpdate = true;
   }
 
-  private removeMesh(
-    meshes: Map<number, THREE.Mesh>,
-    group: THREE.Group,
+  private passGeometryKey(chunkKeyValue: number, pass: string): string {
+    return `${chunkKeyValue}:${pass}`;
+  }
+
+  /** Dispose geometry owned by a chunk pass exactly once. */
+  private disposeOwnedGeometry(chunkKeyValue: number, pass: string): void {
+    const gk = this.passGeometryKey(chunkKeyValue, pass);
+    const geo = this.ownedPassGeometries.get(gk);
+    if (geo === undefined) return;
+    geo.dispose();
+    this.ownedPassGeometries.delete(gk);
+  }
+
+  private assignChunkBounds(geometry: THREE.BufferGeometry, chunk: Chunk): void {
+    // Conservative known bounds for chunk-local meshing (blocks 0..16, y 0..128).
+    const minX = chunk.chunkX * CHUNK_SIZE_X;
+    const minZ = chunk.chunkZ * CHUNK_SIZE_Z;
+    geometry.boundingBox = new THREE.Box3(
+      new THREE.Vector3(minX, 0, minZ),
+      new THREE.Vector3(minX + CHUNK_SIZE_X, CHUNK_SIZE_Y, minZ + CHUNK_SIZE_Z),
+    );
+    geometry.boundingSphere = new THREE.Sphere(
+      new THREE.Vector3(minX + CHUNK_SIZE_X * 0.5, CHUNK_SIZE_Y * 0.5, minZ + CHUNK_SIZE_Z * 0.5),
+      Math.sqrt((CHUNK_SIZE_X * 0.5) ** 2 + (CHUNK_SIZE_Y * 0.5) ** 2 + (CHUNK_SIZE_Z * 0.5) ** 2),
+    );
+  }
+
+  /**
+   * Color + depth meshes share one BufferGeometry (single GPU upload / VRAM copy).
+   * Pass owner disposes geometry once when replacing or unloading.
+   */
+  private upsertColorDepthPair(
+    chunk: Chunk,
     key: number,
+    geometry: THREE.BufferGeometry,
+    colorMeshes: Map<number, THREE.Mesh>,
+    colorGroup: THREE.Group,
+    colorMaterial: THREE.MeshBasicMaterial,
+    depthMeshes: Map<number, THREE.Mesh>,
+    depthGroup: THREE.Group,
+    depthMaterial: THREE.MeshBasicMaterial,
+    pass: string,
   ): void {
-    const existing = meshes.get(key);
-    if (existing === undefined) return;
-    group.remove(existing);
-    existing.geometry.dispose();
-    meshes.delete(key);
+    if (geometryIsEmpty(geometry)) {
+      geometry.dispose();
+      this.removeSharedPassMeshes(colorMeshes, colorGroup, depthMeshes, depthGroup, key, pass);
+      return;
+    }
+
+    this.disposeOwnedGeometry(key, pass);
+    this.assignChunkBounds(geometry, chunk);
+    this.ownedPassGeometries.set(this.passGeometryKey(key, pass), geometry);
+
+    const place = (map: Map<number, THREE.Mesh>, group: THREE.Group, material: THREE.MeshBasicMaterial, suffix: string): void => {
+      let mesh = map.get(key);
+      if (mesh !== undefined) {
+        // Do not dispose old geometry here — ownedPassGeometries handled it.
+        mesh.geometry = geometry;
+        mesh.frustumCulled = true;
+      } else {
+        mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(chunk.chunkX * CHUNK_SIZE_X, 0, chunk.chunkZ * CHUNK_SIZE_Z);
+        mesh.name = `chunk_${key}_${suffix}`;
+        mesh.renderOrder = group.renderOrder;
+        mesh.frustumCulled = true;
+        group.add(mesh);
+        map.set(key, mesh);
+      }
+    };
+
+    place(colorMeshes, colorGroup, colorMaterial, pass);
+    place(depthMeshes, depthGroup, depthMaterial, `${pass}_depth`);
+    this.meshUploadsThisFrame += 1;
+  }
+
+  private removeSharedPassMeshes(
+    colorMeshes: Map<number, THREE.Mesh>,
+    colorGroup: THREE.Group,
+    depthMeshes: Map<number, THREE.Mesh>,
+    depthGroup: THREE.Group,
+    key: number,
+    pass: string,
+  ): void {
+    const color = colorMeshes.get(key);
+    if (color !== undefined) {
+      colorGroup.remove(color);
+      colorMeshes.delete(key);
+    }
+    const depth = depthMeshes.get(key);
+    if (depth !== undefined) {
+      depthGroup.remove(depth);
+      depthMeshes.delete(key);
+    }
+    this.disposeOwnedGeometry(key, pass);
   }
 
   private upsertMesh(
@@ -1170,18 +1241,26 @@ export class ChunkRenderer {
     chunk: Chunk,
     key: number,
     geometry: THREE.BufferGeometry,
+    pass = 'mesh',
   ): void {
     if (geometryIsEmpty(geometry)) {
       geometry.dispose();
-      this.removeMesh(meshes, group, key);
+      const existing = meshes.get(key);
+      if (existing !== undefined) {
+        group.remove(existing);
+        this.disposeOwnedGeometry(key, pass);
+        meshes.delete(key);
+      }
       return;
     }
 
+    this.disposeOwnedGeometry(key, pass);
+    this.assignChunkBounds(geometry, chunk);
+    this.ownedPassGeometries.set(this.passGeometryKey(key, pass), geometry);
+
     const existing = meshes.get(key);
     if (existing !== undefined) {
-      existing.geometry.dispose();
       existing.geometry = geometry;
-      existing.geometry.computeBoundingSphere();
       existing.frustumCulled = true;
       this.meshUploadsThisFrame += 1;
       return;
@@ -1190,11 +1269,11 @@ export class ChunkRenderer {
     this.meshUploadsThisFrame += 1;
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(chunk.chunkX * CHUNK_SIZE_X, 0, chunk.chunkZ * CHUNK_SIZE_Z);
-    mesh.name = `chunk_${key}`;
+    mesh.name = `chunk_${key}_${pass}`;
     mesh.renderOrder = group.renderOrder;
+    mesh.frustumCulled = true;
     group.add(mesh);
     meshes.set(key, mesh);
-    mesh.frustumCulled = true;
   }
 
 }
