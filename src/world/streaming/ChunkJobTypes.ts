@@ -14,6 +14,8 @@ export interface ChunkGenerationResult {
   readonly blocks: ArrayBuffer;
   readonly metadata: ArrayBuffer;
   readonly durationMs: number;
+  /** JSON-serialized GeneratedChunkFeatures (optional for back-compat). */
+  readonly featuresJson?: string;
 }
 
 export interface ChunkWorkerError {

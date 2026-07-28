@@ -63,6 +63,9 @@ export interface GenerationSubTimings {
   readonly chunksCompleted: number;
   readonly bytesReceived: number;
   readonly transferLatencyMs: number;
+  readonly lightingInitMs?: number;
+  readonly borderReconcileMs?: number;
+  readonly neighbourDirtyCount?: number;
 }
 
 export interface MeshingSubTimings {
@@ -296,7 +299,7 @@ export class PerformanceProfiler {
   private readonly lightingHistory = new RollingHistory();
   private readonly persistenceHistory = new RollingHistory();
 
-  private generationTimings: GenerationSubTimings = { queueProcessMs: 0, workerDurationMs: 0, integrationMs: 0, chunksCompleted: 0, bytesReceived: 0, transferLatencyMs: 0 };
+  private generationTimings: GenerationSubTimings = { queueProcessMs: 0, workerDurationMs: 0, integrationMs: 0, chunksCompleted: 0, bytesReceived: 0, transferLatencyMs: 0, lightingInitMs: 0, borderReconcileMs: 0, neighbourDirtyCount: 0 };
   private meshingTimings: MeshingSubTimings = { jobBuildMs: 0, dispatchMs: 0, resultDrainMs: 0, workerDurationMs: 0, geometryCreationMs: 0, sceneInsertionMs: 0, bytesCopied: 0, bytesTransferred: 0, bytesReturned: 0, transferLatencyMs: 0 };
   private weatherTimings: WeatherSubTimings = { simulationMs: 0, splashMs: 0, heightmapResampleMs: 0, geometryRebuildMs: 0, drawMs: 0, transparentRenderingMs: 0 };
   private lightingTimings: LightingSubTimings = { propagationMs: 0, averageBfsQueueSize: 0, maximumBfsQueueSize: 0, propagationCalls: 0, nodesProcessed: 0, initializationMs: 0, borderReconcileMs: 0, localRelightMs: 0, blockReads: 0, lightReads: 0, lightWrites: 0, opacityQueries: 0, emissionQueries: 0, coordinateConversions: 0, chunkLookups: 0, missingChunkLookups: 0, boundaryTraversals: 0, queuePushes: 0, removeQueuePushes: 0, queueNodeAllocations: 0, remeshFanOutChunks: 0 };

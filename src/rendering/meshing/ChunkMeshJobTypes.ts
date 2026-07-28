@@ -74,6 +74,7 @@ export interface ChunkMeshResult {
   readonly water: MeshAttributeBuffers;
   readonly lava: MeshAttributeBuffers;
   readonly cutout: MeshAttributeBuffers;
+  readonly leaves: MeshAttributeBuffers;
   readonly fire: MeshAttributeBuffers;
   readonly translucent: MeshAttributeBuffers;
   readonly durationMs: number;

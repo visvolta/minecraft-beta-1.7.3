@@ -40,6 +40,8 @@ export interface LightableEntity {
 
 export class EntityLightingUpdater {
   private readonly cache = new WeakMap<THREE.Material, CacheEntry>();
+  /** Skip material traverse when entity block cell + atmosphere are unchanged. */
+  private readonly entityCellCache = new WeakMap<object, { blockX: number; blockY: number; blockZ: number; generation: number }>();
   /** Bumped whenever sky darkness or sun brightness changes. */
   private generation = 0;
   private skylightSubtracted = 0;
@@ -67,6 +69,18 @@ export class EntityLightingUpdater {
     const blockX = Math.floor(entity.position.x);
     const blockY = Math.floor(entity.position.y + 0.5);
     const blockZ = Math.floor(entity.position.z);
+
+    const prev = this.entityCellCache.get(entity);
+    if (
+      prev !== undefined &&
+      prev.blockX === blockX &&
+      prev.blockY === blockY &&
+      prev.blockZ === blockZ &&
+      prev.generation === this.generation
+    ) {
+      return;
+    }
+    this.entityCellCache.set(entity, { blockX, blockY, blockZ, generation: this.generation });
 
     root.traverse((node) => {
       const material = (node as THREE.Mesh).material;

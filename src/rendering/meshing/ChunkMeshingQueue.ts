@@ -67,6 +67,7 @@ export interface ChunkMeshGeometrySet {
   readonly water: THREE.BufferGeometry;
   readonly lava: THREE.BufferGeometry;
   readonly cutout: THREE.BufferGeometry;
+  readonly leaves: THREE.BufferGeometry;
   readonly fire: THREE.BufferGeometry;
   readonly translucent: THREE.BufferGeometry;
 }
@@ -97,22 +98,23 @@ function isPopulatedMeshAttributeBuffers(buffers: MeshAttributeBuffers): buffers
   return buffers.empty !== true;
 }
 
+/** Adopt transferred ArrayBuffers without copying. Ownership moves to the geometry. */
 function geometryFromBuffers(buffers: MeshAttributeBuffers): THREE.BufferGeometry {
   if (!isPopulatedMeshAttributeBuffers(buffers)) return emptyGeometryFromBuffers();
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(buffers.positions), 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(buffers.normals), 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(buffers.uvs), 2));
-  geometry.setAttribute('normalColor', new THREE.Float32BufferAttribute(new Float32Array(buffers.normalColors), 3));
-  geometry.setAttribute('debugColor', new THREE.Float32BufferAttribute(new Float32Array(buffers.debugColors), 3));
-  geometry.setAttribute('aoColor', new THREE.Float32BufferAttribute(new Float32Array(buffers.aoColors), 3));
-  geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(new Float32Array(buffers.tintColors), 3));
-  geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(new Float32Array(buffers.skyLightLevels), 1));
-  geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(new Float32Array(buffers.blockLightLevels), 1));
-  geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(new Float32Array(buffers.aoFactorScalars), 1));
-  geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(new Float32Array(buffers.faceBrightness), 1));
-  geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(buffers.fluidTextureKinds), 1));
-  geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(buffers.fluidFrameUvs), 2));
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buffers.positions), 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(buffers.normals), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(buffers.uvs), 2));
+  geometry.setAttribute('normalColor', new THREE.BufferAttribute(new Float32Array(buffers.normalColors), 3));
+  geometry.setAttribute('debugColor', new THREE.BufferAttribute(new Float32Array(buffers.debugColors), 3));
+  geometry.setAttribute('aoColor', new THREE.BufferAttribute(new Float32Array(buffers.aoColors), 3));
+  geometry.setAttribute('tintColor', new THREE.BufferAttribute(new Float32Array(buffers.tintColors), 3));
+  geometry.setAttribute('skyLightLevel', new THREE.BufferAttribute(new Float32Array(buffers.skyLightLevels), 1));
+  geometry.setAttribute('blockLightLevel', new THREE.BufferAttribute(new Float32Array(buffers.blockLightLevels), 1));
+  geometry.setAttribute('aoFactorScalar', new THREE.BufferAttribute(new Float32Array(buffers.aoFactorScalars), 1));
+  geometry.setAttribute('faceBrightness', new THREE.BufferAttribute(new Float32Array(buffers.faceBrightness), 1));
+  geometry.setAttribute('fluidTextureKind', new THREE.BufferAttribute(new Float32Array(buffers.fluidTextureKinds), 1));
+  geometry.setAttribute('fluidFrameUv', new THREE.BufferAttribute(new Float32Array(buffers.fluidFrameUvs), 2));
   geometry.setAttribute('color', geometry.getAttribute('normalColor'));
   geometry.setIndex(new THREE.BufferAttribute(
     buffers.indexType === 'uint16' ? new Uint16Array(buffers.indices) : new Uint32Array(buffers.indices),
@@ -280,6 +282,7 @@ export class ChunkMeshingQueue {
         water: geometryFromBuffers(result.water),
         lava: geometryFromBuffers(result.lava),
         cutout: geometryFromBuffers(result.cutout),
+        leaves: geometryFromBuffers(result.leaves),
         fire: geometryFromBuffers(result.fire),
         translucent: geometryFromBuffers(result.translucent),
       });
@@ -498,7 +501,7 @@ export class ChunkMeshingQueue {
 
   private resultBytes(result: ChunkMeshResult): number {
     let total = 0;
-    for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.fire, result.translucent]) {
+    for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.leaves, result.fire, result.translucent]) {
       if (!isPopulatedMeshAttributeBuffers(mesh)) continue;
       total += mesh.positions.byteLength;
       total += mesh.normals.byteLength;

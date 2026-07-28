@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { FogState } from './FogController';
 import { OVERWORLD_FOG_COLOR, overworldFogDensity } from './FogController';
+import { AntiAliasPipeline, type AaMode } from './AntiAliasPipeline';
 
 const CAMERA_FOV = 70;
 const CAMERA_NEAR = 0.05;
@@ -59,6 +60,9 @@ export class Renderer {
    * the weather radius in PrecipitationRenderer.
    */
   private readonly fancyGraphics = readFancyGraphicsSetting();
+  private readonly aaPipeline: AntiAliasPipeline;
+  private renderScale = 1;
+  private aaMode: AaMode = 'off';
 
   private readonly onResizeBound = (): void => {
     this.handleResize();
@@ -82,6 +86,7 @@ export class Renderer {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping;
+    this.aaPipeline = new AntiAliasPipeline(this.renderer, this.scene, this.camera);
   }
 
   /** Canvas element to mount in the DOM. */
@@ -147,21 +152,49 @@ export class Renderer {
 
   public dispose(): void {
     this.stop();
+    this.aaPipeline.dispose();
     this.renderer.renderLists.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
   }
 
+  /** World render only — call HUD/UI after this so AA does not blur GUI. */
   public render(): void {
-    this.renderer.render(this.scene, this.camera);
+    if (this.aaMode === 'off') {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    this.aaPipeline.render();
+  }
+
+  public setAaMode(mode: AaMode): void {
+    this.aaMode = mode;
+    this.aaPipeline.setMode(mode);
+    this.handleResize();
+  }
+
+  public setRenderScale(scale: number): void {
+    this.renderScale = Math.max(0.5, Math.min(1.5, scale));
+    this.handleResize();
+  }
+
+  public getAaMode(): AaMode {
+    return this.aaMode;
+  }
+
+  public getRenderScale(): number {
+    return this.renderScale;
   }
 
   private handleResize(): void {
     const width = window.innerWidth;
     const height = window.innerHeight;
+    const pr = PIXEL_RATIO * this.renderScale;
 
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(pr);
     this.renderer.setSize(width, height);
+    this.aaPipeline.setSize(width, height, pr);
   }
 }

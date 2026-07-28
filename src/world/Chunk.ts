@@ -51,6 +51,9 @@ export class Chunk {
   private light: Uint8Array;
   private sectionNonAirCounts: Uint16Array;
   private dirty: boolean;
+  /** When >0, setSkylight/setBlocklight skip markDirty (batched lighting). */
+  private lightBatchDepth = 0;
+  private lightBatchMeshDirty = false;
   private blockRevision = 0;
   private metadataRevision = 0;
   private meshRevision = 0;
@@ -115,6 +118,23 @@ export class Chunk {
     this.meshRevision += 1;
     if (!wasDirty) this.renderDirtyListener?.(this, true);
   }
+
+  /** Batch many light writes; one mesh dirty at most when the batch ends. */
+  public beginLightBatch(): void {
+    this.lightBatchDepth += 1;
+  }
+
+  public endLightBatch(markMeshDirty: boolean): void {
+    if (this.lightBatchDepth <= 0) return;
+    this.lightBatchDepth -= 1;
+    if (this.lightBatchDepth === 0) {
+      const hadLightWrites = this.lightBatchMeshDirty;
+      this.lightBatchMeshDirty = false;
+      // Only dirty mesh when caller requests it AND light actually changed.
+      if (markMeshDirty && hadLightWrites) this.markDirty();
+    }
+  }
+
 
   private markPersistenceDirty(): void {
     const wasDirty = this.isPersistenceDirty();
@@ -272,7 +292,8 @@ export class Chunk {
     this.light[idx] = (this.light[idx]! & 0xF0) | (value & 0x0F);
     this.lightRevision += 1;
     this.markPersistenceDirty();
-    this.markDirty();
+    if (this.lightBatchDepth > 0) this.lightBatchMeshDirty = true;
+    else this.markDirty();
   }
 
   public getBlocklight(localX: number, localY: number, localZ: number): number {
@@ -291,7 +312,8 @@ export class Chunk {
     this.light[idx] = (this.light[idx]! & 0x0F) | ((value & 0x0F) << 4);
     this.lightRevision += 1;
     this.markPersistenceDirty();
-    this.markDirty();
+    if (this.lightBatchDepth > 0) this.lightBatchMeshDirty = true;
+    else this.markDirty();
   }
 
   public getBlockMetadata(localX: number, localY: number, localZ: number): number {
@@ -458,6 +480,30 @@ export class Chunk {
     this.blocks.set(data);
     this.recomputeSectionNonAirCounts();
     this.markBlockDataChanged();
+  }
+
+  /**
+   * Take ownership of transferred generation buffers (no byte copy when
+   * lengths match and the view covers the whole underlying storage).
+   */
+  public adoptGeneratedStorage(blocks: Uint8Array, metadata: Uint8Array): void {
+    if (blocks.length !== CHUNK_VOLUME || metadata.length !== CHUNK_VOLUME) {
+      throw new RangeError('Generated storage length mismatch.');
+    }
+    // Prefer zero-copy when the view is a tight packing of its ArrayBuffer.
+    if (blocks.byteOffset === 0 && blocks.byteLength === blocks.buffer.byteLength) {
+      this.blocks = blocks;
+    } else {
+      this.blocks.set(blocks);
+    }
+    if (metadata.byteOffset === 0 && metadata.byteLength === metadata.buffer.byteLength) {
+      this.metadata = metadata;
+    } else {
+      this.metadata.set(metadata);
+    }
+    this.recomputeSectionNonAirCounts();
+    this.markBlockDataChanged();
+    this.metadataRevision += 1;
   }
 
   /**

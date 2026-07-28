@@ -84,7 +84,7 @@ function isPopulatedMesh(mesh: MeshAttributeBuffers): mesh is PopulatedMeshAttri
 
 function transferList(result: ChunkMeshResult): Transferable[] {
   const list: Transferable[] = [];
-  for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.fire, result.translucent]) {
+  for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.leaves, result.fire, result.translucent]) {
     if (!isPopulatedMesh(mesh)) continue;
     list.push(
       mesh.positions,
@@ -109,6 +109,16 @@ function transferList(result: ChunkMeshResult): Transferable[] {
 let workerWorldSeed: string | null = null;
 let workerVegetationColors: VegetationColorProvider | null = null;
 const workerManager = new ChunkManager();
+let sharedMesher: ChunkMesher | null = null;
+function getMesher(seed: string): ChunkMesher {
+  if (sharedMesher === null || workerWorldSeed !== seed) {
+    workerWorldSeed = seed;
+    workerVegetationColors = new VegetationColorProvider(BigInt(seed));
+    sharedMesher = new ChunkMesher(workerManager, registry, atlas as never, workerVegetationColors);
+  }
+  return sharedMesher;
+}
+
 
 const workerSelf = self as unknown as {
   onmessage: ((event: MessageEvent<ChunkMeshWorkerMessage>) => void) | null;
@@ -150,16 +160,14 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
     if (job.atlasUvs !== undefined) atlas.set(job.atlasUvs);
     const seed = job.worldSeed ?? workerWorldSeed;
     if (seed === null) throw new Error('Chunk meshing worker received mesh job before init.');
-    if (workerVegetationColors === null || workerWorldSeed !== seed) {
-      workerWorldSeed = seed;
-      workerVegetationColors = new VegetationColorProvider(BigInt(seed));
-    }
-    const mesher = new ChunkMesher(workerManager, registry, atlas as never, workerVegetationColors);
+    const mesher = getMesher(seed);
+    mesher.beginBuild();
     const mask = computeChunkPassMask(target.getBlockDataView(), registry);
     const terrainGeometry = hasChunkPass(mask, ChunkPassMask.Terrain) ? mesher.build(target) : null;
     const waterGeometry = hasChunkPass(mask, ChunkPassMask.Water) ? mesher.buildWater(target) : null;
     const lavaGeometry = hasChunkPass(mask, ChunkPassMask.Lava) ? mesher.buildLava(target) : null;
     const cutoutGeometry = hasChunkPass(mask, ChunkPassMask.Cutout) ? mesher.buildCutouts(target) : null;
+    const leavesGeometry = hasChunkPass(mask, ChunkPassMask.Leaves) ? mesher.buildLeaves(target) : null;
     const fireGeometry = hasChunkPass(mask, ChunkPassMask.Fire) ? mesher.buildFires(target) : null;
     const translucentGeometry = hasChunkPass(mask, ChunkPassMask.Translucent) ? mesher.buildTranslucent(target) : null;
 
@@ -173,6 +181,7 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
       water: waterGeometry ? extractGeometry(waterGeometry) : createEmptyMeshAttributeBuffers(),
       lava: lavaGeometry ? extractGeometry(lavaGeometry) : createEmptyMeshAttributeBuffers(),
       cutout: cutoutGeometry ? extractGeometry(cutoutGeometry) : createEmptyMeshAttributeBuffers(),
+      leaves: leavesGeometry ? extractGeometry(leavesGeometry) : createEmptyMeshAttributeBuffers(),
       fire: fireGeometry ? extractGeometry(fireGeometry) : createEmptyMeshAttributeBuffers(),
       translucent: translucentGeometry ? extractGeometry(translucentGeometry) : createEmptyMeshAttributeBuffers(),
       durationMs: performance.now() - start,
@@ -181,6 +190,7 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
     waterGeometry?.dispose();
     lavaGeometry?.dispose();
     cutoutGeometry?.dispose();
+    leavesGeometry?.dispose();
     fireGeometry?.dispose();
     translucentGeometry?.dispose();
     workerSelf.postMessage(result, transferList(result));

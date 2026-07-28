@@ -58,7 +58,7 @@ export class TaigaTree2Generator {
 
     const belowBlock = world.getBlock(x, y - 1, z);
 
-    if ((belowBlock !== BlockIds.Grass && belowBlock !== BlockIds.Dirt) || y >= 128 - height - 1) {
+    if ((belowBlock !== BlockIds.Grass && belowBlock !== BlockIds.Dirt && belowBlock !== BlockIds.Podzol && belowBlock !== BlockIds.CoarseDirt) || y >= 128 - height - 1) {
       return false;
     }
 

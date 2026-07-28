@@ -74,20 +74,20 @@ export class SurfaceGenerator {
       SURFACE_NOISE_SCALE,
       1,
     );
-    // Gravel-patch noise reuses the sand-patch generator with swapped
-    // X/Z axes and a fixed Y-plane, exactly matching Beta's
-    // `n.a(s, j1*16, 109.0134D, i1*16, 16, 1, 16, d1, 1.0D, d1)`.
+    // Gravel-patch noise: Beta
+    // field_909_n.generateNoiseOctaves(..., chunkX*16, 109.0134, chunkZ*16, 16, 1, 16, d, 1, d)
     const gravelPatch = this.sandPatchNoise.fillArray(
-      chunkZ * CHUNK_SIZE_Z,
-      GRAVEL_NOISE_FIXED_PLANE,
       chunkX * CHUNK_SIZE_X,
-      CHUNK_SIZE_Z,
-      1,
+      GRAVEL_NOISE_FIXED_PLANE,
+      chunkZ * CHUNK_SIZE_Z,
       CHUNK_SIZE_X,
+      1,
+      CHUNK_SIZE_Z,
       SURFACE_NOISE_SCALE,
       1,
       SURFACE_NOISE_SCALE,
     );
+    // stoneNoise / surface depth: all three scales are d*2 in Beta.
     const surfaceDepthNoise = this.depthPatchNoise.fillArray(
       chunkX * CHUNK_SIZE_X,
       chunkZ * CHUNK_SIZE_Z,
@@ -97,12 +97,12 @@ export class SurfaceGenerator {
       1,
       SURFACE_NOISE_SCALE * 2,
       SURFACE_NOISE_SCALE * 2,
-      1,
+      SURFACE_NOISE_SCALE * 2,
     );
 
     for (let x = 0; x < CHUNK_SIZE_X; x++) {
       for (let z = 0; z < CHUNK_SIZE_Z; z++) {
-        const columnIndex = x + z * CHUNK_SIZE_X;
+        const columnIndex = x * CHUNK_SIZE_Z + z; // matches ClimateSampler x-major layout
         const biome = selectBiome(climate[columnIndex]!);
 
         const isSandPatch = sandPatch[columnIndex]! + this.random.nextDouble() * 0.2 > 0;
@@ -166,6 +166,11 @@ export class SurfaceGenerator {
           if (remainingFillerDepth > 0) {
             remainingFillerDepth--;
             blocks[index] = fillerBlock;
+            // Beta: when sand filler is exhausted, place sandstone shelf underneath.
+            if (remainingFillerDepth === 0 && fillerBlock === BlockIds.Sand) {
+              remainingFillerDepth = this.random.nextInt(4);
+              fillerBlock = BlockIds.SandStone;
+            }
           }
         }
       }

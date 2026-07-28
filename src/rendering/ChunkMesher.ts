@@ -26,6 +26,7 @@ import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 import { getBetaFluidCornerHeight } from './fluid/FluidSurfaceGeometry';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import { ChunkPassMask, classifyBlockPassMask, hasChunkPass } from './meshing/ChunkPassMask';
+import { FloatBuilder, IndexBuilder, emptyLeafCullStats, type LeafCullStats } from './meshing/TypedMeshBuilder';
 import { getRailShapeForBlock } from '../world/rails/RailShapes';
 import { isDoorBlockId } from '../blocks/shapes/BlockShapes';
 import {
@@ -203,20 +204,46 @@ function getLinearTint(tint: readonly [number, number, number]): readonly [numbe
 }
 
 class MeshBuffers {
-  public readonly positions: number[] = [];
-  public readonly normals: number[] = [];
-  public readonly uvs: number[] = [];
-  public readonly normalColors: number[] = [];
-  public readonly debugColors: number[] = [];
-  public readonly aoColors: number[] = [];
-  public readonly tintColors: number[] = [];
-  public readonly skyLightLevels: number[] = [];
-  public readonly blockLightLevels: number[] = [];
-  public readonly aoFactorScalars: number[] = [];
-  public readonly faceBrightness: number[] = [];
-  public readonly fluidTextureKinds: number[] = [];
-  public readonly fluidFrameUvs: number[] = [];
-  public readonly indices: number[] = [];
+  public readonly positions = new FloatBuilder(4096);
+  public readonly normals = new FloatBuilder(4096);
+  public readonly uvs = new FloatBuilder(4096);
+  public readonly normalColors = new FloatBuilder(4096);
+  public readonly debugColors = new FloatBuilder(4096);
+  public readonly aoColors = new FloatBuilder(4096);
+  public readonly tintColors = new FloatBuilder(4096);
+  public readonly skyLightLevels = new FloatBuilder(1024);
+  public readonly blockLightLevels = new FloatBuilder(1024);
+  public readonly aoFactorScalars = new FloatBuilder(1024);
+  public readonly faceBrightness = new FloatBuilder(1024);
+  public readonly fluidTextureKinds = new FloatBuilder(1024);
+  public readonly fluidFrameUvs = new FloatBuilder(2048);
+  public readonly indices = new IndexBuilder(6144);
+  public readonly leafStats: LeafCullStats = emptyLeafCullStats();
+
+  public clear(): void {
+    this.positions.clear();
+    this.normals.clear();
+    this.uvs.clear();
+    this.normalColors.clear();
+    this.debugColors.clear();
+    this.aoColors.clear();
+    this.tintColors.clear();
+    this.skyLightLevels.clear();
+    this.blockLightLevels.clear();
+    this.aoFactorScalars.clear();
+    this.faceBrightness.clear();
+    this.fluidTextureKinds.clear();
+    this.fluidFrameUvs.clear();
+    this.indices.clear();
+    this.leafStats.tested = 0;
+    this.leafStats.culledOpaque = 0;
+    this.leafStats.culledLeaves = 0;
+    this.leafStats.emitted = 0;
+  }
+
+  public get vertexCount(): number {
+    return this.positions.count / 3;
+  }
 
   public pushFace(
     face: FaceDef,
@@ -231,7 +258,7 @@ class MeshBuffers {
     flipDiagonal = false,
   ): void {
     const [tintR, tintG, tintB] = getLinearTint(tint);
-    const vertexOffset = this.positions.length / 3;
+    const vertexOffset = this.vertexCount;
 
     for (let i = 0; i < 4; i++) {
       const corner = face.corners[i]!;
@@ -241,51 +268,35 @@ class MeshBuffers {
       const ao = aoByVertex[i]!;
       const rawBrightness = getLightBrightness(Math.max(sky, block));
 
-      this.positions.push(x + cx, y + cy, z + cz);
-      this.normals.push(face.nx, face.ny, face.nz);
-      this.uvs.push(...(uvRect !== undefined
-        ? (() => {
-            const [localU, localV] = localCornerToTextureUv(face, corner);
-            return [
-              uvRect.u0 + localU * (uvRect.u1 - uvRect.u0),
-              uvRect.v0 + localV * (uvRect.v1 - uvRect.v0),
-            ] as const;
-          })()
-        : [0, 0] as const));
-
-      {
-        const visibility = clampedVisibility(rawBrightness, ao);
-        this.normalColors.push(tintR * visibility, tintG * visibility, tintB * visibility);
+      this.positions.push3(x + cx, y + cy, z + cz);
+      this.normals.push3(face.nx, face.ny, face.nz);
+      if (uvRect !== undefined) {
+        const [localU, localV] = localCornerToTextureUv(face, corner);
+        this.uvs.push2(
+          uvRect.u0 + localU * (uvRect.u1 - uvRect.u0),
+          uvRect.v0 + localV * (uvRect.v1 - uvRect.v0),
+        );
+      } else {
+        this.uvs.push2(0, 0);
       }
-      this.debugColors.push(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push(ao, ao, ao);
-      this.tintColors.push(tintR, tintG, tintB);
+
+      const visibility = clampedVisibility(rawBrightness, ao);
+      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
+      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
+      this.aoColors.push3(ao, ao, ao);
+      this.tintColors.push3(tintR, tintG, tintB);
       this.skyLightLevels.push(sky);
       this.blockLightLevels.push(block);
       this.aoFactorScalars.push(ao);
       this.faceBrightness.push(1);
       this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
-      this.fluidFrameUvs.push(0, 0);
+      this.fluidFrameUvs.push2(0, 0);
     }
 
     if (flipDiagonal) {
-      this.indices.push(
-        vertexOffset,
-        vertexOffset + 1,
-        vertexOffset + 3,
-        vertexOffset + 1,
-        vertexOffset + 2,
-        vertexOffset + 3,
-      );
+      this.indices.push6(vertexOffset, vertexOffset + 1, vertexOffset + 3, vertexOffset + 1, vertexOffset + 2, vertexOffset + 3);
     } else {
-      this.indices.push(
-        vertexOffset,
-        vertexOffset + 1,
-        vertexOffset + 2,
-        vertexOffset,
-        vertexOffset + 2,
-        vertexOffset + 3,
-      );
+      this.indices.push6(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset, vertexOffset + 2, vertexOffset + 3);
     }
   }
 
@@ -299,63 +310,59 @@ class MeshBuffers {
   ): void {
     const [tintR, tintG, tintB] = getLinearTint(tint);
     const rawBrightness = getLightBrightness(Math.max(light.sky, light.block));
-
     const u0 = uvRect ? uvRect.u0 : 0;
     const v0 = uvRect ? uvRect.v0 : 0;
     const u1 = uvRect ? uvRect.u1 : 0;
     const v1 = uvRect ? uvRect.v1 : 0;
+    const visibility = clampedVisibility(rawBrightness, 1);
 
-    let offset = this.positions.length / 3;
-    this.positions.push(
-      x, y, z,
-      x + 1, y, z + 1,
-      x + 1, y + 1, z + 1,
-      x, y + 1, z,
-    );
+    let offset = this.vertexCount;
+    this.positions.push3(x, y, z);
+    this.positions.push3(x + 1, y, z + 1);
+    this.positions.push3(x + 1, y + 1, z + 1);
+    this.positions.push3(x, y + 1, z);
     for (let i = 0; i < 4; i++) {
-      this.normals.push(CROSS_NORMAL_A, 0, CROSS_NORMAL_B);
-      {
-        const visibility = clampedVisibility(rawBrightness, 1);
-        this.normalColors.push(tintR * visibility, tintG * visibility, tintB * visibility);
-      }
-      this.debugColors.push(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push(1, 1, 1);
-      this.tintColors.push(tintR, tintG, tintB);
+      this.normals.push3(CROSS_NORMAL_A, 0, CROSS_NORMAL_B);
+      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
+      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
+      this.aoColors.push3(1, 1, 1);
+      this.tintColors.push3(tintR, tintG, tintB);
       this.skyLightLevels.push(light.sky);
       this.blockLightLevels.push(light.block);
       this.aoFactorScalars.push(1);
       this.faceBrightness.push(1);
       this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
-      this.fluidFrameUvs.push(0, 0);
+      this.fluidFrameUvs.push2(0, 0);
     }
-    this.uvs.push(u0, v1, u1, v1, u1, v0, u0, v0);
-    this.indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
+    this.uvs.push2(u0, v1);
+    this.uvs.push2(u1, v1);
+    this.uvs.push2(u1, v0);
+    this.uvs.push2(u0, v0);
+    this.indices.push6(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
 
-    offset = this.positions.length / 3;
-    this.positions.push(
-      x, y, z + 1,
-      x + 1, y, z,
-      x + 1, y + 1, z,
-      x, y + 1, z + 1,
-    );
+    offset = this.vertexCount;
+    this.positions.push3(x, y, z + 1);
+    this.positions.push3(x + 1, y, z);
+    this.positions.push3(x + 1, y + 1, z);
+    this.positions.push3(x, y + 1, z + 1);
     for (let i = 0; i < 4; i++) {
-      this.normals.push(CROSS_NORMAL_A, 0, CROSS_NORMAL_A);
-      {
-        const visibility = clampedVisibility(rawBrightness, 1);
-        this.normalColors.push(tintR * visibility, tintG * visibility, tintB * visibility);
-      }
-      this.debugColors.push(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push(1, 1, 1);
-      this.tintColors.push(tintR, tintG, tintB);
+      this.normals.push3(CROSS_NORMAL_A, 0, CROSS_NORMAL_A);
+      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
+      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
+      this.aoColors.push3(1, 1, 1);
+      this.tintColors.push3(tintR, tintG, tintB);
       this.skyLightLevels.push(light.sky);
       this.blockLightLevels.push(light.block);
       this.aoFactorScalars.push(1);
       this.faceBrightness.push(1);
       this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
-      this.fluidFrameUvs.push(0, 0);
+      this.fluidFrameUvs.push2(0, 0);
     }
-    this.uvs.push(u0, v1, u1, v1, u1, v0, u0, v0);
-    this.indices.push(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
+    this.uvs.push2(u0, v1);
+    this.uvs.push2(u1, v1);
+    this.uvs.push2(u1, v0);
+    this.uvs.push2(u0, v0);
+    this.indices.push6(offset, offset + 1, offset + 2, offset, offset + 2, offset + 3);
   }
 
   public pushLadder(
@@ -406,24 +413,23 @@ class MeshBuffers {
     aoByVertex: Quad4 = DEFAULT_VALUES,
     flipDiagonal = false,
   ): void {
+    // Delegate to legacy-compatible path via temporary FaceDef-like corners
+    const face = FACES[faceIndex]!;
+    // Cactus uses inset geometry — keep existing detailed path by calling simplified full-face for non-side?
+    // Use original inset math with typed pushes:
     const [tintR, tintG, tintB] = getLinearTint(tint);
     const u0 = uvRect ? uvRect.u0 : 0;
     const v0 = uvRect ? uvRect.v0 : 0;
     const u1 = uvRect ? uvRect.u1 : 0;
     const v1 = uvRect ? uvRect.v1 : 0;
-    const vertexOffset = this.positions.length / 3;
-
+    const vertexOffset = this.vertexCount;
     const inset = 0.0625;
     const oinset = 1 - inset;
-
     let px: number[] = [];
     let py: number[] = [];
     let pz: number[] = [];
-    let nx = 0;
-    let ny = 0;
-    let nz = 0;
+    let nx = 0, ny = 0, nz = 0;
     let faceUvs: number[] = [];
-
     switch (faceIndex) {
       case 0:
         px = [x + oinset, x + oinset, x + oinset, x + oinset];
@@ -460,75 +466,56 @@ class MeshBuffers {
         nx = 0; ny = 0; nz = 1;
         faceUvs = [u0 + (u1 - u0) * inset, v1, u0 + (u1 - u0) * oinset, v1, u0 + (u1 - u0) * oinset, v0, u0 + (u1 - u0) * inset, v0];
         break;
-      case 5:
       default:
         px = [x + oinset, x + inset, x + inset, x + oinset];
-        py = [y + 1, y + 1, y, y];
+        py = [y, y, y + 1, y + 1];
         pz = [z + inset, z + inset, z + inset, z + inset];
         nx = 0; ny = 0; nz = -1;
-        faceUvs = [u0 + (u1 - u0) * oinset, v0, u0 + (u1 - u0) * inset, v0, u0 + (u1 - u0) * inset, v1, u0 + (u1 - u0) * oinset, v1];
+        faceUvs = [u0 + (u1 - u0) * oinset, v1, u0 + (u1 - u0) * inset, v1, u0 + (u1 - u0) * inset, v0, u0 + (u1 - u0) * oinset, v0];
         break;
     }
-
     for (let i = 0; i < 4; i++) {
       const sky = skyLevels[i]!;
       const block = blockLevels[i]!;
       const ao = aoByVertex[i]!;
       const rawBrightness = getLightBrightness(Math.max(sky, block));
-
-      this.positions.push(px[i]!, py[i]!, pz[i]!);
-      this.normals.push(nx, ny, nz);
-      this.uvs.push(faceUvs[i * 2]!, faceUvs[i * 2 + 1]!);
-      {
-        const visibility = clampedVisibility(rawBrightness, ao);
-        this.normalColors.push(tintR * visibility, tintG * visibility, tintB * visibility);
-      }
-      this.debugColors.push(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push(ao, ao, ao);
-      this.tintColors.push(tintR, tintG, tintB);
+      const visibility = clampedVisibility(rawBrightness, ao);
+      this.positions.push3(px[i]!, py[i]!, pz[i]!);
+      this.normals.push3(nx, ny, nz);
+      this.uvs.push2(faceUvs[i * 2]!, faceUvs[i * 2 + 1]!);
+      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
+      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
+      this.aoColors.push3(ao, ao, ao);
+      this.tintColors.push3(tintR, tintG, tintB);
       this.skyLightLevels.push(sky);
       this.blockLightLevels.push(block);
       this.aoFactorScalars.push(ao);
       this.faceBrightness.push(1);
       this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
-      this.fluidFrameUvs.push(0, 0);
+      this.fluidFrameUvs.push2(0, 0);
     }
-
     if (flipDiagonal) {
-      this.indices.push(
-        vertexOffset,
-        vertexOffset + 1,
-        vertexOffset + 3,
-        vertexOffset + 1,
-        vertexOffset + 2,
-        vertexOffset + 3,
-      );
+      this.indices.push6(vertexOffset, vertexOffset + 1, vertexOffset + 3, vertexOffset + 1, vertexOffset + 2, vertexOffset + 3);
     } else {
-      this.indices.push(
-        vertexOffset,
-        vertexOffset + 1,
-        vertexOffset + 2,
-        vertexOffset,
-        vertexOffset + 2,
-        vertexOffset + 3,
-      );
+      this.indices.push6(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset, vertexOffset + 2, vertexOffset + 3);
     }
+    void face;
   }
 
   public pushQuad(
-    vertices: readonly [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]],
+    vertices: readonly [Corner, Corner, Corner, Corner],
     normal: readonly [number, number, number],
     uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
     tint: readonly [number, number, number],
     light: LightSample,
+    faceBrightness: number,
+    fluidTextureKind: number,
+    customUvs?: Quad8,
+    customFrameUvs?: Quad8,
     ao = 1,
-    fluidTextureKind: FluidTextureKind = FluidTextureKind.WaterStill,
-    customUvs?: readonly [number, number, number, number, number, number, number, number],
-    customFrameUvs?: readonly [number, number, number, number, number, number, number, number],
-    faceBrightness = 1,
   ): void {
     const [tintR, tintG, tintB] = getLinearTint(tint);
-    const vertexOffset = this.positions.length / 3;
+    const vertexOffset = this.vertexCount;
     const rawBrightness = getLightBrightness(Math.max(light.sky, light.block));
     const visibility = clampedVisibility(rawBrightness, ao) * faceBrightness;
     const u0 = uvRect?.u0 ?? 0;
@@ -536,48 +523,135 @@ class MeshBuffers {
     const u1 = uvRect?.u1 ?? 1;
     const v1 = uvRect?.v1 ?? 1;
     const uvs: readonly [number, number, number, number, number, number, number, number] = customUvs ?? [u0, v1, u1, v1, u1, v0, u0, v0];
+    const frameUv = customFrameUvs ?? ([0, 1, 1, 1, 1, 0, 0, 0] as const);
     for (let i = 0; i < 4; i++) {
       const vertex = vertices[i]!;
-      this.positions.push(vertex[0], vertex[1], vertex[2]);
-      this.normals.push(normal[0], normal[1], normal[2]);
-      this.uvs.push(uvs[i * 2]!, uvs[i * 2 + 1]!);
-      this.normalColors.push(tintR * visibility, tintG * visibility, tintB * visibility);
-      this.debugColors.push(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push(ao, ao, ao);
-      this.tintColors.push(tintR, tintG, tintB);
+      this.positions.push3(vertex[0], vertex[1], vertex[2]);
+      this.normals.push3(normal[0], normal[1], normal[2]);
+      this.uvs.push2(uvs[i * 2]!, uvs[i * 2 + 1]!);
+      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
+      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
+      this.aoColors.push3(ao, ao, ao);
+      this.tintColors.push3(tintR, tintG, tintB);
       this.skyLightLevels.push(light.sky);
       this.blockLightLevels.push(light.block);
       this.aoFactorScalars.push(ao);
       this.faceBrightness.push(faceBrightness);
       this.fluidTextureKinds.push(fluidTextureKind);
-      const frameUv = customFrameUvs ?? ([0, 1, 1, 1, 1, 0, 0, 0] as const);
-      this.fluidFrameUvs.push(frameUv[i * 2]!, frameUv[i * 2 + 1]!);
+      this.fluidFrameUvs.push2(frameUv[i * 2]!, frameUv[i * 2 + 1]!);
     }
-    this.indices.push(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset, vertexOffset + 2, vertexOffset + 3);
+    this.indices.push6(vertexOffset, vertexOffset + 1, vertexOffset + 2, vertexOffset, vertexOffset + 2, vertexOffset + 3);
   }
 
   public toGeometry(): THREE.BufferGeometry {
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(this.normals, 3));
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(this.uvs, 2));
-    geometry.setAttribute('normalColor', new THREE.Float32BufferAttribute(this.normalColors, 3));
-    geometry.setAttribute('debugColor', new THREE.Float32BufferAttribute(this.debugColors, 3));
-    geometry.setAttribute('aoColor', new THREE.Float32BufferAttribute(this.aoColors, 3));
-    geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(this.tintColors, 3));
-    geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(this.skyLightLevels, 1));
-    geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(this.blockLightLevels, 1));
-    geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(this.aoFactorScalars, 1));
-    geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(this.faceBrightness, 1));
-    geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(this.fluidTextureKinds, 1));
-    geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(this.fluidFrameUvs, 2));
+    const pos = new Float32Array(this.positions.view());
+    const nor = new Float32Array(this.normals.view());
+    const uv = new Float32Array(this.uvs.view());
+    const nc = new Float32Array(this.normalColors.view());
+    const dc = new Float32Array(this.debugColors.view());
+    const ao = new Float32Array(this.aoColors.view());
+    const tc = new Float32Array(this.tintColors.view());
+    const sky = new Float32Array(this.skyLightLevels.view());
+    const bl = new Float32Array(this.blockLightLevels.view());
+    const aof = new Float32Array(this.aoFactorScalars.view());
+    const fb = new Float32Array(this.faceBrightness.view());
+    const fk = new Float32Array(this.fluidTextureKinds.view());
+    const ff = new Float32Array(this.fluidFrameUvs.view());
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geometry.setAttribute('normalColor', new THREE.Float32BufferAttribute(nc, 3));
+    geometry.setAttribute('debugColor', new THREE.Float32BufferAttribute(dc, 3));
+    geometry.setAttribute('aoColor', new THREE.Float32BufferAttribute(ao, 3));
+    geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(tc, 3));
+    geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(sky, 1));
+    geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(bl, 1));
+    geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(aof, 1));
+    geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(fb, 1));
+    geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(fk, 1));
+    geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(ff, 2));
     geometry.setAttribute('color', geometry.getAttribute('normalColor'));
-    geometry.setIndex(this.indices);
+    const { buffer, indexType } = this.indices.toArrayBuffer(this.vertexCount <= 65535);
+    geometry.setIndex(new THREE.BufferAttribute(
+      indexType === 'uint16' ? new Uint16Array(buffer) : new Uint32Array(buffer),
+      1,
+    ));
     return geometry;
+  }
+
+  /** Transferable attribute pack for workers — each buffer is an owned copy ready to transfer. */
+  public toAttributeBuffers(): {
+    positions: ArrayBuffer;
+    normals: ArrayBuffer;
+    uvs: ArrayBuffer;
+    normalColors: ArrayBuffer;
+    debugColors: ArrayBuffer;
+    aoColors: ArrayBuffer;
+    tintColors: ArrayBuffer;
+    skyLightLevels: ArrayBuffer;
+    blockLightLevels: ArrayBuffer;
+    aoFactorScalars: ArrayBuffer;
+    faceBrightness: ArrayBuffer;
+    fluidTextureKinds: ArrayBuffer;
+    fluidFrameUvs: ArrayBuffer;
+    indices: ArrayBuffer;
+    indexType: 'uint16' | 'uint32';
+    vertexCount: number;
+    indexCount: number;
+  } {
+    const vertexCount = this.vertexCount;
+    const indexCount = this.indices.count;
+    if (vertexCount === 0 || indexCount === 0) {
+      return {
+        positions: new ArrayBuffer(0),
+        normals: new ArrayBuffer(0),
+        uvs: new ArrayBuffer(0),
+        normalColors: new ArrayBuffer(0),
+        debugColors: new ArrayBuffer(0),
+        aoColors: new ArrayBuffer(0),
+        tintColors: new ArrayBuffer(0),
+        skyLightLevels: new ArrayBuffer(0),
+        blockLightLevels: new ArrayBuffer(0),
+        aoFactorScalars: new ArrayBuffer(0),
+        faceBrightness: new ArrayBuffer(0),
+        fluidTextureKinds: new ArrayBuffer(0),
+        fluidFrameUvs: new ArrayBuffer(0),
+        indices: new ArrayBuffer(0),
+        indexType: 'uint32',
+        vertexCount: 0,
+        indexCount: 0,
+      };
+    }
+    const idx = this.indices.toArrayBuffer(vertexCount <= 65535);
+    return {
+      positions: this.positions.toArrayBuffer(),
+      normals: this.normals.toArrayBuffer(),
+      uvs: this.uvs.toArrayBuffer(),
+      normalColors: this.normalColors.toArrayBuffer(),
+      debugColors: this.debugColors.toArrayBuffer(),
+      aoColors: this.aoColors.toArrayBuffer(),
+      tintColors: this.tintColors.toArrayBuffer(),
+      skyLightLevels: this.skyLightLevels.toArrayBuffer(),
+      blockLightLevels: this.blockLightLevels.toArrayBuffer(),
+      aoFactorScalars: this.aoFactorScalars.toArrayBuffer(),
+      faceBrightness: this.faceBrightness.toArrayBuffer(),
+      fluidTextureKinds: this.fluidTextureKinds.toArrayBuffer(),
+      fluidFrameUvs: this.fluidFrameUvs.toArrayBuffer(),
+      indices: idx.buffer,
+      indexType: idx.indexType,
+      vertexCount,
+      indexCount,
+    };
   }
 }
 
+
 export class ChunkMesher {
+  public lastLeafCullStats: LeafCullStats = emptyLeafCullStats();
+  public beginBuild(): void {
+    this.vegetationColors?.beginMeshBuild();
+  }
   private readonly chunkManager: ChunkManager;
   private readonly blockRegistry: BlockRegistry;
   private readonly atlas: TextureAtlas;
@@ -617,9 +691,11 @@ export class ChunkMesher {
     return { startY, endY: Math.min(CHUNK_SIZE_Y, startY + CHUNK_SECTION_HEIGHT) };
   }
 
-  private resolveVegetationTint(blockId: BlockId, face: BlockFace, fallback: readonly [number, number, number], worldX: number, worldZ: number): readonly [number, number, number] {
-    const kind = vegetationTintKind(blockId, face);
-    return kind === undefined || this.vegetationColors === undefined ? fallback : this.vegetationColors.getColorAt(kind, worldX, worldZ);
+  private resolveVegetationTint(blockId: BlockId, face: BlockFace, fallback: readonly [number, number, number], worldX: number, worldZ: number, metadata = 0): readonly [number, number, number] {
+    const kind = vegetationTintKind(blockId, face, metadata);
+    if (kind === undefined || this.vegetationColors === undefined) return fallback;
+    if (kind === 'untinted') return [1, 1, 1];
+    return this.vegetationColors.getColorAt(kind, worldX, worldZ);
   }
 
   private getLightComponentsAt(chunk: Chunk, lx: number, ly: number, lz: number): LightSample {
@@ -860,6 +936,7 @@ export class ChunkMesher {
 
   public build(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
+    this.vegetationColors?.beginMeshBuild();
 
     const sectionPassMasks = this.getSectionPassMasks(chunk);
     for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
@@ -934,6 +1011,7 @@ export class ChunkMesher {
 
   public buildCutouts(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
+    this.vegetationColors?.beginMeshBuild();
 
     const sectionPassMasks = this.getSectionPassMasks(chunk);
     for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
@@ -954,17 +1032,8 @@ export class ChunkMesher {
 
           const renderType = definition.renderType;
           if (renderType === 'leaves') {
-            for (const face of FACES) {
-              const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-              if (this.hidesLeafFace(neighbourId, face)) {
-                continue;
-              }
-              const textureName = resolveBlockTexture(definition, face.slot!);
-              const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
-              const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
-              const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
-              buffers.pushFace(face, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
-            }
+            // Leaves are meshed in buildLeaves() (separate opacity material).
+            continue;
           } else if (renderType === 'cutout') {
             if (blockId === BlockIds.RedstoneTorchOff || blockId === BlockIds.RedstoneTorchOn || blockId === BlockIds.Torch) {
               this.buildTorch(buffers, chunk, x, y, z, blockId, definition);
@@ -1046,9 +1115,15 @@ export class ChunkMesher {
           } else if (renderType === 'redstone_wire') {
             this.buildRedstoneWire(buffers, chunk, x, y, z, blockId, definition);
           } else if (renderType === 'cross' && blockId !== BlockIds.Fire) {
-            const textureName = resolveBlockTexture(definition, 'side');
+            const crossMeta = chunk.getBlockMetadata(x, y, z);
+            let textureName = resolveBlockTexture(definition, 'side');
+            if (blockId === BlockIds.TallGrass && (crossMeta & 0xf) === 2) {
+              textureName = 'fern';
+            } else if (blockId === BlockIds.TallGrass) {
+              textureName = textureName ?? 'tall_grass';
+            }
             const uvRect = this.getSafeUvRect(textureName);
-            const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
+            const tint = this.resolveVegetationTint(blockId, 'side', resolveBlockTint(definition, 'side'), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z, crossMeta);
             const light = this.getLightComponentsAt(chunk, x, y, z);
             buffers.pushCross(x, y, z, uvRect, tint, light);
           } else if (renderType === 'cactus') {
@@ -1082,6 +1157,7 @@ export class ChunkMesher {
     }
     }
 
+    this.lastLeafCullStats = { ...buffers.leafStats };
     return buffers.toGeometry();
   }
 
@@ -1098,6 +1174,7 @@ export class ChunkMesher {
 
   public buildFires(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
+    this.vegetationColors?.beginMeshBuild();
 
     // All fire planes use the SAME texture row (row 0).
     // The shader advances the animation frame uniformly for the entire block.
@@ -1392,6 +1469,7 @@ export class ChunkMesher {
    */
   public buildTranslucent(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
+    this.vegetationColors?.beginMeshBuild();
 
     const sectionPassMasks = this.getSectionPassMasks(chunk);
     for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
@@ -1432,8 +1510,65 @@ export class ChunkMesher {
     return buffers.toGeometry();
   }
 
+
+  public buildLeaves(chunk: Chunk): THREE.BufferGeometry {
+    const buffers = new MeshBuffers();
+    this.vegetationColors?.beginMeshBuild();
+    const sectionPassMasks = this.getSectionPassMasks(chunk);
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (!hasChunkPass(sectionPassMasks[sectionIndex]!, ChunkPassMask.Leaves)) continue;
+      const { startY, endY } = this.sectionYRange(sectionIndex);
+      for (let y = startY; y < endY; y++) {
+        for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+          for (let x = 0; x < CHUNK_SIZE_X; x++) {
+            const blockId = chunk.getBlock(x, y, z);
+            if (blockId === AIR_BLOCK_ID) continue;
+            const definition = this.blockRegistry.getById(blockId);
+            if (definition === undefined || definition.renderType !== 'leaves') continue;
+            for (const face of FACES) {
+              const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
+              buffers.leafStats.tested += 1;
+              const hide = this.hidesLeafFace(neighbourId, face);
+              if (hide === 'opaque') {
+                buffers.leafStats.culledOpaque += 1;
+                continue;
+              }
+              // leaf-to-leaf intentionally not culled
+              buffers.leafStats.emitted += 1;
+              const textureName = resolveBlockTexture(definition, face.slot!);
+              const uvRect = textureName !== undefined ? this.atlas.getUvRect(textureName) : undefined;
+              const tint = this.resolveVegetationTint(
+                blockId,
+                face.slot!,
+                resolveBlockTint(definition, face.slot!),
+                chunk.chunkX * CHUNK_SIZE_X + x,
+                chunk.chunkZ * CHUNK_SIZE_Z + z,
+              );
+              const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
+              buffers.pushFace(
+                face,
+                x,
+                y,
+                z,
+                uvRect,
+                tint,
+                smoothLighting.skyLevels,
+                smoothLighting.blockLevels,
+                smoothLighting.aoFactors,
+                smoothLighting.flipDiagonal,
+              );
+            }
+          }
+        }
+      }
+    }
+    this.lastLeafCullStats = { ...buffers.leafStats };
+    return buffers.toGeometry();
+  }
+
   public buildWater(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
+    this.vegetationColors?.beginMeshBuild();
 
     const sectionPassMasks = this.getSectionPassMasks(chunk);
     for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
@@ -1458,6 +1593,7 @@ export class ChunkMesher {
 
   public buildLava(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
+    this.vegetationColors?.beginMeshBuild();
 
     const sectionPassMasks = this.getSectionPassMasks(chunk);
     for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
@@ -1569,10 +1705,29 @@ export class ChunkMesher {
     return neighbourDef.solid && !neighbourDef.transparent && neighbourDef.renderType === 'opaque';
   }
 
-  private hidesLeafFace(neighbourId: BlockId, face: { readonly dy: number }): boolean {
-    if (face.dy !== 0) return false;
+  /**
+   * Leaf face culling (no greedy meshing, leaf-to-leaf kept):
+   * - opaque full cubes hide all six leaf faces
+   * - leaf-to-leaf always renders (airier canopy)
+   * - glass/fluid/cutout/air/non-full keep the face
+   */
+  private hidesLeafFace(neighbourId: BlockId, _face: { readonly dy: number }): 'opaque' | 'leaves' | false {
+    if (neighbourId === AIR_BLOCK_ID) return false;
+    // Explicitly do NOT cull leaf-to-leaf.
+    if (
+      neighbourId === BlockIds.Leaves ||
+      neighbourId === BlockIds.SpruceLeaves ||
+      neighbourId === BlockIds.BirchLeaves
+    ) {
+      return false;
+    }
     const neighbourDef = this.blockRegistry.getById(neighbourId);
-    return neighbourDef?.renderType === 'leaves';
+    if (neighbourDef === undefined) return false;
+    if (neighbourDef.renderType === 'leaves') return false;
+    if (neighbourDef.solid && !neighbourDef.transparent && neighbourDef.renderType === 'opaque') {
+      return 'opaque';
+    }
+    return false;
   }
 
   private hidesCactusFace(faceIndex: number, neighbourId: BlockId): boolean {

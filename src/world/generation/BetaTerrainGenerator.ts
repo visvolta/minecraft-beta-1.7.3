@@ -60,9 +60,6 @@ export interface RawTerrain {
  * desynchronize every noise field constructed after it from its correct
  * seeded state.
  *
- * Deliberate deviations from Beta, disclosed:
- * - No Ice placement at sea level for cold columns (ice generation is out
- *   of scope for this stage) — cold columns get ordinary still Water.
  */
 export class BetaTerrainGenerator {
   private readonly minNoise: OctaveNoise; // Beta's `k`
@@ -106,7 +103,7 @@ export class BetaTerrainGenerator {
     );
 
     const density = this.buildDensityGrid(chunkX, chunkZ, climate);
-    const blocks = this.densityToBlocks(density);
+    const blocks = this.densityToBlocks(density, climate);
 
     return { blocks, climate };
   }
@@ -277,7 +274,7 @@ export class BetaTerrainGenerator {
    * blocks via trilinear interpolation, matching ChunkProviderGenerate's
    * density-to-block loop exactly (4x8x4 sub-cells per density cell).
    */
-  private densityToBlocks(density: Float64Array): Uint8Array {
+  private densityToBlocks(density: Float64Array, climate: ClimateSample[]): Uint8Array {
     const blocks = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
     const cellsXZ = DENSITY_GRID_SIZE_XZ - 1; // 4
 
@@ -316,7 +313,13 @@ export class BetaTerrainGenerator {
                 let blockId: number = RAW_AIR;
 
                 if (worldY < SEA_LEVEL) {
-                  blockId = RAW_WATER;
+                  // Beta: cold sea-level band freezes to ice when temp < 0.5.
+                  const temp = climate[worldX * CHUNK_SIZE_X + worldZ]?.temperature ?? 1;
+                  if (temp < 0.5 && worldY >= SEA_LEVEL - 1) {
+                    blockId = BlockIds.Ice;
+                  } else {
+                    blockId = RAW_WATER;
+                  }
                 }
 
                 if (vInterpolated > 0) {

@@ -25,15 +25,20 @@ export function isWorkerFeatureEnabled(feature: WorkerFeature): boolean {
   return DEFAULTS[feature];
 }
 
-function totalWorkerBudget(): number {
-  const logicalCores = navigator.hardwareConcurrency ?? 4;
-  return Math.max(2, Math.min(4, logicalCores - 1));
-}
-
+/**
+ * Mesh-heavy worker scaling (post mesh-buffer optimizations):
+ * - Reserve capacity for the main/render thread.
+ * - Keep generation modest (terrain is less parallelizable per-job).
+ * - Allow more meshing workers on multi-core CPUs.
+ * - Hard total cap avoids excessive snapshot RAM.
+ */
 export function getWorkerCount(feature: WorkerFeature): number {
-  const total = totalWorkerBudget();
-  if (feature === 'generation') {
-    return Math.ceil(total / 2);
-  }
-  return Math.floor(total / 2);
+  const hw = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency ?? 4) : 4;
+  const reserve = hw >= 8 ? 2 : 1;
+  const usable = Math.max(2, hw - reserve);
+  // Hard total workers across both features.
+  const totalCap = Math.min(8, usable);
+  const gen = Math.max(1, Math.min(2, Math.floor(totalCap / 3)));
+  const mesh = Math.max(1, totalCap - gen);
+  return feature === 'generation' ? gen : mesh;
 }

@@ -3,6 +3,8 @@ import type { ChunkManager } from '../ChunkManager';
 import type { WorldGenerator } from '../WorldGenerator';
 import type { ChunkGenerationJob, ChunkGenerationResult, ChunkWorkerError } from './ChunkJobTypes';
 import { getWorkerCount, isWorkerFeatureEnabled } from './WorkerFeatureFlags';
+import { storeGeneratedFeatures } from '../generation/decoration/GeneratedFeaturesRegistry';
+import type { GeneratedChunkFeatures } from '../generation/decoration/GeneratedChunkFeatures';
 
 interface PendingChunk {
   readonly chunkX: number;
@@ -325,8 +327,10 @@ export class ChunkGenerationQueue {
       }
 
       const chunk = this.chunkManager.getOrCreateChunk(result.chunkX, result.chunkZ);
-      chunk.loadGeneratedBlocks(new Uint8Array(result.blocks));
-      chunk.loadGeneratedMetadata(new Uint8Array(result.metadata));
+      chunk.adoptGeneratedStorage(new Uint8Array(result.blocks), new Uint8Array(result.metadata));
+      if (result.featuresJson) {
+        storeGeneratedFeatures(result.chunkX, result.chunkZ, parseFeaturesJson(result.featuresJson));
+      }
       chunk.setTerrainPopulated(true);
       this.recordDuration(result.durationMs);
       this.completed += 1;
@@ -407,4 +411,31 @@ export class ChunkGenerationQueue {
     this.totalDuration += duration;
     this.maxDuration = Math.max(this.maxDuration, duration);
   }
+}
+
+
+function parseFeaturesJson(json: string): GeneratedChunkFeatures {
+  const raw = JSON.parse(json) as {
+    dungeons: Array<{
+      spawnerX: number;
+      spawnerY: number;
+      spawnerZ: number;
+      mobId: string;
+      chests: Array<{ x: number; y: number; z: number; contents: Array<[number, { id: string; count: number; metadata: number }]> }>;
+    }>;
+  };
+  return {
+    dungeons: raw.dungeons.map((d) => ({
+      spawnerX: d.spawnerX,
+      spawnerY: d.spawnerY,
+      spawnerZ: d.spawnerZ,
+      mobId: d.mobId,
+      chests: d.chests.map((c) => ({
+        x: c.x,
+        y: c.y,
+        z: c.z,
+        contents: new Map(c.contents),
+      })),
+    })),
+  };
 }

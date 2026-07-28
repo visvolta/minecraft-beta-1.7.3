@@ -14,6 +14,9 @@ export interface ChunkIntegrationStats {
   readonly lastGeneratedIntegrationMs: number;
   readonly lastReadIntegrationMs: number;
   readonly integratedChunks: number;
+  readonly lastLightingInitMs: number;
+  readonly lastBorderReconcileMs: number;
+  readonly lastNeighbourDirtyCount: number;
 }
 
 /** Chebyshev radius (square) for loading chunks around the camera. */
@@ -67,6 +70,9 @@ export class ChunkStreamer {
   private lastGeneratedIntegrationMs = 0;
   private lastReadIntegrationMs = 0;
   private integratedChunks = 0;
+  private lastLightingInitMs = 0;
+  private lastBorderReconcileMs = 0;
+  private lastNeighbourDirtyCount = 0;
 
   public constructor(
     chunkManager: ChunkManager,
@@ -144,9 +150,13 @@ export class ChunkStreamer {
     );
     for (const { chunk } of completed) {
       const integrationStart = performance.now();
+      const lightStart = performance.now();
       this.lightEngine.initializeChunkLighting(chunk);
+      this.lastLightingInitMs = performance.now() - lightStart;
+      const borderStart = performance.now();
       this.lightEngine.reconcileChunkBorders(chunk);
-      this.markNeighboursDirty(chunk.chunkX, chunk.chunkZ);
+      this.lastBorderReconcileMs = performance.now() - borderStart;
+      this.lastNeighbourDirtyCount = this.markNeighboursDirty(chunk.chunkX, chunk.chunkZ);
       this.onChunkLoaded?.(chunk);
       const integrationMs = performance.now() - integrationStart;
       this.lastGeneratedIntegrationMs += integrationMs;
@@ -165,6 +175,9 @@ export class ChunkStreamer {
       lastGeneratedIntegrationMs: this.lastGeneratedIntegrationMs,
       lastReadIntegrationMs: this.lastReadIntegrationMs,
       integratedChunks: this.integratedChunks,
+      lastLightingInitMs: this.lastLightingInitMs,
+      lastBorderReconcileMs: this.lastBorderReconcileMs,
+      lastNeighbourDirtyCount: this.lastNeighbourDirtyCount,
     };
   }
 
@@ -337,10 +350,14 @@ export class ChunkStreamer {
         managed.markPersistenceClean(chunk.getPersistenceRevision());
 
         if (!(this.trustPersistedLighting && chunk.loadedPersistedLightingData())) {
+          const lightStart = performance.now();
           this.lightEngine.initializeChunkLighting(managed);
+          this.lastLightingInitMs = performance.now() - lightStart;
         }
+        const borderStart = performance.now();
         this.lightEngine.reconcileChunkBorders(managed);
-        this.markNeighboursDirty(managed.chunkX, managed.chunkZ);
+        this.lastBorderReconcileMs = performance.now() - borderStart;
+        this.lastNeighbourDirtyCount = this.markNeighboursDirty(managed.chunkX, managed.chunkZ);
         this.onChunkLoaded?.(managed);
         const integrationMs = performance.now() - integrationStart;
         this.lastReadIntegrationMs = integrationMs;
@@ -368,11 +385,16 @@ export class ChunkStreamer {
     this.activeReads.set(k, readPromise);
   }
 
-  private markNeighboursDirty(chunkX: number, chunkZ: number): void {
+  private markNeighboursDirty(chunkX: number, chunkZ: number): number {
+    let count = 0;
     for (const [dx, dz] of NEIGHBOUR_OFFSETS) {
       const neighbour = this.chunkManager.getChunk(chunkX + dx, chunkZ + dz);
-      neighbour?.markDirty();
+      if (neighbour !== undefined) {
+        neighbour.markDirty();
+        count += 1;
+      }
     }
+    return count;
   }
 
 }

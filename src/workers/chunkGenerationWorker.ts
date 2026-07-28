@@ -1,6 +1,7 @@
 import { Chunk } from '../world/Chunk';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import type { ChunkGenerationJob, ChunkGenerationResult, ChunkWorkerError } from '../world/streaming/ChunkJobTypes';
+import type { GeneratedChunkFeatures } from '../world/generation/decoration/GeneratedChunkFeatures';
 
 let generatorSeed: string | null = null;
 let generator: BetaWorldGenerator | null = null;
@@ -27,9 +28,11 @@ workerSelf.onmessage = (event: MessageEvent<ChunkGenerationJob>): void => {
   try {
     const start = performance.now();
     const chunk = new Chunk(job.chunkX, job.chunkZ);
-    getGenerator(job.seed).populate(chunk);
+    const gen = getGenerator(job.seed);
+    gen.populate(chunk);
     const blocks = chunk.copyBlocks();
     const metadata = chunk.copyMetadata();
+    const features = gen.getLastGeneratedFeatures();
     const blockBuffer = blocks.buffer as ArrayBuffer;
     const metadataBuffer = metadata.buffer as ArrayBuffer;
     const result: ChunkGenerationResult = {
@@ -40,6 +43,7 @@ workerSelf.onmessage = (event: MessageEvent<ChunkGenerationJob>): void => {
       blocks: blockBuffer,
       metadata: metadataBuffer,
       durationMs: performance.now() - start,
+      featuresJson: serializeFeatures(features),
     };
     workerSelf.postMessage(result, [blockBuffer, metadataBuffer]);
   } catch (error) {
@@ -51,3 +55,20 @@ workerSelf.onmessage = (event: MessageEvent<ChunkGenerationJob>): void => {
     workerSelf.postMessage(result);
   }
 };
+
+function serializeFeatures(features: GeneratedChunkFeatures): string {
+  return JSON.stringify({
+    dungeons: features.dungeons.map((d) => ({
+      spawnerX: d.spawnerX,
+      spawnerY: d.spawnerY,
+      spawnerZ: d.spawnerZ,
+      mobId: d.mobId,
+      chests: d.chests.map((c) => ({
+        x: c.x,
+        y: c.y,
+        z: c.z,
+        contents: [...c.contents.entries()],
+      })),
+    })),
+  });
+}

@@ -137,7 +137,7 @@ export class BigTreeGenerator {
   private validateGroundAndTrunkSpace(): boolean {
     const groundBlock = this.world.getBlock(this.baseX, this.baseY - 1, this.baseZ);
 
-    if (groundBlock !== BlockIds.Grass && groundBlock !== BlockIds.Dirt) {
+    if (groundBlock !== BlockIds.Grass && groundBlock !== BlockIds.Dirt && groundBlock !== BlockIds.Podzol && groundBlock !== BlockIds.CoarseDirt) {
       return false;
     }
 

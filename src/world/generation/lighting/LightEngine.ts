@@ -43,6 +43,9 @@ const NEIGHBORS = [
  * using queue-based 3D flood-fill algorithms across chunk boundaries.
  */
 export class LightEngine {
+  /** Chunks participating in an active light write batch (no per-cell mesh dirty). */
+  private lightBatchChunks: Set<Chunk> | null = null;
+
   private readonly chunkManager: ChunkManager;
   private readonly blockRegistry: BlockRegistry;
   private metricsEnabled = false;
@@ -183,6 +186,7 @@ export class LightEngine {
         if (this.metricsEnabled) this.lightWrites++;
         if (this.metricsEnabled) this.remeshFanOutChunkKeys.add(chunkKey(chunkX, chunkZ));
       }
+      this.trackLightBatchChunk(chunk);
       chunk.setSkylight(localX, y, localZ, val);
     } else {
       if (this.metricsEnabled) this.missingChunkLookups++;
@@ -217,6 +221,7 @@ export class LightEngine {
         if (this.metricsEnabled) this.lightWrites++;
         if (this.metricsEnabled) this.remeshFanOutChunkKeys.add(chunkKey(chunkX, chunkZ));
       }
+      this.trackLightBatchChunk(chunk);
       chunk.setBlocklight(localX, y, localZ, val);
     } else {
       if (this.metricsEnabled) this.missingChunkLookups++;
@@ -270,6 +275,27 @@ export class LightEngine {
    * Calculates the initial skylight and blocklight for a freshly generated chunk.
    * Feeds boundary blocks into propagation queues for seamless cross-chunk lighting.
    */
+  private beginGlobalLightBatch(): void {
+    this.lightBatchChunks = new Set();
+  }
+
+  private endGlobalLightBatch(markMeshDirty: boolean): void {
+    const set = this.lightBatchChunks;
+    this.lightBatchChunks = null;
+    if (set === null) return;
+    for (const c of set) {
+      c.endLightBatch(markMeshDirty);
+    }
+  }
+
+  private trackLightBatchChunk(chunk: Chunk): void {
+    if (this.lightBatchChunks === null) return;
+    if (!this.lightBatchChunks.has(chunk)) {
+      chunk.beginLightBatch();
+      this.lightBatchChunks.add(chunk);
+    }
+  }
+
   public initializeChunkLighting(chunk: Chunk): void {
     const metricsStart = performance.now();
     const startX = chunk.chunkX * CHUNK_SIZE_X;
@@ -277,7 +303,9 @@ export class LightEngine {
 
     const skyPropQueue: number[] = [];
     const blockPropQueue: number[] = [];
-
+    this.beginGlobalLightBatch();
+    this.trackLightBatchChunk(chunk);
+    try {
     // 1. Initial vertical skylight projection based on heightmap
     for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE_Z; lz++) {
@@ -321,6 +349,12 @@ export class LightEngine {
     // 2. Propagate initial skylight and blocklight
     this.propagateSkylightQueue(skyPropQueue);
     this.propagateBlocklightQueue(blockPropQueue);
+    } finally {
+      // Drop per-cell dirty flags without meshing neighbors here.
+      this.endGlobalLightBatch(false);
+      // New chunk still needs its first mesh with final lighting.
+      chunk.markDirty();
+    }
     this.initializationTimeMs += performance.now() - metricsStart;
   }
 
@@ -531,6 +565,9 @@ export class LightEngine {
 
     const skyQueue: number[] = [];
     const blockQueue: number[] = [];
+    this.beginGlobalLightBatch();
+    this.trackLightBatchChunk(chunk);
+    try {
 
     // 1. Scan our own chunk border blocks
     for (let lx = 0; lx < CHUNK_SIZE_X; lx++) {
@@ -590,6 +627,10 @@ export class LightEngine {
 
     this.propagateSkylightQueue(skyQueue);
     this.propagateBlocklightQueue(blockQueue);
+    } finally {
+      // Border reconcile may alter neighbor light; mark those mesh-dirty once each.
+      this.endGlobalLightBatch(true);
+    }
     this.borderReconcileTimeMs += performance.now() - metricsStart;
   }
 

@@ -44,6 +44,8 @@ import { HotbarHudRenderer } from '../inventory/HotbarHudRenderer';
 import { InventoryUi } from '../inventory/InventoryUi';
 import { InventoryTooltip } from '../inventory/InventoryTooltip';
 import { ChestManager } from '../chest/ChestManager';
+import { takeGeneratedFeatures } from '../world/generation/decoration/GeneratedFeaturesRegistry';
+import { applyDungeonFeaturesToRuntime } from '../world/generation/decoration/DungeonRuntimeApplier';
 import { ChestController } from '../chest/ChestController';
 import { ChestUi } from '../chest/ChestUi';
 import { ChestRenderer } from '../chest/ChestRenderer';
@@ -400,7 +402,7 @@ export class Engine {
     );
     this.cameraController.setRotation(metadata.player.yaw, metadata.player.pitch);
 
-    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setDamageListener((event)=>{if(!event.fullHit)return;this.audioManager.play({type:'player.damage',kind:'hurt',x:this.player.position.x,y:this.player.position.y,z:this.player.position.z});});this.player.viewBobbingEnabled=this.settings.video.viewBobbing;this.player.setGameMode(metadata.gameMode ?? GameMode.Survival);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
+    this.player=new Player(metadata.player.x,metadata.player.y,metadata.player.z);this.player.setDamageListener((event)=>{if(!event.fullHit)return;this.audioManager.play({type:'player.damage',kind:'hurt',x:this.player.position.x,y:this.player.position.y,z:this.player.position.z});});this.player.viewBobbingEnabled=this.settings.video.viewBobbing;this.renderer.setAaMode(this.settings.video.aaMode);this.renderer.setRenderScale(this.settings.video.renderScale);this.player.setGameMode(metadata.gameMode ?? GameMode.Survival);this.player.setMaxHealth(metadata.playerHealth?.maxHealth??20);this.player.setHealth(metadata.playerHealth?.health??20);this.player.recentHealth=this.player.health;this.player.setFoodState(metadata.playerFood?.hunger??20,metadata.playerFood?.saturation??5,metadata.playerFood?.exhaustion??0);
     this.playerController = new PlayerController(
       this.input,
       this.cameraController,
@@ -906,6 +908,7 @@ export class Engine {
     const trustPersistedLighting = metadata.saveVersion === SAVE_VERSION && metadata.generatorVersion === GENERATOR_VERSION;
     this.chunkStreamer = new ChunkStreamer(this.chunkManager, this.worldGenerator, this.chunkRenderer, this.lightEngine, worldSeed, this.persistence, trustPersistedLighting, (chunk) => {
         this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
+        applyDungeonFeaturesToRuntime(takeGeneratedFeatures(chunk.chunkX, chunk.chunkZ), this.chestManager, chunk);
         this.signManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
         this.worldTickScheduler.indexLoadedChunkTicks(chunk);
         this.worldTickScheduler.reconcileChunkBoundaries(chunk);
@@ -980,6 +983,8 @@ export class Engine {
     this.cameraController.setSettings(settings);
     this.hotbarHudRenderer.setGuiScale(settings.video.guiScale);
     this.player.viewBobbingEnabled = settings.video.viewBobbing;
+    this.renderer.setAaMode(settings.video.aaMode);
+    this.renderer.setRenderScale(settings.video.renderScale);
   }
 
   public setPaused(paused: boolean): void {
@@ -1413,6 +1418,9 @@ export class Engine {
       chunksCompleted: generationStats.completed,
       bytesReceived: generationStats.lastTransferBytes,
       transferLatencyMs: generationStats.lastTransferLatencyMs,
+      lightingInitMs: integrationStats.lastLightingInitMs,
+      borderReconcileMs: integrationStats.lastBorderReconcileMs,
+      neighbourDirtyCount: integrationStats.lastNeighbourDirtyCount,
     });
     const persistenceDiag = this.persistence.getDiagnostics();
     this.performanceProfiler.setPersistenceQueueDepth(

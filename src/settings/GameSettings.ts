@@ -6,7 +6,7 @@ export interface GameSettings {
   readonly version: 1;
   readonly audio: { readonly master: number; readonly music: number; readonly sound: number };
   readonly mouse: { readonly sensitivity: number; readonly invertY: boolean };
-  readonly video: { readonly viewBobbing: boolean; readonly guiScale: GuiScaleSetting };
+  readonly video: { readonly viewBobbing: boolean; readonly guiScale: GuiScaleSetting; readonly aaMode: 'smaa' | 'fxaa' | 'off'; readonly renderScale: number };
   readonly controls: { readonly bindings: Readonly<Record<InputAction, readonly string[]>> };
   readonly gameplay: { readonly difficulty: Difficulty };
 }
@@ -28,7 +28,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   version: 1,
   audio: { master: 1, music: 1, sound: 1 },
   mouse: { sensitivity: 0.5, invertY: false },
-  video: { viewBobbing: true, guiScale: 0 },
+  video: { viewBobbing: true, guiScale: 0, aaMode: 'smaa', renderScale: 1 },
   controls: { bindings: DEFAULT_KEY_BINDINGS },
   gameplay: { difficulty: Difficulty.Normal },
 };
@@ -61,6 +61,8 @@ export function validateGameSettings(value: unknown): GameSettings {
     video: {
       viewBobbing: typeof video.viewBobbing === 'boolean' ? video.viewBobbing : DEFAULT_GAME_SETTINGS.video.viewBobbing,
       guiScale: normalizeGuiScale(video.guiScale),
+      aaMode: video.aaMode === 'fxaa' || video.aaMode === 'off' || video.aaMode === 'smaa' ? video.aaMode : 'smaa',
+      renderScale: typeof video.renderScale === 'number' ? Math.max(0.5, Math.min(1.5, video.renderScale)) : 1,
     },
     controls: { bindings },
     gameplay: { difficulty: difficulty === Difficulty.Peaceful || difficulty === Difficulty.Easy || difficulty === Difficulty.Normal || difficulty === Difficulty.Hard ? difficulty : Difficulty.Normal },

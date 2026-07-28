@@ -189,6 +189,17 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   });
 
   registerBlock(registry, {
+    id: BlockIds.CoarseDirt,
+    name: 'coarse_dirt',
+    displayName: 'Coarse Dirt',
+    solid: true,
+    transparent: false,
+    replaceable: false,
+    blocksWeather: true,
+    textures: { all: 'coarse_dirt' },
+  });
+
+  registerBlock(registry, {
     id: BlockIds.WaterFlowing,
     name: 'flowing_water',
     displayName: 'Flowing Water',
@@ -736,6 +747,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Gravel]: 0.6,
     [BlockIds.Clay]: 0.6,
     [BlockIds.Podzol]: 0.5,
+    [BlockIds.CoarseDirt]: 0.5,
     [BlockIds.Log]: 2.0,
     [BlockIds.SpruceLog]: 2.0,
     [251]: 2.0, // BirchLog

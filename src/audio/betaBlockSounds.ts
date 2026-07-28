@@ -112,6 +112,7 @@ export const BETA_BLOCK_SOUNDS: Readonly<Record<number, BlockSoundDefinition>> =
   [BlockIds.Clay]: GRAVEL,
   [BlockIds.Farmland]: GRAVEL,
   [BlockIds.Podzol]: GRAVEL,
+  [BlockIds.CoarseDirt]: GRAVEL,
 
   [BlockIds.Sand]: SAND,
   // Beta `slowSand` uses soundSandFootstep.

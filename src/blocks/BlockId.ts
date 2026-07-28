@@ -38,6 +38,8 @@ export const BlockIds = {
    * id+metadata storage if/when that's added. Never generated naturally.
    */
   Podzol: 254,
+  /** Intentional non-Beta surface block (modern coarse dirt). */
+  CoarseDirt: 248,
   /**
    * TEMPORARY, project-internal ID — NOT Beta-compatible storage.
    * Real Beta 1.7.3 represents wood species (Oak/Spruce/Birch/Jungle) as
