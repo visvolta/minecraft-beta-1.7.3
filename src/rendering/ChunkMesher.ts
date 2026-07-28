@@ -2927,9 +2927,11 @@ export class ChunkMesher {
 
     const tint = resolveBlockTint(definition, 'side');
     const light = this.getLightComponentsAt(chunk, x, y, z);
+    // Both halves derive their box from BED_HEIGHT alone, so the head and foot
+    // side faces can never disagree on height, and the UV span below is always
+    // computed from the same constant as the geometry.
     const yTop = y + BED_HEIGHT;
-    const bedSideHeight = 9 / 16;
-    const y0 = yTop - bedSideHeight;
+    const y0 = yTop - BED_HEIGHT;
     const yBase = y + 0.1875;
     const x0 = x, x1 = x + 1, z0 = z, z1 = z + 1;
 
@@ -2943,6 +2945,32 @@ export class ChunkMesher {
       const turns = ((quarterTurns % 4) + 4) % 4;
       const out = corners.slice(turns).concat(corners.slice(0, turns));
       return [out[0]![0], out[0]![1], out[1]![0], out[1]![1], out[2]![0], out[2]![1], out[3]![0], out[3]![1]];
+    };
+
+    /**
+     * Side/end UVs for the bed box.
+     *
+     * Beta's `RenderBlocks.renderEastFace` (and its N/S/W siblings) derive the
+     * V span from the block's own bounds rather than the whole tile:
+     *   vTop    = tileRow + 16 - maxY * 16
+     *   vBottom = tileRow + 16 - minY * 16
+     * With the 9/16-tall bed that samples only the bottom 9 texture rows.
+     *
+     * That matters because `bed_*_side` / `bed_*_end` are authored with their
+     * top 7 rows fully transparent. Stretching the entire 16-row tile across
+     * the 9px-tall face therefore renders a transparent strip along the top of
+     * every side — the visible "bed side gap". Sampling the sub-range instead
+     * restores Beta's 1:1 texel scale and fills the face to the top surface.
+     */
+    const sideUv = (
+      rect: { u0: number; v0: number; u1: number; v1: number },
+      mirror = false,
+    ): Quad8 => {
+      const vBottom = rect.v1;
+      const vTop = rect.v0 + (rect.v1 - rect.v0) * (1 - BED_HEIGHT);
+      let corners: [number, number][] = [[rect.u0, vBottom], [rect.u1, vBottom], [rect.u1, vTop], [rect.u0, vTop]];
+      if (mirror) corners = [corners[1]!, corners[0]!, corners[3]!, corners[2]!];
+      return [corners[0]![0], corners[0]![1], corners[1]![0], corners[1]![1], corners[2]![0], corners[2]![1], corners[3]![0], corners[3]![1]];
     };
 
     const push = (
@@ -2983,7 +3011,7 @@ export class ChunkMesher {
     for (const face of faces) {
       if (face.face === hiddenFace) continue;
       const rect = face.face === outwardFace ? endRect : sideRect;
-      push(face.corners, face.normal, rect, uv(rect, 0, face.face === flippedFace));
+      push(face.corners, face.normal, rect, sideUv(rect, face.face === flippedFace));
     }
   }
 

@@ -197,6 +197,10 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     replaceable: false,
     blocksWeather: true,
     textures: { all: 'coarse_dirt' },
+    // Without an explicit renderType the mesher's isOpaqueMeshBlock() check
+    // fails and the block is skipped by every pass, so it generates in the
+    // world but renders as a hole. Coarse dirt is a full opaque cube.
+    renderType: 'opaque',
   });
 
   registerBlock(registry, {

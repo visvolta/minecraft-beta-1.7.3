@@ -2,6 +2,7 @@ import type { BlockRegistry } from '../blocks/BlockRegistry';
 import { loadBlockTextureImages } from './TextureLoader';
 import { TextureAtlas } from './TextureAtlas';
 import { EntityTextureAssets } from './EntityTextureAssets';
+import { collectBlockAtlasTextureNames } from './blockAtlasTextureNames';
 
 /**
  * Orchestrates the asset-loading pipeline: figures out which block
@@ -14,72 +15,14 @@ export class AssetManager {
   public static loadEntityTextures(): Promise<EntityTextureAssets> { return EntityTextureAssets.load(); }
 
   /**
-   * Collects every distinct texture name referenced by the registry's
-   * block definitions (across all/top/bottom/side), loads them, and
-   * packs them into one TextureAtlas.
+   * Collects every distinct texture name the mesher can request — the names
+   * reachable from block definitions plus the mesh-time-only names — loads
+   * them, and packs them into one TextureAtlas.
    */
   public static async loadBlockAtlas(
     blockRegistry: BlockRegistry,
   ): Promise<TextureAtlas> {
-    const textureNames = new Set<string>();
-
-    for (const definition of blockRegistry.values()) {
-      const { all, top, bottom, side, front } = definition.textures;
-
-      for (const name of [all, top, bottom, side, front]) {
-        if (name !== undefined) {
-          textureNames.add(name);
-        }
-      }
-    }
-
-    // Snow-covered grass side texture (Beta texture 68).
-    // Used by ChunkMesher when a Grass block has Snow above it.
-    // Not referenced by any block definition directly.
-    textureNames.add('grass_side_snowed');
-
-    // Required Slab base material textures (Stone and Sandstone)
-    textureNames.add('stone_slab_top');
-    textureNames.add('stone_slab_side');
-    textureNames.add('sandstone_top');
-    textureNames.add('sandstone_normal');
-
-    // Required Door upper-half textures
-    // Bed faces are chosen per half at mesh time, so they are not reachable
-    // through the block definition's own texture entries.
-    textureNames.add('bed_head_top');
-    textureNames.add('bed_head_side');
-    textureNames.add('bed_head_end');
-    textureNames.add('bed_feet_top');
-    textureNames.add('bed_feet_side');
-    textureNames.add('bed_feet_end');
-    // Rail variants chosen per metadata at mesh time: the curved sheet and
-    // the powered/active states are never named by a block definition, so
-    // without these the atlas has no entry and the mesher falls back.
-    textureNames.add('rail_normal');
-    textureNames.add('rail_normal_turned');
-    textureNames.add('rail_golden');
-    textureNames.add('rail_golden_powered');
-    textureNames.add('rail_detector');
-    textureNames.add('door_wood_upper');
-    textureNames.add('door_iron_upper');
-    textureNames.add('door_spruce_upper');
-    textureNames.add('door_birch_upper');
-
-    // Redstone wire shapes and overlays (Beta 1.7.3)
-    textureNames.add('redstone_dust_cross');
-    textureNames.add('redstone_dust_line');
-    textureNames.add('redstone_dust_cross_overlay');
-    textureNames.add('redstone_dust_line_overlay');
-
-    // Add destruction stage textures to the atlas.
-    for (let i = 0; i < 10; i++) {
-      textureNames.add(`destroy_stage_${i}`);
-    }
-
-    // Authoritative missing-texture fallback region in atlas (`not the first atlas region`).
-    textureNames.add('missing_texture');
-
+    const textureNames = collectBlockAtlasTextureNames(blockRegistry);
     const images = await loadBlockTextureImages(textureNames);
     return TextureAtlas.build(images);
   }

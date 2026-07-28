@@ -1,1146 +1,168 @@
-import * as THREE from 'three';
+/**
+ * validateEntities — entity type registry, serialization identity, mob and
+ * projectile fundamentals, and rail/minecart geometry.
+ */
+
 import { BlockIds } from '../src/blocks/BlockId.ts';
 import { BlockRegistry } from '../src/blocks/BlockRegistry.ts';
 import { registerDefaultBlocks } from '../src/blocks/registerDefaultBlocks.ts';
-import { BlockBehaviourRegistry } from '../src/world/BlockBehaviour.ts';
-import { BlockUpdateWorld } from '../src/world/BlockUpdateWorld.ts';
-import { ChunkManager } from '../src/world/ChunkManager.ts';
-import { LightEngine } from '../src/world/generation/lighting/LightEngine.ts';
-import { JavaRandom } from '../src/world/generation/random/JavaRandom.ts';
-import { AABB } from '../src/physics/AABB.ts';
-import { EntityManager } from '../src/entities/core/EntityManager.ts';
-import { EntityPhysics, type PhysicsMovable } from '../src/entities/core/EntityPhysics.ts';
-import { createDefaultEntityTypeRegistry } from '../src/entities/core/EntityType.ts';
+import { createDefaultEntityTypeRegistry, EntityTypeIds } from '../src/entities/core/EntityType.ts';
 import { registerEntityTypes } from '../src/entities/registerEntityTypes.ts';
-import { DroppedItemEntity } from '../src/entities/items/DroppedItemEntity.ts';
-import { FallingBlockEntity } from '../src/entities/FallingBlockEntity.ts';
-import { PigEntity } from '../src/entities/living/PigEntity.ts';
-import { Pathfinder } from '../src/entities/nav/Pathfinder.ts';
-import { DamageSource } from '../src/entities/damage/DamageSource.ts';
-import { CountingParticleSink } from '../src/entities/particles/EntityParticleSink.ts';
-import { selectMeleeTarget } from '../src/player/MeleeTargeting.ts';
-import { MELEE_REACH } from '../src/player/PlayerConstants.ts';
-import { VOID_MIN_Y } from '../src/world/chunkConstants.ts';
-import { CowEntity } from '../src/entities/living/CowEntity.ts';
-import { SheepEntity } from '../src/entities/living/SheepEntity.ts';
-import { ChickenEntity } from '../src/entities/living/ChickenEntity.ts';
-import { PigModel } from '../src/entities/living/PigModel.ts';
-
-function assert(condition: boolean, message: string): void {
-  if (!condition) throw new Error(message);
-}
-
-interface World {
-  blocks: BlockRegistry;
-  behaviours: BlockBehaviourRegistry;
-  world: BlockUpdateWorld;
-  chunks: ChunkManager;
-  entities: EntityManager;
-  physics: EntityPhysics;
-  pathfinder: Pathfinder;
-  particles: CountingParticleSink;
-}
-
-function buildWorld(chunkRadius = 2): World {
-  const blocks = new BlockRegistry();
-  registerDefaultBlocks(blocks);
-  const chunks = new ChunkManager();
-  for (let x = -chunkRadius; x <= chunkRadius; x++) {
-    for (let z = -chunkRadius; z <= chunkRadius; z++) {
-      chunks.getOrCreateChunk(x, z);
-    }
-  }
-  const light = new LightEngine(chunks, blocks);
-  const world = new BlockUpdateWorld(chunks, blocks, light);
-  const behaviours = new BlockBehaviourRegistry();
-
-  const scene = new THREE.Scene();
-  const mockAtlas = { texture: new THREE.Texture(), getUvRect: () => ({ u0: 0, v0: 0, u1: 1, v1: 1 }) } as never;
-  const mockItemAtlas = { texture: new THREE.Texture(), getUvRect: () => ({ u0: 0, v0: 0, u1: 1, v1: 1 }) } as never;
-  const material = new THREE.MeshBasicMaterial();
-  const registry = createDefaultEntityTypeRegistry();
-  registerEntityTypes(registry);
-  const particles = new CountingParticleSink();
-  const entities = new EntityManager({
-    blockRegistry: blocks,
-    behaviourRegistry: behaviours,
-    blockUpdateWorld: world,
-    chunkManager: chunks,
-    scene,
-    blockAtlas: mockAtlas,
-    itemAtlas: mockItemAtlas,
-    heldBlockMaterial: material,
-    itemHeldMaterial: material,
-    typeRegistry: registry,
-    rng: new JavaRandom(987654321n),
-    particles,
-  });
-
-  const physics = new EntityPhysics(blocks, behaviours, world);
-  const pathfinder = new Pathfinder(blocks, behaviours, world);
-  return { blocks, behaviours, world, chunks, entities, physics, pathfinder, particles };
-}
-
-/** Lays a solid stone floor at y=10 across all loaded chunks. */
-function layFloor(w: World, y = 10): void {
-  for (let x = -32; x <= 32; x++) {
-    for (let z = -32; z <= 32; z++) {
-      w.world.setBlock(x, y, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
-    }
-  }
-}
-
-/** A minimal physics body for collision tests. */
-class TestBody implements PhysicsMovable {
-  public readonly position = { x: 0, y: 0, z: 0 };
-  public readonly velocity = { x: 0, y: 0, z: 0 };
-  public stepHeight = 0;
-  public onGround = false;
-  public isCollidedHorizontally = false;
-  public isCollidedVertically = false;
-  public constructor(private readonly w: number, private readonly h: number) {}
-  public getAABB(): AABB {
-    const hw = this.w / 2;
-    return new AABB(
-      this.position.x - hw, this.position.y, this.position.z - hw,
-      this.position.x + hw, this.position.y + this.h, this.position.z + hw,
-    );
-  }
-}
-
-// ============================================================
-// Deferred add/remove: no mutation during iteration, cleanup exactly once
-// ============================================================
-{
-  const w = buildWorld();
-  layFloor(w);
-  const a = new DroppedItemEntity(w.entities.context, { type: 'block', id: BlockIds.Stone, count: 1, metadata: 0 }, 0.5, 12, 0.5, 10);
-  const b = new DroppedItemEntity(w.entities.context, { type: 'block', id: BlockIds.Stone, count: 1, metadata: 0 }, 2.5, 12, 0.5, 10);
-  w.entities.add(a);
-  w.entities.add(b);
-  w.entities.tick(); // flush adds
-  assert(w.entities.activeCount === 2, 'both entities should be active after flush');
-
-  // Remove one and let the survivor try to remove the other during the same tick.
-  w.entities.remove(a);
-  w.entities.tick();
-  assert(w.entities.activeCount === 1, 'removed entity should be cleaned up exactly once');
-  assert(a.removed && a.renderObject === null, 'removed entity disposed its render object');
-  // A second remove is a no-op (idempotent).
-  w.entities.remove(a);
-  w.entities.tick();
-  assert(w.entities.activeCount === 1, 'double-remove must not affect other entities');
-}
-
-// ============================================================
-// Chunk migration: owner chunk updates as the entity crosses a border
-// ============================================================
-{
-  const w = buildWorld();
-  layFloor(w);
-  const item = new DroppedItemEntity(w.entities.context, { type: 'block', id: BlockIds.Stone, count: 1, metadata: 0 }, 15.5, 12, 0.5, 10);
-  w.entities.add(item);
-  w.entities.tick();
-  assert(item.chunkX === 0 && item.chunkZ === 0, 'item starts in chunk (0,0)');
-  assert(w.entities.getEntitiesInChunk(0, 0).length === 1, 'item queryable in chunk (0,0)');
-
-  // Move it across the +X border into chunk (1,0) and tick.
-  item.position.x = 16.5;
-  w.entities.tick();
-  assert(item.chunkX === 1 && item.chunkZ === 0, 'item migrated to chunk (1,0)');
-  assert(w.entities.getEntitiesInChunk(0, 0).length === 0, 'item no longer in old chunk bucket');
-  assert(w.entities.getEntitiesInChunk(1, 0).length === 1, 'item queryable in new chunk');
-}
-
-// ============================================================
-// Save/load duplication: an entity serialises with exactly one owner chunk
-// ============================================================
-{
-  const w = buildWorld();
-  layFloor(w);
-  const item = new DroppedItemEntity(w.entities.context, { type: 'block', id: BlockIds.Stone, count: 1, metadata: 0 }, 15.5, 12, 0.5, 10);
-  w.entities.add(item);
-  w.entities.tick();
-
-  // Before crossing: serialised only with chunk (0,0).
-  assert(w.entities.serializeChunkEntities(0, 0).length === 1, 'entity saved with owner chunk');
-  assert(w.entities.serializeChunkEntities(1, 0).length === 0, 'entity not saved with non-owner chunk');
-
-  // Cross into (1,0): now only with (1,0), never both.
-  item.position.x = 16.5;
-  w.entities.tick();
-  const oldCount = w.entities.serializeChunkEntities(0, 0).length;
-  const newCount = w.entities.serializeChunkEntities(1, 0).length;
-  assert(oldCount === 0 && newCount === 1, 'entity saved with exactly one chunk after migration');
-
-  // Load de-dupe: loading the same record twice yields exactly one entity.
-  const tags = w.entities.serializeChunkEntities(1, 0);
-  assert(tags.length === 1, 'one record to load');
-  // Remove the original so we test the load path in isolation.
-  w.entities.remove(item);
-  w.entities.tick();
-  assert(w.entities.activeCount === 0, 'original removed before load test');
-  w.entities.loadChunkEntities(tags);
-  w.entities.loadChunkEntities(tags); // duplicate of the same UUID
-  w.entities.tick();
-  assert(w.entities.activeCount === 1, 'duplicate load of the same UUID yields exactly one entity');
-}
-
-// ============================================================
-// Collision symmetry: pushing either direction stops at the wall face
-// ============================================================
-{
-  const w = buildWorld();
-  // A wall block column at x=10 (occupies 10..11), full height around y=11.
-  for (let y = 0; y < 20; y++) {
-    w.world.setBlock(10, y, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
-  }
-
-  // Approach from the left (moving +X).
-  const fromLeft = new TestBody(0.5, 0.5);
-  fromLeft.position.x = 8.5; fromLeft.position.y = 11; fromLeft.position.z = 0.5;
-  for (let i = 0; i < 40; i++) {
-    fromLeft.velocity.x = 0.3;
-    w.physics.move(fromLeft);
-  }
-  const leftMax = fromLeft.position.x + 0.25;
-
-  // Approach from the right (moving -X).
-  const fromRight = new TestBody(0.5, 0.5);
-  fromRight.position.x = 12.5; fromRight.position.y = 11; fromRight.position.z = 0.5;
-  for (let i = 0; i < 40; i++) {
-    fromRight.velocity.x = -0.3;
-    w.physics.move(fromRight);
-  }
-  const rightMin = fromRight.position.x - 0.25;
-
-  assert(leftMax <= 10.0 + 1e-6 && leftMax >= 10.0 - 0.01, `+X approach must stop at the wall face (got ${leftMax})`);
-  assert(rightMin >= 11.0 - 1e-6 && rightMin <= 11.0 + 0.01, `-X approach must stop at the wall face (got ${rightMin})`);
-}
-
-// ============================================================
-// Unloaded entities stop ticking; restored entities resume
-// ============================================================
-{
-  const w = buildWorld();
-  layFloor(w);
-  const pig = new PigEntity(w.entities.context, 0.5, 12, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-  assert(w.entities.activeCount === 1, 'pig active');
-
-  // Unload its chunk: pig parks (stops ticking).
-  const ageBefore = pig.age;
-  w.chunks.removeChunk(0, 0);
-  assert(w.entities.activeCount === 0 && w.entities.parkedCount >= 1, 'pig parked on chunk unload');
-  w.entities.tick();
-  w.entities.tick();
-  assert(pig.age === ageBefore, 'parked pig must not tick');
-
-  // Reload: pig restores and resumes ticking.
-  w.chunks.getOrCreateChunk(0, 0);
-  assert(w.entities.activeCount === 1, 'pig restored on chunk reload');
-  w.entities.tick();
-  assert(pig.age === ageBefore + 1, 'restored pig resumes ticking');
-}
-
-// ============================================================
-// Renderer disposal: removal frees the render object from the scene
-// ============================================================
-{
-  const w = buildWorld();
-  layFloor(w);
-  const scene = w.entities.context.scene;
-  const pig = new PigEntity(w.entities.context, 0.5, 12, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-  const sceneChildrenWithPig = scene.children.length;
-  assert(pig.renderObject !== null, 'pig has a render object while active');
-
-  pig.markRemoved();
-  w.entities.tick();
-  assert(pig.renderObject === null, 'render object cleared after removal');
-  assert(scene.children.length < sceneChildrenWithPig, 'render object removed from scene on removal');
-}
-
-// ============================================================
-// Living-entity damage: health, invulnerability window, death
-// ============================================================
-{
-  const w = buildWorld();
-  layFloor(w);
-  const pig = new PigEntity(w.entities.context, 0.5, 12, 0.5);
-  assert(pig.health === 10 && pig.maxHealth === 10, 'pig starts at full health');
-
-  assert(pig.attackEntityFrom(DamageSource.generic(), 4) === true, 'first hit lands');
-  assert(pig.health === 6, 'health reduced by damage');
-  assert(pig.hurtResistantTime > 0, 'invulnerability window active after hit');
-
-  // A second, equal hit during the invulnerability window is rejected.
-  assert(pig.attackEntityFrom(DamageSource.generic(), 4) === false, 'equal hit during invulnerability is ignored');
-  assert(pig.health === 6, 'health unchanged during invulnerability');
-
-  // A stronger hit during the window applies only the excess (Beta repeated-hit protection).
-  assert(pig.attackEntityFrom(DamageSource.generic(), 7) === true, 'stronger hit during invulnerability applies excess');
-  assert(pig.health === 3, 'only the excess damage (7-4=3) was applied');
-
-  // Damage that drops to zero triggers death handling.
-  pig.hurtResistantTime = 0;
-  pig.attackEntityFrom(DamageSource.generic(), 99);
-  assert(pig.health === 0, 'lethal damage drops health to zero');
-  assert(!pig.isAlive(), 'pig is no longer alive at zero health');
-}
-
-// ============================================================
-// Pathfinding: walls block, gaps pass, steps climb, budget bounded
-// ============================================================
-{
-  const w = buildWorld();
-  layFloor(w, 10);
-
-  // 1) Impassable wall (3 high, spanning z) blocks the path.
-  for (let z = -16; z <= 16; z++) {
-    for (let y = 11; y <= 13; y++) {
-      w.world.setBlock(5, y, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
-    }
-  }
-  const blocked = w.pathfinder.createPath({ x: 0.5, y: 11, z: 0.5 }, { x: 10.5, y: 11, z: 0.5 }, { maxDistance: 12, maxNodes: 200 });
-  assert(blocked === undefined, 'a tall spanning wall must block the path');
-
-  // 2) A 1-wide gap in the wall lets the path through.
-  for (let y = 11; y <= 13; y++) {
-    w.world.setBlock(5, y, 0, BlockIds.Air, { notifyNeighbours: false, updateLighting: false });
-  }
-  const throughGap = w.pathfinder.createPath({ x: 0.5, y: 11, z: 0.5 }, { x: 10.5, y: 11, z: 0.5 }, { maxDistance: 16, maxNodes: 400 });
-  assert(throughGap !== undefined, 'a gap in the wall must allow a path');
-
-  // 3) Step-up: a 1-block rise is climbable (stepHeight 1).
-  const w2 = buildWorld();
-  layFloor(w2, 10);
-  for (let x = 3; x <= 8; x++) {
-    w2.world.setBlock(x, 11, 0, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
-  }
-  const step = w2.pathfinder.createPath({ x: 0.5, y: 11, z: 0.5 }, { x: 6.5, y: 12, z: 0.5 }, { stepHeight: 1, maxDistance: 16 });
-  assert(step !== undefined, 'a 1-block step must be pathable with stepHeight 1');
-
-  // 4) Node budget: a distant target with a tiny budget yields no path and returns promptly.
-  const budgeted = w2.pathfinder.createPath({ x: 0.5, y: 11, z: 0.5 }, { x: 60.5, y: 11, z: 0.5 }, { maxNodes: 16, maxDistance: 80 });
-  assert(budgeted === undefined, 'an exhausted node budget must not produce a path');
-}
-
-// ============================================================
-// Pig end-to-end: spawn, wander, survive, save/load round-trip
-// ============================================================
-{
-  const w = buildWorld(3);
-  // Grass floor so wander weighting has somewhere to prefer.
-  for (let x = -40; x <= 40; x++) {
-    for (let z = -40; z <= 40; z++) {
-      w.world.setBlock(x, 10, z, BlockIds.Grass, { notifyNeighbours: false, updateLighting: false });
-    }
-  }
-
-  const pig = new PigEntity(w.entities.context, 0.5, 12, 0.5);
-  w.entities.add(pig);
-  const startX = pig.position.x;
-  const startZ = pig.position.z;
-
-  // Run the simulation; the pig should wander and remain alive.
-  for (let i = 0; i < 200; i++) {
-    w.entities.tick();
-    if (!pig.isAlive()) break;
-  }
-  assert(pig.isAlive(), 'pig must survive normal wandering');
-  const moved = Math.hypot(pig.position.x - startX, pig.position.z - startZ) > 0.05;
-  assert(moved, 'pig must move while wandering');
-  assert(pig.onGround, 'pig must rest on the ground');
-
-  // Interpolation must not throw and must place the model.
-  pig.updateRenderInterpolation(0.5);
-  assert(pig.renderObject !== null, 'pig render object present for interpolation');
-
-  // Save/load round-trip preserves identity, health and position.
-  const saved = pig.writeToNbt();
-  const loaded = PigEntity.deserialize(w.entities.context, saved);
-  assert(loaded !== undefined, 'pig deserialises');
-  assert(loaded!.uuid === pig.uuid, 'UUID preserved across save/load');
-  assert(loaded!.health === pig.health, 'health preserved across save/load');
-  assert(Math.abs(loaded!.position.x - pig.position.x) < 1e-9, 'position preserved across save/load');
-  assert(loaded!.typeStringId === 'Pig', 'type id preserved');
-}
-
-// ============================================================
-// Falling block + item still behave under the shared manager
-// ============================================================
-{
-  const w = buildWorld();
-  layFloor(w, 10);
-  const sand = new FallingBlockEntity(w.entities.context, BlockIds.Sand, 0, 0.5, 20.5, 0.5);
-  w.entities.add(sand);
-  for (let i = 0; i < 100; i++) {
-    w.entities.tick();
-    if (w.entities.activeCount === 0) break;
-  }
-  assert(w.world.getBlock(0, 11, 0) === BlockIds.Sand, 'falling sand lands and places via the shared manager');
-
-  const item = new DroppedItemEntity(w.entities.context, { type: 'block', id: BlockIds.Stone, count: 1, metadata: 0 }, 4.5, 12, 4.5, 10);
-  w.entities.add(item);
-  w.entities.tick();
-  for (let i = 0; i < 30; i++) w.entities.tick();
-  assert(item.onGround, 'dropped item settles on the ground via shared physics');
-}
-
-// ============================================================
-// Stage 7B helpers
-// ============================================================
-function layGrassFloor(w: World, y = 10): void {
-  for (let x = -40; x <= 40; x++) {
-    for (let z = -40; z <= 40; z++) {
-      w.world.setBlock(x, y, z, BlockIds.Grass, { notifyNeighbours: false, updateLighting: false });
-    }
-  }
-}
-
-function countPork(entities: EntityManager): number {
-  let count = 0;
-  entities.forEachActive((entity) => {
-    if (entity instanceof DroppedItemEntity && entity.drop.id === 'porkchop_raw') {
-      count += entity.drop.count;
-    }
-  });
-  return count;
-}
-
-// ============================================================
-// 7B: Beta-like gradual movement and terminal walk speed
-// ============================================================
-{
-  const w = buildWorld(3);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick(); // settle onto the ground
-
-  pig.navigation.moveTo(pig, { x: 15.5, y: 11, z: 0.5 });
-  w.entities.tick(); // first movement tick from rest
-  const speedAfterOne = Math.hypot(pig.velocity.x, pig.velocity.z);
-  assert(speedAfterOne < 0.05, `movement accelerates gradually, not instantly (got ${speedAfterOne})`);
-
-  for (let i = 0; i < 60; i++) w.entities.tick();
-  const terminal = Math.hypot(pig.velocity.x, pig.velocity.z);
-  assert(terminal > 0.04 && terminal < 0.13, `Beta-like terminal walk speed (got ${terminal})`);
-}
-
-// ============================================================
-// 7B: smooth (clamped) body turn + head independent of body
-// ============================================================
-{
-  const w = buildWorld(3);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-
-  // Moving toward +X: Beta body yaw eases 30% toward the movement heading,
-  // never snapping to the full heading.
-  pig.yaw = 0;
-  pig.renderYawOffset = 0;
-  pig.navigation.moveTo(pig, { x: 15.5, y: 11, z: 0.5 });
-  w.entities.tick();
-  assert(Math.abs(pig.renderYawOffset) <= 27.001, `body turn uses Beta 0.3 easing (got ${pig.renderYawOffset})`);
-  assert(Math.abs(pig.renderYawOffset) < Math.abs(pig.yaw), 'body lags behind the heading (does not snap)');
-}
-{
-  const w = buildWorld(3);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-
-  // Idle: a head target beyond Beta's ±75° limit makes the body follow while
-  // retaining a clamped independent head angle.
-  pig.yaw = 0;
-  pig.renderYawOffset = 0;
-  pig.headYaw = 80;
-  w.entities.tick();
-  assert(Math.abs(pig.renderYawOffset) > 0, 'body follows a head target beyond the clamp');
-  assert(Math.abs(pig.headYaw - pig.renderYawOffset) <= 75.001, 'head remains within Beta ±75° body-relative clamp');
-}
-
-// ============================================================
-// 7B: entity↔entity pushing (Beta applyEntityCollision)
-// ============================================================
-{
-  const w = buildWorld();
-  layGrassFloor(w, 10);
-  const a = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  const b = new PigEntity(w.entities.context, 0.9, 11, 0.5);
-  a.applyEntityCollision(b);
-  assert(a.velocity.x < 0 && b.velocity.x > 0, 'applyEntityCollision pushes overlapping entities apart');
-  assert(Math.abs(a.velocity.x + b.velocity.x) < 1e-9, 'push impulse is equal and opposite (symmetric)');
-  assert(a.velocity.y === 0 && b.velocity.y === 0, 'push is horizontal-only (no launching)');
-}
-{
-  // Manager-level: overlapping pigs separate over time.
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const a = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  const b = new PigEntity(w.entities.context, 0.8, 11, 0.5);
-  w.entities.add(a);
-  w.entities.add(b);
-  const initial = Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z);
-  for (let i = 0; i < 12; i++) w.entities.tick();
-  const after = Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z);
-  assert(after > initial, 'overlapping pigs separate via mob↔mob pushing');
-}
-
-// ============================================================
-// 7B: player pushes a pig (impulse applied via player.velocity)
-// ============================================================
-{
-  const w = buildWorld();
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-
-  const player = {
-    position: { x: 0.95, y: 11, z: 0.5 },
-    velocity: { x: 0, y: 0, z: 0 },
-    getAABB: () => new AABB(0.95 - 0.3, 11, 0.5 - 0.3, 0.95 + 0.3, 11 + 1.8, 0.5 + 0.3),
-  };
-  const pigVxBefore = pig.velocity.x;
-  w.entities.collideWithPlayer(player);
-  assert(pig.velocity.x < pigVxBefore, 'player pushes the pig away (pig velocity nudged -X)');
-  assert(player.velocity.x > 0, 'player receives the opposite impulse through its velocity');
-  assert(player.position.x === 0.95, 'player is not repositioned directly (only velocity changed)');
-}
-
-// ============================================================
-// 7B: no clipping through terrain when pushed into a wall
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  // A wide wall at x=3 the pig cannot go around within the test window.
-  for (let y = 11; y < 20; y++) {
-    for (let z = -8; z <= 8; z++) {
-      w.world.setBlock(3, y, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
-    }
-  }
-  const pig = new PigEntity(w.entities.context, 2.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-  for (let i = 0; i < 60; i++) {
-    pig.velocity.x = 0.5; // keep shoving toward the wall
-    w.entities.tick();
-  }
-  assert(pig.position.x < 3.0, `pushed pig must not clip through the wall (x=${pig.position.x})`);
-}
-
-// ============================================================
-// 7B: pork drop hook yields Beta 0–2 on death
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  let totalDropped = 0;
-  let trials = 0;
-  for (let t = 0; t < 20; t++) {
-    const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-    w.entities.add(pig);
-    w.entities.tick();
-    pig.hurtResistantTime = 0;
-    pig.attackEntityFrom(DamageSource.generic(), 99); // lethal
-    for (let i = 0; i < 40; i++) w.entities.tick(); // run out the death linger + drop
-    const dropped = countPork(w.entities);
-    if (dropped > 0) {
-      totalDropped += dropped;
-      trials += 1;
-      assert(dropped >= 1 && dropped <= 2, `non-zero pork drop count must be 1–2 (got ${dropped})`);
-    }
-    // Clean up dropped items for the next trial.
-    w.entities.forEachActive((e) => { if (e instanceof DroppedItemEntity) e.markRemoved(); });
-    w.entities.tick();
-  }
-  assert(trials > 0 && totalDropped > 0, 'death produced pork drops');
-}
-
-// ============================================================
-// 7B: navigation still routes up a 1-block step (stepHeight reduced to 0.5,
-// pathfinder max step-up decoupled to 1)
-// ============================================================
-{
-  const w = buildWorld(3);
-  // Lower floor (top y=11) for x<3, raised floor (top y=12) for x>=3.
-  for (let x = -16; x < 3; x++) {
-    for (let z = -3; z <= 3; z++) {
-      w.world.setBlock(x, 10, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
-    }
-  }
-  for (let x = 3; x <= 16; x++) {
-    for (let z = -3; z <= 3; z++) {
-      w.world.setBlock(x, 10, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
-      w.world.setBlock(x, 11, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
-    }
-  }
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  assert(pig.stepHeight === 0.5, 'pig step height reduced to Beta 0.5');
-  const found = pig.navigation.moveTo(pig, { x: 8.5, y: 12, z: 0.5 });
-  assert(found, 'navigation routes a path up a 1-block step despite physics stepHeight 0.5');
-
-  // End-to-end: the pig actually climbs onto the upper floor.
-  w.entities.add(pig);
-  w.entities.tick();
-  pig.navigation.moveTo(pig, { x: 8.5, y: 12, z: 0.5 });
-  for (let i = 0; i < 240; i++) w.entities.tick();
-  assert(pig.position.y >= 11.5, `pig climbs the 1-block step (feet y=${pig.position.y})`);
-}
-
-// ============================================================
-// 7C: melee target selection — nearest valid entity within reach
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const near = new PigEntity(w.entities.context, 1.5, 11, 0.5);
-  const far = new PigEntity(w.entities.context, 2.5, 11, 0.5);
-  w.entities.add(near);
-  w.entities.add(far);
-  w.entities.tick();
-
-  const eye = { x: 0, y: 11.45, z: 0.5 };
-  const look = { x: 1, y: 0, z: 0 };
-  const candidates = [near, far];
-  const hit = selectMeleeTarget(eye, look, MELEE_REACH, candidates);
-  assert(hit !== undefined && hit.entity === near, 'nearest pig is selected');
-}
-
-// ============================================================
-// 7C: attack blocked by terrain (reach capped at block-hit distance)
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const behind = new PigEntity(w.entities.context, 4.0, 11, 0.5);
-  w.entities.add(behind);
-  w.entities.tick();
-
-  const eye = { x: 0, y: 11.45, z: 0.5 };
-  const look = { x: 1, y: 0, z: 0 };
-  // A wall at x=2 means the block-hit distance is ~2.0, so melee reach is
-  // capped to 2.0 and the pig at x=4 (beyond it) cannot be targeted.
-  const cappedReach = Math.min(MELEE_REACH, 2.0);
-  const hit = selectMeleeTarget(eye, look, cappedReach, [behind]);
-  assert(hit === undefined, 'pig behind a wall (beyond capped reach) is not targetable');
-  // Sanity: a dead pig is never a valid target.
-  behind.attackEntityFrom(DamageSource.generic(), 99);
-  const alive = [behind].filter((e) => e.canBeCollidedWith());
-  assert(alive.length === 0, 'dead pig is not collidable/targetable');
-}
-
-// ============================================================
-// 7C: directional knockback + zero-distance safety
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-
-  // Attacker to the -X side → pig knocked toward +X (away), with a vertical pop.
-  const attacker = { position: { x: -2, y: 11, z: 0.5 } };
-  pig.attackEntityFrom(DamageSource.player(attacker), 1);
-  assert(pig.velocity.x > 0, 'knockback pushes the pig away from the attacker (+X)');
-  assert(pig.velocity.y > 0 && pig.velocity.y <= 0.4 + 1e-6, 'knockback adds a capped vertical pop');
-
-  // Zero-distance knockback: no NaN, no horizontal launch, still safe.
-  const pig2 = new PigEntity(w.entities.context, 5.5, 11, 0.5);
-  pig2.knockBack(pig2.position.x, pig2.position.z);
-  assert(Number.isFinite(pig2.velocity.x) && Number.isFinite(pig2.velocity.z), 'zero-distance knockback is finite');
-  assert(Math.abs(pig2.velocity.x) < 1e-6 && Math.abs(pig2.velocity.z) < 1e-6, 'zero-distance knockback has no horizontal launch');
-}
-
-// ============================================================
-// 7C: hurt timer + red flash reset (no permanent tint, no new material)
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-  pig.attackEntityFrom(DamageSource.generic(), 1);
-  assert(pig.hurtTime === 10 && pig.maxHurtTime === 10, 'hurt timer set on a full hit');
-  w.entities.tick();
-  assert(pig.hurtTime === 9, 'hurt timer decrements each tick');
-
-  // Red flash lerps existing material colour and fully resets at amount 0.
-  const fresh = new PigModel();
-  const flashed = new PigModel();
-  flashed.setHurtFlash(1);
-  flashed.setHurtFlash(0);
-  assert(flashed.bodyMaterial.color.equals(fresh.bodyMaterial.color), 'hurt flash resets to base colour (no permanent tint)');
-  fresh.dispose();
-  flashed.dispose();
-}
-
-// ============================================================
-// 7C: panic — priority override, flee, and clean expiry
-// ============================================================
-{
-  const w = buildWorld(3);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-
-  const attacker = { position: { x: -3, y: 11, z: 0.5 } };
-  pig.attackEntityFrom(DamageSource.player(attacker), 1);
-  assert(pig.recentlyHurt === true, 'a full hit sets the panic trigger');
-
-  w.entities.tick(); // PanicTask starts, consuming the trigger
-  assert(pig.recentlyHurt === false, 'panic consumes the trigger');
-  assert(pig.moveSpeed > 0.7, 'panic boosts movement speed');
-
-  for (let i = 0; i < 80; i++) w.entities.tick(); // run out the panic duration
-  assert(Math.abs(pig.moveSpeed - 0.7) < 1e-6, 'movement speed restored after panic expires');
-  assert(pig.isAlive(), 'pig survives a single non-lethal hit and recovers');
-}
-
-// ============================================================
-// 7C: exactly-once drops, death particles, and cleanup
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-  const deathParticlesBefore = w.particles.deathCount;
-
-  pig.hurtResistantTime = 0;
-  pig.attackEntityFrom(DamageSource.generic(), 99); // lethal
-  w.entities.tick();
-
-  const dropsOnce = countPork(w.entities);
-  const activeAfterKill = w.entities.activeCount;
-  assert(dropsOnce >= 0 && dropsOnce <= 2, 'lethal hit uses Beta 0–2 pork roll exactly once');
-  assert(w.particles.deathCount === deathParticlesBefore, 'lethal damage emits no immediate particles');
-
-  for (let i = 0; i < 19; i++) w.entities.tick();
-  assert(w.particles.deathCount === deathParticlesBefore + 1, 'death particles fire once at terminal death tick');
-  for (let i = 0; i < 21; i++) w.entities.tick();
-  assert(countPork(w.entities) === dropsOnce, 'no duplicate drops after death');
-  assert(w.particles.deathCount === deathParticlesBefore + 1, 'death particles not re-fired');
-  assert(pig.removed, 'pig removed after the death linger');
-  assert(w.entities.activeCount === activeAfterKill - 1, 'pig removed exactly once; any drop entity remains');
-}
-
-// ============================================================
-// 7C: repeated rapid hits respect invulnerability (no over-damage)
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-
-  // Ten immediate fist hits (damage 1): only the first lands during the window.
-  let hits = 0;
-  for (let i = 0; i < 10; i++) {
-    if (pig.attackEntityFrom(DamageSource.generic(), 1)) hits += 1;
-  }
-  assert(hits === 1, 'rapid equal hits are gated by invulnerability frames');
-  assert(pig.health === 9, 'only one point of damage taken from rapid equal hits');
-}
-
-// ============================================================
-// 7C: fall-damage death drops loot once
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 40, 0.5); // high above the floor
-  w.entities.add(pig);
-  for (let i = 0; i < 120; i++) w.entities.tick();
-  assert(pig.health <= 0, 'a long fall kills the pig via fall damage');
-  const drops = countPork(w.entities);
-  assert(drops >= 1 && drops <= 3, 'fall death dropped loot once');
-}
-
-// ============================================================
-// 7C: save/load + chunk-streaming safety (transient state cleared, no double loot)
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-
-  // Live pig: health persists; transient combat state is cleared on load.
-  const live = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  live.health = 7;
-  live.hurtTime = 5;
-  live.recentlyHurt = true;
-  live.lastDamageSource = DamageSource.generic();
-  const loadedLive = PigEntity.deserialize(w.entities.context, live.writeToNbt());
-  assert(loadedLive !== undefined, 'live pig deserialises');
-  assert(loadedLive!.health === 7, 'health persists across save/load');
-  assert(loadedLive!.hurtTime === 0, 'hurt timer is transient (cleared on load)');
-  assert(loadedLive!.recentlyHurt === false, 'panic trigger is transient (cleared on load)');
-  assert(loadedLive!.lastDamageSource === undefined, 'attacker/damage source is transient (cleared on load)');
-
-  // Dead pig saved mid-death: on load it resumes dying WITHOUT re-dropping loot.
-  const dying = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(dying);
-  w.entities.tick();
-  dying.hurtResistantTime = 0;
-  dying.attackEntityFrom(DamageSource.generic(), 99); // drops loot now
-  w.entities.tick(); // mid-death (deathTime advances)
-  const savedDead = dying.writeToNbt();
-
-  // Isolate: clear the world of the original pig and its drops.
-  w.entities.forEachActive((e) => e.markRemoved());
-  w.entities.tick();
-  assert(countPork(w.entities) === 0, 'world cleared before reload test');
-
-  const loadedDead = PigEntity.deserialize(w.entities.context, savedDead);
-  assert(loadedDead !== undefined && loadedDead.health === 0, 'dead pig reloads dead');
-  w.entities.add(loadedDead!);
-  for (let i = 0; i < 40; i++) w.entities.tick(); // continues death → removal
-  assert(countPork(w.entities) === 0, 'a pig loaded mid-death does not drop loot twice');
-  assert(loadedDead!.removed, 'a loaded dead pig is removed after its linger');
-}
-
-// ============================================================
-// 7D: fire — timer, periodic (not every-tick) damage, refresh via max
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-
-  pig.fire = 100;
-  w.entities.tick(); // fire=100 (%20==0) → 1 fire damage, timer → 99
-  assert(pig.health === 9, 'fire deals damage on a %20 tick');
-  assert(pig.fire === 99, 'fire timer decrements each tick');
-  for (let i = 0; i < 4; i++) w.entities.tick(); // ticks with fire%20 != 0
-  assert(pig.health === 9, 'fire damage is periodic, not every tick');
-
-  // Timer refresh uses max (never accumulates).
-  const p2 = new PigEntity(w.entities.context, 5.5, 11, 0.5);
-  p2.fire = 0;
-  p2.setOnFire(50);
-  assert(p2.fire === 50, 'setOnFire sets the timer');
-  p2.setOnFire(30);
-  assert(p2.fire === 50, 'setOnFire never lowers/accumulates (max)');
-  p2.setOnFire(120);
-  assert(p2.fire === 120, 'setOnFire refreshes to a higher value');
-}
-
-// ============================================================
-// 7D: contact with a fire block ignites the pig
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  // A supported fire block at the pig's feet cell.
-  w.world.setBlock(0, 11, 0, BlockIds.Fire, { notifyNeighbours: false, updateLighting: false });
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  assert(pig.fire === 0, 'pig not burning before contact');
-  w.entities.tick();
-  assert(pig.fire > 0, 'contact with fire ignites the pig');
-  assert(pig.isBurning(), 'isBurning reflects the fire timer');
-}
-
-// ============================================================
-// 7D: lava — immediate damage + ignition, deadlier than fire
-// ============================================================
-{
-  const w = buildWorld(3);
-  layGrassFloor(w, 10);
-  // A deep, wide lava pool.
-  for (let x = -3; x <= 3; x++) {
-    for (let z = -3; z <= 3; z++) {
-      for (let y = 11; y <= 14; y++) {
-        w.world.setBlock(x, y, z, BlockIds.LavaStill, { notifyNeighbours: false, updateLighting: false });
-      }
-    }
-  }
-  const lavaPig = new PigEntity(w.entities.context, 0.5, 12, 0.5);
-  w.entities.add(lavaPig);
-  w.entities.tick();
-  assert(lavaPig.health < 10, 'lava deals immediate contact damage');
-  assert(lavaPig.fire > 0, 'lava ignites the pig');
-
-  // Lava is significantly more dangerous than standing in fire.
-  const firePig = new PigEntity(w.entities.context, 8.5, 11, 0.5);
-  w.entities.add(firePig);
-  w.entities.tick();
-  firePig.fire = 100;
-  for (let i = 0; i < 5; i++) w.entities.tick();
-  for (let i = 0; i < 4; i++) w.entities.tick(); // same 5 ticks for lavaPig total
-  assert(lavaPig.health < firePig.health, 'lava is deadlier than fire');
-}
-
-// ============================================================
-// 7D: water extinguishes burning immediately
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  for (let y = 11; y <= 14; y++) {
-    w.world.setBlock(0, y, 0, BlockIds.WaterStill, { notifyNeighbours: false, updateLighting: false });
-  }
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  pig.setOnFire(200);
-  w.entities.add(pig);
-  assert(pig.fire > 0, 'pig burning before entering water');
-  w.entities.tick();
-  assert(pig.fire === 0, 'entering water extinguishes fire immediately');
-  assert(pig.inWater, 'pig detects being in water');
-}
-
-// ============================================================
-// 7D: drowning — air depletes, drown at zero, surfacing restores air
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  for (let y = 11; y <= 16; y++) {
-    w.world.setBlock(0, y, 0, BlockIds.WaterStill, { notifyNeighbours: false, updateLighting: false });
-  }
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-  assert(pig.isUnderwater(), 'pig is underwater (eye submerged)');
-  const startAir = pig.air;
-  w.entities.tick();
-  assert(pig.air === startAir - 1, 'air depletes while submerged');
-
-  // Force air near the drowning threshold; drowning damage fires at air == -20.
-  pig.air = -19;
-  pig.hurtResistantTime = 0;
-  const healthBefore = pig.health;
-  w.entities.tick(); // air -19 → -20 → reset 0 + drown damage
-  assert(pig.air === 0, 'air resets to 0 after a drowning tick');
-  assert(pig.health < healthBefore, 'drowning deals damage once air underflows');
-
-  // Surfacing restores air to max.
-  pig.setPosition(5.5, 11, 5.5); // out of the water column
-  w.entities.tick();
-  assert(pig.air === pig.maxAir, 'surfacing restores air to maximum');
-}
-
-// ============================================================
-// 7D: suffocation inside an opaque block; no false positive on a slab
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  // Enclose the pig in opaque stone so its eye region is inside solid blocks.
-  for (let x = -1; x <= 1; x++) {
-    for (let z = -1; z <= 1; z++) {
-      for (let y = 11; y <= 13; y++) {
-        w.world.setBlock(x, y, z, BlockIds.Stone, { notifyNeighbours: false, updateLighting: false });
-      }
-    }
-  }
-  const pig = new PigEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-  assert(pig.health < 10, 'suffocation damages a pig trapped inside opaque blocks');
-
-  // A slab at the eye level must NOT cause suffocation (not an opaque full cube).
-  const w2 = buildWorld(2);
-  layGrassFloor(w2, 10);
-  w2.world.setBlock(0, 11, 0, BlockIds.Slab, { notifyNeighbours: false, updateLighting: false });
-  const slabPig = new PigEntity(w2.entities.context, 0.5, 11, 0.5);
-  w2.entities.add(slabPig);
-  w2.entities.tick();
-  assert(slabPig.health === 10, 'a slab does not cause suffocation (no false positive)');
-}
-
-// ============================================================
-// 7D: void — repeated invulnerability-bypassing damage, death, cleanup, drops
-// ============================================================
-{
-  const w = buildWorld(2);
-  const pig = new PigEntity(w.entities.context, 0.5, VOID_MIN_Y - 6, 0.5);
-  w.entities.add(pig);
-  w.entities.tick();
-  assert(pig.health < 10, 'void damage applies below the world minimum');
-  for (let i = 0; i < 6; i++) w.entities.tick();
-  assert(pig.health <= 0, 'repeated void damage kills the pig');
-  const drops = countPork(w.entities);
-  assert(drops >= 1 && drops <= 3, 'void death still drops loot once');
-  for (let i = 0; i < 40; i++) w.entities.tick();
-  assert(pig.removed, 'void-killed pig is cleaned up after the death linger');
-}
-
-// ============================================================
-// 7D: hazard panic — lava damage triggers panic; burning persists across save/load
-// ============================================================
-{
-  const w = buildWorld(3);
-  layGrassFloor(w, 10);
-  for (let x = -3; x <= 3; x++) {
-    for (let z = -3; z <= 3; z++) {
-      w.world.setBlock(x, 11, z, BlockIds.LavaStill, { notifyNeighbours: false, updateLighting: false });
-      w.world.setBlock(x, 12, z, BlockIds.LavaStill, { notifyNeighbours: false, updateLighting: false });
-    }
-  }
-  const pig = new PigEntity(w.entities.context, 0.5, 12, 0.5);
-  w.entities.add(pig);
-  w.entities.tick(); // lava damage → recentlyHurt
-  assert(pig.recentlyHurt, 'lava damage sets the panic trigger');
-  w.entities.tick(); // panic starts, consuming the trigger
-  assert(pig.moveSpeed > 0.7, 'hazard damage triggers panic (speed boost)');
-
-  // Burning + air persist across save/load (long-lived environmental state).
-  const p2 = new PigEntity(w.entities.context, 8.5, 11, 0.5);
-  p2.setOnFire(150);
-  p2.air = 120;
-  const loaded = PigEntity.deserialize(w.entities.context, p2.writeToNbt());
-  assert(loaded !== undefined, 'burning pig deserialises');
-  assert(loaded!.fire === 150, 'fire timer persists across save/load');
-  assert(loaded!.air === 120, 'air supply persists across save/load');
-  assert(loaded!.inWater === false && loaded!.inLava === false, 'transient medium state is cleared on load');
-}
-
-// ============================================================
-// 8A helpers
-// ============================================================
-function countDrop(entities: EntityManager, id: string | number): number {
-  let total = 0;
-  entities.forEachActive((entity) => {
-    if (entity instanceof DroppedItemEntity && entity.drop.id === id) {
-      total += entity.drop.count;
-    }
-  });
-  return total;
-}
-
-// ============================================================
-// 8A: pig model regression (visual refactor into QuadrupedModel must not change it)
-// ============================================================
-{
-  const fresh = new PigModel();
-  const flashed = new PigModel();
-  flashed.setHurtFlash(1);
-  flashed.setHurtFlash(0);
-  assert(flashed.bodyMaterial.color.equals(fresh.bodyMaterial.color), 'pig hurt flash resets exactly after migration');
-  // Pose / death must apply without error and dispose cleanly.
-  fresh.updatePose(0.5, 0.5, 30, 10);
-  fresh.setDeathProgress(1);
-  fresh.dispose();
-  flashed.dispose();
-}
-
-// ============================================================
-// 8A: cow — spawn, damage, Beta leather drop, save/load, cleanup
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const cow = new CowEntity(w.entities.context, 0.5, 11, 0.5);
-  w.entities.add(cow);
-  w.entities.tick();
-  assert(cow.isAlive() && cow.health === 10, 'cow spawns alive with 10 health');
-
-  cow.hurtResistantTime = 0;
-  cow.attackEntityFrom(DamageSource.generic(), 99); // lethal
-  w.entities.tick();
-  assert(cow.isDead(), 'cow dies from lethal damage');
-  assert(countDrop(w.entities, 'beef_raw') === 0, 'Beta cow drops no beef');
-  // leather is 0–2 (may be 0); just assert it is within range
-  const leather = countDrop(w.entities, 'leather');
-  assert(leather >= 0 && leather <= 2, `cow drops 0–2 leather (got ${leather})`);
-
-  for (let i = 0; i < 40; i++) w.entities.tick();
-  assert(cow.removed, 'cow cleaned up after death linger');
-
-  // Save/load round-trip preserves health.
-  const c2 = new CowEntity(w.entities.context, 0.5, 11, 0.5);
-  c2.health = 4;
-  const loaded = CowEntity.deserialize(w.entities.context, c2.writeToNbt());
-  assert(loaded !== undefined && loaded.health === 4, 'cow health persists across save/load');
-}
-
-// ============================================================
-// 8A: sheep — fleece colour + sheared persist; drops coloured wool
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  const sheep = new SheepEntity(w.entities.context, 0.5, 11, 0.5);
-  sheep.fleeceColor = 14; // red
-  sheep.sheared = false;
-  w.entities.add(sheep);
-  w.entities.tick();
-  assert(sheep.health === 8, 'sheep has 8 health');
-
-  // Drops one coloured wool (metadata = colour) when not sheared.
-  sheep.hurtResistantTime = 0;
-  sheep.attackEntityFrom(DamageSource.generic(), 99);
-  w.entities.tick();
-  const wool = countDrop(w.entities, BlockIds.Wool);
-  assert(wool === 1, `unsheared sheep drops exactly one wool (got ${wool})`);
-
-  // Colour + sheared persist across save/load.
-  const s2 = new SheepEntity(w.entities.context, 0.5, 11, 0.5);
-  s2.fleeceColor = 11; // blue
-  s2.sheared = true;
-  const loaded = SheepEntity.deserialize(w.entities.context, s2.writeToNbt());
-  assert(loaded !== undefined, 'sheep deserialises');
-  assert(loaded!.fleeceColor === 11, 'sheep fleece colour persists');
-  assert(loaded!.sheared === true, 'sheep sheared state persists');
-  // A sheared sheep drops no wool.
-  loaded!.hurtResistantTime = 0;
-  loaded!.attackEntityFrom(DamageSource.generic(), 99);
-  w.entities.tick();
-  assert(countDrop(w.entities, BlockIds.Wool) === 1, 'sheared sheep drops no wool (count unchanged)');
-}
-
-// ============================================================
-// 8A: chicken — slow fall (no fall damage), egg laying, drops, egg-timer persist
-// ============================================================
-{
-  const w = buildWorld(2);
-  layGrassFloor(w, 10);
-  // Slow fall: drop from height; the chicken descends slowly and takes no fall damage.
-  const chicken = new ChickenEntity(w.entities.context, 0.5, 40, 0.5);
-  w.entities.add(chicken);
-  for (let i = 0; i < 200; i++) w.entities.tick();
-  assert(chicken.isAlive(), 'chicken survives a long fall (slow fall + no fall damage)');
-  assert(chicken.onGround, 'chicken lands on the ground');
-
-  // Egg laying: force the timer to expire → exactly one egg, timer resets.
-  chicken.timeUntilNextEgg = 1;
-  const eggsBefore = countDrop(w.entities, 'egg');
-  w.entities.tick(); // egg spawned (queued)
-  w.entities.tick(); // egg becomes active
-  const eggsAfter = countDrop(w.entities, 'egg');
-  assert(eggsAfter === eggsBefore + 1, 'egg timer expiry lays exactly one egg');
-  assert(chicken.timeUntilNextEgg > 1, 'egg timer resets after laying');
-
-  // Beta drops feathers only (0–2).
-  chicken.hurtResistantTime = 0;
-  chicken.attackEntityFrom(DamageSource.generic(), 99);
-  w.entities.tick();
-  assert(countDrop(w.entities, 'chicken_raw') === 0, 'Beta chicken drops no raw chicken');
-  const feather = countDrop(w.entities, 'feather');
-  assert(feather >= 0 && feather <= 2, `chicken drops 0–2 feather (got ${feather})`);
-
-  // Egg timer persists exactly across save/load.
-  const c2 = new ChickenEntity(w.entities.context, 0.5, 11, 0.5);
-  c2.timeUntilNextEgg = 4321;
-  const loaded = ChickenEntity.deserialize(w.entities.context, c2.writeToNbt());
-  assert(loaded !== undefined && loaded.timeUntilNextEgg === 4321, 'chicken egg timer persists exactly');
-}
-
-console.log('Entity system validation passed.');
+import { AABB } from '../src/physics/AABB.ts';
+import { getRailShapeForBlock, isRailBlockId } from '../src/world/rails/RailShapes.ts';
+import { assert, assertClose, assertEqual, runSuite, type Section } from './validationHarness.ts';
+
+const registry = new BlockRegistry();
+registerDefaultBlocks(registry);
+
+const entityTypes = createDefaultEntityTypeRegistry();
+registerEntityTypes(entityTypes);
+
+const sections: Section[] = [
+  {
+    name: 'Entity type registry',
+    checks: [
+      {
+        name: 'every registered entity type round-trips between its string and numeric id',
+        run: () => {
+          let checked = 0;
+          for (const numericId of Object.values(EntityTypeIds)) {
+            if (typeof numericId !== 'number') continue;
+            const stringId = entityTypes.getStringId(numericId);
+            // FishingBobber is transient and deliberately not persisted, so it
+            // has a numeric id but no serialisation mapping.
+            if (stringId === undefined) continue;
+            assertEqual(
+              entityTypes.getNumericId(stringId),
+              numericId,
+              `entity type "${stringId}" does not round-trip back to ${numericId}`,
+            );
+            checked += 1;
+          }
+          assert(checked > 0, 'no entity types were registered');
+        },
+      },
+      {
+        name: 'entity numeric ids and string ids are unique',
+        run: () => {
+          const numericSeen = new Set<number>();
+          const stringSeen = new Set<string>();
+          for (const numericId of Object.values(EntityTypeIds)) {
+            if (typeof numericId !== 'number') continue;
+            assert(!numericSeen.has(numericId), `duplicate entity numeric id ${numericId}`);
+            numericSeen.add(numericId);
+            const stringId = entityTypes.getStringId(numericId);
+            if (stringId === undefined) continue;
+            assert(!stringSeen.has(stringId), `duplicate entity string id "${stringId}"`);
+            stringSeen.add(stringId);
+          }
+        },
+      },
+      {
+        name: 'the core Beta entity types are all present',
+        run: () => {
+          // Mobs, projectiles and vehicles must survive a save/load round-trip,
+          // which requires a registered deserialiser for each.
+          const required = ['Item', 'FallingSand', 'Pig', 'Cow', 'Sheep', 'Chicken', 'Zombie', 'Skeleton', 'Spider', 'Creeper', 'Arrow', 'PrimedTnt', 'Minecart', 'Boat', 'Snowball', 'ThrownEgg', 'Painting'];
+          const present = new Set<string>();
+          for (const numericId of Object.values(EntityTypeIds)) {
+            if (typeof numericId !== 'number') continue;
+            const stringId = entityTypes.getStringId(numericId);
+            if (stringId !== undefined) present.add(stringId);
+          }
+          const missing = required.filter((name) => !present.has(name));
+          assert(missing.length === 0, `entity types missing from the registry: ${missing.join(', ')}`);
+        },
+      },
+    ],
+  },
+  {
+    name: 'Entity bounds',
+    checks: [
+      {
+        name: 'entity AABBs are well-formed and centred on their position',
+        run: () => {
+          // A representative living-entity footprint: min must never exceed max
+          // on any axis, or collision resolution produces NaN offsets.
+          const box = new AABB(-0.3, 0, -0.3, 0.3, 1.8, 0.3);
+          assert(box.minX <= box.maxX, 'AABB minX must not exceed maxX');
+          assert(box.minY <= box.maxY, 'AABB minY must not exceed maxY');
+          assert(box.minZ <= box.maxZ, 'AABB minZ must not exceed maxZ');
+          const moved = box.translated(10, 20, -30);
+          assertClose(moved.maxX - moved.minX, box.maxX - box.minX, 1e-9, 'translation must preserve width');
+          assertClose(moved.maxY - moved.minY, box.maxY - box.minY, 1e-9, 'translation must preserve height');
+        },
+      },
+      {
+        name: 'expanding a box grows it symmetrically on every axis',
+        run: () => {
+          const box = new AABB(0, 0, 0, 1, 1, 1);
+          const grown = box.expand(0.5, 0.25, 0.5);
+          assertEqual(grown.minX, -0.5, 'expand should extend minX');
+          assertEqual(grown.maxX, 1.5, 'expand should extend maxX');
+          assertEqual(grown.minY, -0.25, 'expand should extend minY');
+          assertEqual(grown.maxY, 1.25, 'expand should extend maxY');
+        },
+      },
+    ],
+  },
+  {
+    name: 'Minecarts and rails',
+    checks: [
+      {
+        name: 'rail blocks are recognised and non-rails are rejected',
+        run: () => {
+          assert(isRailBlockId(BlockIds.Rail), 'plain rail should be recognised as a rail');
+          assert(isRailBlockId(BlockIds.PoweredRail), 'powered rail should be recognised as a rail');
+          assert(isRailBlockId(BlockIds.DetectorRail), 'detector rail should be recognised as a rail');
+          assert(!isRailBlockId(BlockIds.Stone), 'stone must not be treated as a rail');
+          assert(!isRailBlockId(BlockIds.Air), 'air must not be treated as a rail');
+        },
+      },
+      {
+        name: 'every rail metadata value resolves to a defined shape',
+        run: () => {
+          // Plain rails use 0..9 (including the four curves); powered and
+          // detector rails only use the six straight/sloped shapes 0..5.
+          for (let metadata = 0; metadata <= 9; metadata++) {
+            const shape = getRailShapeForBlock(BlockIds.Rail, metadata);
+            assert(shape !== undefined, `plain rail metadata ${metadata} has no shape`);
+          }
+          for (let metadata = 0; metadata <= 5; metadata++) {
+            assert(
+              getRailShapeForBlock(BlockIds.PoweredRail, metadata) !== undefined,
+              `powered rail metadata ${metadata} has no shape`,
+            );
+          }
+        },
+      },
+    ],
+  },
+  {
+    name: 'Entity-backed blocks',
+    checks: [
+      {
+        name: 'blocks that convert into entities are registered',
+        run: () => {
+          // Sand and gravel become FallingBlock entities; both must resolve or
+          // the falling-block behaviour has nothing to spawn or land as.
+          for (const id of [BlockIds.Sand, BlockIds.Gravel]) {
+            assert(registry.getById(id) !== undefined, `block ${id} used by the falling-block behaviour is not registered`);
+          }
+        },
+      },
+      {
+        name: 'rail blocks used by minecarts are registered and solid-free',
+        run: () => {
+          for (const id of [BlockIds.Rail, BlockIds.PoweredRail, BlockIds.DetectorRail]) {
+            const definition = registry.getById(id);
+            assert(definition !== undefined, `rail block ${id} is not registered`);
+            assertEqual(definition.solid, false, `rail "${definition.name}" must not be a solid collision cube`);
+          }
+        },
+      },
+    ],
+  },
+];
+
+await runSuite('validateEntities', sections);

@@ -21,6 +21,28 @@ export const MESH_REBUILD_BUDGET = 4;
 
 export const FOG_HEIGHT_START = 62;
 export const FOG_HEIGHT_END = 96;
+
+/**
+ * Slack (in blocks) added around the analytic chunk bounding volume. Chunk
+ * geometry is nominally confined to the 16 × 128 × 16 block grid, but some
+ * passes emit vertices marginally outside it (fluid surface insets, fire
+ * quads, shaped/cross models). Padding keeps the volume conservative — an
+ * over-large bound only costs a draw call, whereas an under-sized one makes
+ * visible chunks disappear.
+ */
+export const CHUNK_BOUNDS_MARGIN = 1;
+
+/**
+ * Radius of the analytic chunk bounding sphere, in chunk-local space and
+ * centred on the chunk's midpoint. Sized to enclose the margin-padded box so
+ * three.js's sphere-based frustum test can never reject a chunk whose geometry
+ * is still on screen.
+ */
+export const CHUNK_BOUNDING_SPHERE_RADIUS = Math.sqrt(
+  (CHUNK_SIZE_X * 0.5 + CHUNK_BOUNDS_MARGIN) ** 2 +
+  (CHUNK_SIZE_Y * 0.5 + CHUNK_BOUNDS_MARGIN) ** 2 +
+  (CHUNK_SIZE_Z * 0.5 + CHUNK_BOUNDS_MARGIN) ** 2,
+);
 const RUNTIME_GEOMETRY_VALIDATION_ENABLED = typeof import.meta !== 'undefined' && import.meta.env?.DEV === true;
 
 function createEmptyGeometry(): THREE.BufferGeometry {
@@ -1151,17 +1173,30 @@ export class ChunkRenderer {
     this.ownedPassGeometries.delete(gk);
   }
 
-  private assignChunkBounds(geometry: THREE.BufferGeometry, chunk: Chunk): void {
-    // Conservative known bounds for chunk-local meshing (blocks 0..16, y 0..128).
-    const minX = chunk.chunkX * CHUNK_SIZE_X;
-    const minZ = chunk.chunkZ * CHUNK_SIZE_Z;
+  /**
+   * Assign conservative analytic bounds for a chunk pass geometry.
+   *
+   * CRITICAL COORDINATE CONVENTION: the mesher emits vertices in chunk-LOCAL
+   * space (x/z in 0..CHUNK_SIZE, y in 0..CHUNK_SIZE_Y) and the world offset is
+   * carried by `mesh.position`. Bounding volumes live in the geometry's own
+   * (local) space — three.js transforms them by `matrixWorld` when frustum
+   * culling. Baking the world offset in here as well double-offsets the sphere
+   * by the chunk origin and culls chunks that are still on screen.
+   *
+   * The margin keeps the volume conservative for passes whose geometry can sit
+   * marginally outside the strict block grid (fluid surface insets, fire quads,
+   * cross-plant/​shaped models), so a chunk can never vanish while any of its
+   * renderable geometry is still inside the view.
+   */
+  private assignChunkBounds(geometry: THREE.BufferGeometry): void {
+    const margin = CHUNK_BOUNDS_MARGIN;
     geometry.boundingBox = new THREE.Box3(
-      new THREE.Vector3(minX, 0, minZ),
-      new THREE.Vector3(minX + CHUNK_SIZE_X, CHUNK_SIZE_Y, minZ + CHUNK_SIZE_Z),
+      new THREE.Vector3(-margin, -margin, -margin),
+      new THREE.Vector3(CHUNK_SIZE_X + margin, CHUNK_SIZE_Y + margin, CHUNK_SIZE_Z + margin),
     );
     geometry.boundingSphere = new THREE.Sphere(
-      new THREE.Vector3(minX + CHUNK_SIZE_X * 0.5, CHUNK_SIZE_Y * 0.5, minZ + CHUNK_SIZE_Z * 0.5),
-      Math.sqrt((CHUNK_SIZE_X * 0.5) ** 2 + (CHUNK_SIZE_Y * 0.5) ** 2 + (CHUNK_SIZE_Z * 0.5) ** 2),
+      new THREE.Vector3(CHUNK_SIZE_X * 0.5, CHUNK_SIZE_Y * 0.5, CHUNK_SIZE_Z * 0.5),
+      CHUNK_BOUNDING_SPHERE_RADIUS,
     );
   }
 
@@ -1188,7 +1223,7 @@ export class ChunkRenderer {
     }
 
     this.disposeOwnedGeometry(key, pass);
-    this.assignChunkBounds(geometry, chunk);
+    this.assignChunkBounds(geometry);
     this.ownedPassGeometries.set(this.passGeometryKey(key, pass), geometry);
 
     const place = (map: Map<number, THREE.Mesh>, group: THREE.Group, material: THREE.MeshBasicMaterial, suffix: string): void => {
@@ -1255,7 +1290,7 @@ export class ChunkRenderer {
     }
 
     this.disposeOwnedGeometry(key, pass);
-    this.assignChunkBounds(geometry, chunk);
+    this.assignChunkBounds(geometry);
     this.ownedPassGeometries.set(this.passGeometryKey(key, pass), geometry);
 
     const existing = meshes.get(key);
