@@ -89,6 +89,11 @@ export class Player extends Entity {
 
   public distanceWalkedModified = 0;
   public prevDistanceWalkedModified = 0;
+  public cameraYaw = 0;
+  public prevCameraYaw = 0;
+  public cameraPitch = 0;
+  public prevCameraPitch = 0;
+  public animationAgeTicks = 0;
 
   public isSwinging = false;
   public armAction:'none'|'breaking'|'breakingRecover'='none';public breakingSwingPhase=0;public prevBreakingSwingPhase=0;
@@ -219,6 +224,10 @@ export class Player extends Entity {
   public updateAnimationState(deltaSeconds: number, headYawRadians = this.bodyYaw): void {
     this.prevLimbSwingPhase = this.limbSwingPhase;
     this.prevLimbSwingAmount = this.limbSwingAmount;
+    this.prevDistanceWalkedModified = this.distanceWalkedModified;
+    this.prevCameraYaw = this.cameraYaw;
+    this.prevCameraPitch = this.cameraPitch;
+    this.animationAgeTicks += Math.max(0, deltaSeconds) * 20;
     this.prevSwingProgress=this.swingProgress;this.prevBreakingSwingPhase=this.breakingSwingPhase;if(this.armAction==='breaking')this.breakingSwingPhase=(this.breakingSwingPhase+deltaSeconds*3)%1;else if(this.armAction==='breakingRecover'){this.breakingSwingPhase=Math.min(1,this.breakingSwingPhase+deltaSeconds*3);if(this.breakingSwingPhase>=1)this.stopBreakingAnimation();}
     this.prevBodyYaw = this.bodyYaw;
 
@@ -262,13 +271,20 @@ export class Player extends Entity {
     // While swinging, Beta snaps the body to the aim direction so an attack
     // always faces the target.
     if (this.swingProgress > 0) bodyTarget = headYawRadians;
-    // Airborne: the swing amount decays to zero (no mid-air walk cycle).
-    if (!this.grounded) swingTarget = 0;
+    // Airborne keeps a reduced locomotion influence from horizontal momentum.
+    if (!this.grounded) swingTarget *= 0.45;
 
-    this.limbSwingAmount += (swingTarget - this.limbSwingAmount) * BETA_LIMB_SWING_SMOOTHING;
+    const tickScale = Math.max(0, deltaSeconds) * 20;
+    const limbSmoothing = 1 - Math.pow(1 - BETA_LIMB_SWING_SMOOTHING, tickScale);
+    const bodySmoothing = 1 - Math.pow(1 - BETA_BODY_YAW_FOLLOW, tickScale);
+    this.limbSwingAmount += (swingTarget - this.limbSwingAmount) * limbSmoothing;
+    this.distanceWalkedModified += moved;
+    const bobTarget = this.grounded && !this.isFlying ? Math.min(1, moved * 4) : 0;
+    this.cameraYaw += (bobTarget - this.cameraYaw) * limbSmoothing;
+    this.cameraPitch += (0 - this.cameraPitch) * limbSmoothing;
 
-    // Body chases the travel/aim direction at 30% per tick.
-    this.bodyYaw += wrapRadiansPi(bodyTarget - this.bodyYaw) * BETA_BODY_YAW_FOLLOW;
+    // Body chases the travel/aim direction at Beta's 30% per tick.
+    this.bodyYaw += wrapRadiansPi(bodyTarget - this.bodyYaw) * bodySmoothing;
 
     // Head/body separation is clamped to +/-75 degrees; beyond 50 degrees the
     // body is dragged along so the player cannot stay owl-necked.

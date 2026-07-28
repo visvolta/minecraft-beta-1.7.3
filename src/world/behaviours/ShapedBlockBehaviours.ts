@@ -47,8 +47,8 @@ function mergeBounds(
 }
 
 /** Beta torches are a thin post, tilted when wall-mounted. */
-const torchBounds: NonNullable<BlockBehaviour['getBoundingBoxes']> = (ctx, x, y, z) =>
-  toWorldBound(torchShape(ctx.world.getBlockMetadata(x, y, z)), x, y, z);
+const torchBounds: NonNullable<BlockBehaviour['getBoundingBoxes']> = (ctx, x, y, z, type) =>
+  type === 'collision' ? [] : toWorldBound(torchShape(ctx.world.getBlockMetadata(x, y, z)), x, y, z);
 
 /** Beta stairs contribute a half-height base plus a half-cell upper step. */
 const stairBounds: NonNullable<BlockBehaviour['getBoundingBoxes']> = (ctx, x, y, z) =>

@@ -1,13 +1,9 @@
 import { Player } from './Player.ts';
 import { PlayerModel } from './PlayerModel.ts';
 import {
-  ANIMATION_AIRBORNE_LEG_ROTATION,
-  ANIMATION_FLYING_PITCH_LIMIT,
   ANIMATION_HEAD_PITCH_LIMIT,
   ANIMATION_IDLE_ARM_X_AMPLITUDE,
-  ANIMATION_IDLE_ARM_X_FREQUENCY,
   ANIMATION_IDLE_ARM_Z_AMPLITUDE,
-  ANIMATION_IDLE_ARM_Z_FREQUENCY,
   ANIMATION_PLACEMENT_SWING_STRENGTH,
   BETA_ARM_SWING_AMPLITUDE,
   BETA_ARM_SWING_SCALE,
@@ -148,27 +144,21 @@ export class PlayerAnimator {
     pose.leftLegX += Math.cos(phase + Math.PI) * legAmplitude;
 
     if (state === 'idle' || state === 'walking') {
-      const time = performance.now() / 1000;
-      pose.rightArmZ += Math.cos(time * ANIMATION_IDLE_ARM_Z_FREQUENCY) * ANIMATION_IDLE_ARM_Z_AMPLITUDE + ANIMATION_IDLE_ARM_Z_AMPLITUDE;
-      pose.leftArmZ -= Math.cos(time * ANIMATION_IDLE_ARM_Z_FREQUENCY) * ANIMATION_IDLE_ARM_Z_AMPLITUDE + ANIMATION_IDLE_ARM_Z_AMPLITUDE;
-      pose.rightArmX += Math.sin(time * ANIMATION_IDLE_ARM_X_FREQUENCY) * ANIMATION_IDLE_ARM_X_AMPLITUDE;
-      pose.leftArmX -= Math.sin(time * ANIMATION_IDLE_ARM_X_FREQUENCY) * ANIMATION_IDLE_ARM_X_AMPLITUDE;
+      const time = player.animationAgeTicks;
+      pose.rightArmZ += Math.cos(time * 0.09) * ANIMATION_IDLE_ARM_Z_AMPLITUDE + ANIMATION_IDLE_ARM_Z_AMPLITUDE;
+      pose.leftArmZ -= Math.cos(time * 0.09) * ANIMATION_IDLE_ARM_Z_AMPLITUDE + ANIMATION_IDLE_ARM_Z_AMPLITUDE;
+      pose.rightArmX += Math.sin(time * 0.067) * ANIMATION_IDLE_ARM_X_AMPLITUDE;
+      pose.leftArmX -= Math.sin(time * 0.067) * ANIMATION_IDLE_ARM_X_AMPLITUDE;
     }
   }
 
-  private applyAirborneAndFlying(player: Player, pose: PoseAccumulator, state: PlayerAnimationState): void {
+  private applyAirborneAndFlying(_player: Player, pose: PoseAccumulator, state: PlayerAnimationState): void {
     if (state === 'jumping' || state === 'falling') {
-      const lowSwing = player.limbSwingAmount < 0.05;
-      if (lowSwing) {
-        pose.rightLegX += ANIMATION_AIRBORNE_LEG_ROTATION;
-        pose.leftLegX += ANIMATION_AIRBORNE_LEG_ROTATION;
-      }
       return;
     }
 
     if (state === 'flying') {
-      const flySpeed = Math.hypot(player.velocity.x, player.velocity.z);
-      pose.bodyX += -ANIMATION_FLYING_PITCH_LIMIT * clamp(flySpeed / 8, 0, 1);
+      // Keep torso upright; flying affects limbs only so body yaw remains authoritative.
       pose.rightArmX *= 0.5;
       pose.leftArmX *= 0.5;
       pose.rightLegX *= 0.5;

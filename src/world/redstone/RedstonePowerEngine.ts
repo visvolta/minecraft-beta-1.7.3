@@ -52,6 +52,10 @@ export class RedstonePowerEngine {
   public canBlockProvidePower(position: BlockPosition): boolean {
     if (!this.world.isLoaded(position.x, position.z)) return false;
     const blockId = this.world.getBlock(position.x, position.y, position.z);
+    return this.canBlockIdProvidePower(blockId);
+  }
+
+  public canBlockIdProvidePower(blockId: number): boolean {
     if (blockId === BlockIds.Air) return false;
     return this.behaviours.get(blockId).canProvidePower === true;
   }

@@ -3,6 +3,7 @@ import type { AABB } from '../../physics/AABB';
 import { doorShape, isDoorOpen, isDoorUpper } from '../../blocks/shapes/BlockShapes';
 import { toWorldBound } from '../../blocks/shapes/toWorldBounds';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry, BoundingBoxType } from '../BlockBehaviour';
+import type { NeighbourUpdateEvent } from '../updates/BlockMutation';
 
 /**
  * Beta 1.7.3 `BlockDoor`.
@@ -130,6 +131,7 @@ export class DoorBehaviour implements BlockBehaviour {
     sourceX?: number,
     sourceY?: number,
     sourceZ?: number,
+    event?: NeighbourUpdateEvent,
   ): void {
     const metadata = ctx.world.getBlockMetadata(x, y, z);
     const doorId = this.blockId;
@@ -142,8 +144,8 @@ export class DoorBehaviour implements BlockBehaviour {
       }
       // Beta forwards a power-provider update down to the lower half, which
       // is the half that owns the open bit.
-      if (this.sourceCanProvidePower(ctx, sourceX, sourceY, sourceZ)) {
-        this.neighborChanged(ctx, x, y - 1, z, sourceX, sourceY, sourceZ);
+      if (this.sourceCanProvidePower(ctx, sourceX, sourceY, sourceZ, event)) {
+        this.neighborChanged(ctx, x, y - 1, z, sourceX, sourceY, sourceZ, event);
       }
       return;
     }
@@ -168,7 +170,7 @@ export class DoorBehaviour implements BlockBehaviour {
     // an unpowered hand-opened door slam shut the moment anything nearby
     // changed, because the computed state (unpowered) disagreed with the
     // hand-set open bit.
-    if (!this.sourceCanProvidePower(ctx, sourceX, sourceY, sourceZ)) return;
+    if (!this.sourceCanProvidePower(ctx, sourceX, sourceY, sourceZ, event)) return;
 
     this.applyRedstone(ctx, x, y, z, metadata);
   }
@@ -186,7 +188,10 @@ export class DoorBehaviour implements BlockBehaviour {
     sourceX?: number,
     sourceY?: number,
     sourceZ?: number,
+    event?: { readonly currentState: { readonly blockId: number } },
   ): boolean {
+    const sourceBlockId = event?.currentState.blockId;
+    if (sourceBlockId !== undefined) return ctx.power?.canBlockIdProvidePower(sourceBlockId) === true;
     if (sourceX === undefined || sourceY === undefined || sourceZ === undefined) return false;
     return ctx.power?.canBlockProvidePower({ x: sourceX, y: sourceY, z: sourceZ }) === true;
   }

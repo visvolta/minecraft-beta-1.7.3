@@ -21,11 +21,13 @@ export interface BlockBehaviourContext {
   readonly events?: WorldEventQueue;
   readonly power?: RedstonePowerEngine;
   readonly entities?: EntityManager;
+  /** The local player is outside EntityManager but still participates in Beta block checks such as pressure plates. */
+  readonly player?: unknown;
   /**
    * Positional one-shot sink for block-driven sounds (door hinge, chest lid).
    * Optional so worker-side and headless callers can omit audio entirely.
    */
-  readonly playBlockSound?: (id: 'door_open' | 'door_close' | 'chestopen' | 'chestclosed' | 'click', x: number, y: number, z: number) => void;
+  readonly playBlockSound?: (id: 'door_open' | 'door_close' | 'chestopen' | 'chestclosed' | 'click', x: number, y: number, z: number, pitch?: number, volume?: number) => void;
 }
 
 export interface BlockBehaviour {

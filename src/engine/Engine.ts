@@ -91,6 +91,7 @@ import { registerSnowIceBehaviours } from '../world/behaviours/registerSnowIceBe
 import { PrecipitationSimulator } from '../world/weather/PrecipitationSimulator';
 import { registerFallingBlockBehaviours } from '../world/behaviours/FallingBlockBehaviour';
 import { registerLeafBehaviour } from '../world/behaviours/LeafBehaviour';
+import { registerGrassBehaviour } from '../world/behaviours/GrassBehaviour';
 import { registerLogBehaviour } from '../world/behaviours/LogBehaviour';
 import { registerChestBehaviour } from '../world/behaviours/ChestBehaviour';
 import { registerDoorBehaviour } from '../world/behaviours/DoorBehaviour';
@@ -411,7 +412,7 @@ export class Engine {
     this.blockUpdateWorld = new BlockUpdateWorld(this.chunkManager, blockRegistry, this.lightEngine);
     this.redstonePowerEngine = new RedstonePowerEngine(this.blockUpdateWorld, blockRegistry, this.blockBehaviourRegistry);
     this.blockUpdateWorld.setPowerEngine(this.redstonePowerEngine);
-    this.blockUpdateWorld.setBlockSoundSink((id, x, y, z) => this.audioManager.play({ type: 'block.action', id, x, y, z }));
+    this.blockUpdateWorld.setBlockSoundSink((id, x, y, z, pitch, volume) => this.audioManager.play({ type: 'block.action', id, x, y, z, ...(pitch === undefined ? {} : { pitch }), ...(volume === undefined ? {} : { volume }) }));
     this.playerPhysics=new PlayerPhysics(blockRegistry,this.blockBehaviourRegistry,this.blockUpdateWorld);
     this.playerSurvivalController=new PlayerSurvivalController(this.player,this.blockUpdateWorld,blockRegistry,()=>metadata.difficulty);
     this.playerSurvivalController.setLandingSoundListener((event)=>{this.audioManager.play({type:'step',material:event.material,x:event.x,y:event.y,z:event.z,volume:event.volume,pitch:event.pitch});});
@@ -539,6 +540,7 @@ export class Engine {
     this.precipitationSimulator = new PrecipitationSimulator(worldSeed);
     registerFireBehaviour(this.blockBehaviourRegistry, blockRegistry, this.weatherController, this.chunkManager);
     registerSnowIceBehaviours(this.blockBehaviourRegistry);
+    registerGrassBehaviour(this.blockBehaviourRegistry, blockRegistry);
     registerFallingBlockBehaviours(this.blockBehaviourRegistry, blockRegistry, this.fallingBlockManager);
     registerLeafBehaviour(this.blockBehaviourRegistry);
     registerLogBehaviour(this.blockBehaviourRegistry);
@@ -556,6 +558,7 @@ export class Engine {
     );
     this.blockUpdateWorld.setBehaviourRegistry(this.blockBehaviourRegistry);
     this.blockUpdateWorld.setEntityManager(this.entityManager);
+    this.blockUpdateWorld.setBehaviourPlayer(this.player);
     this.blockUpdateWorld.setEventQueue(this.worldEventQueue);
     this.blockUpdateWorld.setGameTickProvider(() => this.worldTickScheduler.getGameTick());
     this.blockUpdateWorld.setNextIntProvider((bound: number) => randomTickScheduler.nextInt(bound));
@@ -1332,6 +1335,7 @@ export class Engine {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
+        this.player.preTick();
         if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
           this.playerController.update(deltaSeconds);
         } else { this.player.wishVelocity.x = 0; this.player.wishVelocity.z = 0; }
@@ -1549,13 +1553,13 @@ export class Engine {
     const totalTicksForAlpha = this.worldTime.getTotalTicks();
     const entityAlpha = totalTicksForAlpha - Math.floor(totalTicksForAlpha);
     this.entityManager.render(entityAlpha);
-    this.minecartRenderSystem.update(entityAlpha);
+    this.minecartRenderSystem.update(entityAlpha, this.entityLighting);
     const minecartAudioSeen = new Set<string>();
     this.entityManager.forEachActive((entity) => {
       if (entity instanceof MinecartEntity) {
         minecartAudioSeen.add(entity.uuid);
         const speed = Math.hypot(entity.velocity.x, entity.velocity.z);
-        this.audioManager.setMinecartLoop(entity.uuid, entity.riddenByEntity === this.player, speed);
+        this.audioManager.setMinecartLoop(entity.uuid, entity.riddenByEntity === this.player, speed, entity.position.x, entity.position.y, entity.position.z);
       }
     });
     for (const uuid of this.activeMinecartAudioLoops) {

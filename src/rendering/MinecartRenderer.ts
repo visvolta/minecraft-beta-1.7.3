@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { applyEntityRenderOrder } from './RenderOrder';
+import type { EntityLightingUpdater } from './EntityLightingUpdater';
 import type { EntityManager } from '../entities/core/EntityManager';
 import { MinecartEntity } from '../entities/MinecartEntity';
 import type { EntityTextureAssets } from '../assets/EntityTextureAssets';
@@ -43,52 +44,59 @@ export class MinecartRenderer {
   private readonly material: THREE.MeshBasicMaterial;
 
   public constructor(texture: THREE.Texture) {
-    this.material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true, alphaTest: 0.1 });
+    this.material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, alphaTest: 0.1 });
     attachEntityLighting(this.material);
     this.buildFivePanelModel();
   }
 
   private buildFivePanelModel(): void {
-    // Beta ModelMinecart uses /item/cart.png as a 64×32 legacy ModelRenderer
-    // texture. The browser asset is the same-layout /textures/entity/minecart.png.
-    const floor = this.boxPanel(
+    // Direct transcription of Beta ModelMinecart's six ModelRenderer boxes:
+    // bottom (20x16x2), four walls (16x8x2), and the inset floor panel
+    // (18x14x1). Rotations match ModelMinecart lines 29-33.
+    const bottom = this.boxPanel(
       [1.25, 1.0, 0.125],
-      [0, 0.125, 0],
+      [0, 0.25, 0],
       [-Math.PI / 2, 0, 0],
       { u: 0, v: 10, w: 20, h: 16, d: 2 },
     );
+    const innerFloor = this.boxPanel(
+      [1.125, 0.875, 0.0625],
+      [0, 0.275, 0],
+      [Math.PI / 2, 0, 0],
+      { u: 44, v: 10, w: 18, h: 14, d: 1 },
+    );
     const left = this.boxPanel(
       [1.0, 0.5, 0.125],
-      [-0.625, 0.375, 0],
-      [0, Math.PI / 2, 0],
-      { u: 0, v: 0, w: 16, h: 8, d: 2 },
+      [-0.5825, 0.3125, 0],
+      [0, Math.PI * 1.5, 0],
+      { u: 0, v: 0, w: 16, h: 8, d: 2, swapInnerOuter: true },
     );
     const right = this.boxPanel(
       [1.0, 0.5, 0.125],
-      [0.625, 0.375, 0],
-      [0, -Math.PI / 2, 0],
-      { u: 0, v: 0, w: 16, h: 8, d: 2 },
+      [0.5825, 0.3125, 0],
+      [0, Math.PI / 2, 0],
+      { u: 0, v: 0, w: 16, h: 8, d: 2, swapInnerOuter: true },
     );
     const front = this.boxPanel(
-      [1.25, 0.5, 0.125],
-      [0, 0.375, -0.5],
-      [0, 0, 0],
-      { u: 0, v: 0, w: 16, h: 8, d: 2, sourceW: 20 },
+      [1.0, 0.5, 0.125],
+      [0, 0.3125, -0.4575],
+      [0, Math.PI, 0],
+      { u: 0, v: 0, w: 16, h: 8, d: 2, swapInnerOuter: true },
     );
     const back = this.boxPanel(
-      [1.25, 0.5, 0.125],
-      [0, 0.375, 0.5],
-      [0, Math.PI, 0],
-      { u: 0, v: 0, w: 16, h: 8, d: 2, sourceW: 20 },
+      [1.0, 0.5, 0.125],
+      [0, 0.3125, 0.4575],
+      [0, 0, 0],
+      { u: 0, v: 0, w: 16, h: 8, d: 2, swapInnerOuter: true },
     );
-    this.root.add(floor, left, right, front, back);
+    this.root.add(bottom, innerFloor, left, right, front, back);
   }
 
   private boxPanel(
     size: readonly [number, number, number],
     position: readonly [number, number, number],
     rotation: readonly [number, number, number],
-    uv: { readonly u: number; readonly v: number; readonly w: number; readonly h: number; readonly d: number; readonly sourceW?: number },
+    uv: { readonly u: number; readonly v: number; readonly w: number; readonly h: number; readonly d: number; readonly sourceW?: number; readonly swapInnerOuter?: boolean },
   ): THREE.Mesh {
     const geometry = new THREE.BoxGeometry(size[0], size[1], size[2]);
     applyLegacyBoxUv(geometry, {
@@ -101,11 +109,25 @@ export class MinecartRenderer {
       textureWidth: 64,
       textureHeight: 32,
     });
+    if (uv.swapInnerOuter === true) this.swapDepthFaceUvs(geometry);
     this.geometries.push(geometry);
     const mesh = new THREE.Mesh(geometry, this.material);
     mesh.position.set(position[0], position[1], position[2]);
     mesh.rotation.set(rotation[0], rotation[1], rotation[2]);
     return mesh;
+  }
+
+
+  private swapDepthFaceUvs(geometry: THREE.BoxGeometry): void {
+    const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
+    for (let i = 0; i < 4; i++) {
+      const a = 4 * 4 + i;
+      const b = 5 * 4 + i;
+      const u = uv.getX(a), v = uv.getY(a);
+      uv.setXY(a, uv.getX(b), uv.getY(b));
+      uv.setXY(b, u, v);
+    }
+    uv.needsUpdate = true;
   }
 
   public update(snapshot: MinecartRenderSnapshot): void {
@@ -115,6 +137,10 @@ export class MinecartRenderer {
       (180 - snapshot.yawDegrees) * Math.PI / 180,
       -snapshot.pitchDegrees * Math.PI / 180,
     );
+  }
+
+  public updateLighting(lighting: EntityLightingUpdater, position: { readonly x: number; readonly y: number; readonly z: number }): void {
+    lighting.update({ renderObject: this.root, position });
   }
 
   public dispose(): void {
@@ -134,7 +160,7 @@ export class MinecartRenderSystem {
     private readonly textures: EntityTextureAssets,
   ) {}
 
-  public update(alpha: number): void {
+  public update(alpha: number, lighting?: EntityLightingUpdater): void {
     const seen = new Set<string>();
     this.entityManager.forEachActive((entity) => {
       if (!(entity instanceof MinecartEntity) || entity.removed) return;
@@ -148,6 +174,7 @@ export class MinecartRenderSystem {
         applyEntityRenderOrder(renderer.root);
       }
       renderer.update(snapshotMinecart(entity, alpha));
+      if (lighting !== undefined) renderer.updateLighting(lighting, entity.position);
     });
     for (const [uuid, renderer] of this.renderers) {
       if (!seen.has(uuid)) {
@@ -156,7 +183,6 @@ export class MinecartRenderSystem {
       }
     }
   }
-
   public dispose(): void {
     for (const renderer of this.renderers.values()) renderer.dispose();
     this.renderers.clear();

@@ -12,6 +12,7 @@ export class ButtonBehaviour implements BlockBehaviour {
 
         const orientation = meta & 7;
         ctx.world.setBlockMetadataWithNotify(x, y, z, orientation | 8);
+        ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5);
         this.notifyNeighbors(ctx, x, y, z, orientation);
         ctx.world.scheduleBlockTick(x, y, z, BlockIds.StoneButton, 20);
         return true;
@@ -37,6 +38,7 @@ export class ButtonBehaviour implements BlockBehaviour {
         if (meta & 8) {
             const orientation = meta & 7;
             ctx.world.setBlockMetadataWithNotify(x, y, z, orientation);
+            ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5);
             this.notifyNeighbors(ctx, x, y, z, orientation);
         }
     }

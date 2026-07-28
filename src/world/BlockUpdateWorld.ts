@@ -39,6 +39,7 @@ export class BlockUpdateWorld {
   private entityManager: EntityManager | undefined;
   private powerEngine: RedstonePowerEngine | undefined;
   private blockSoundSink: BlockBehaviourContext['playBlockSound'] | undefined;
+  private behaviourPlayer: unknown;
   private getGameTick: (() => number) | undefined;
   private getNextInt: ((bound: number) => number) | undefined;
   private nextGenerationId = 1;
@@ -77,6 +78,10 @@ export class BlockUpdateWorld {
 
   public setBlockSoundSink(sink: BlockBehaviourContext['playBlockSound']): void {
     this.blockSoundSink = sink;
+  }
+
+  public setBehaviourPlayer(player: unknown): void {
+    this.behaviourPlayer = player;
   }
 
   public setGameTickProvider(provider: () => number): void {
@@ -287,6 +292,7 @@ export class BlockUpdateWorld {
       nextLong,
       ...(events === undefined ? {} : { events }),
       ...(this.entityManager === undefined ? {} : { entities: this.entityManager }),
+      ...(this.behaviourPlayer === undefined ? {} : { player: this.behaviourPlayer }),
       ...(this.powerEngine === undefined ? {} : { power: this.powerEngine }),
       ...(this.blockSoundSink === undefined ? {} : { playBlockSound: this.blockSoundSink }),
     };
@@ -362,6 +368,7 @@ export class BlockUpdateWorld {
       ...(this.getNextInt === undefined ? {} : { nextInt: this.getNextInt }),
       ...(this.eventQueue === undefined ? {} : { events: this.eventQueue }),
       ...(this.entityManager === undefined ? {} : { entities: this.entityManager }),
+      ...(this.behaviourPlayer === undefined ? {} : { player: this.behaviourPlayer }),
       ...(this.powerEngine === undefined ? {} : { power: this.powerEngine }),
       ...(this.blockSoundSink === undefined ? {} : { playBlockSound: this.blockSoundSink }),
       ...(player === undefined ? {} : { player }),

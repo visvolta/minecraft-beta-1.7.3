@@ -1,12 +1,12 @@
 import type { BlockUpdateWorld } from '../../world/BlockUpdateWorld';
 import { findRailAtOrBelow, type RailBlockInfo, type RailShapeDefinition } from '../../world/rails/RailShapes';
 
-export const MINECART_MAX_RAIL_SPEED = 0.4;
+export const MINECART_MAX_RAIL_SPEED = 0.6;
 export const MINECART_EMPTY_DRAG = 0.9599999785423279;
 export const MINECART_OCCUPIED_DRAG = 0.996999979019165;
 export const MINECART_OFF_RAIL_DRAG = 0.98;
 export const MINECART_GRAVITY = 0.03999999910593033;
-export const MINECART_SLOPE_ACCELERATION = 0.0078125;
+export const MINECART_SLOPE_ACCELERATION = 0.012;
 export const POWERED_RAIL_ACCELERATION = 0.06;
 export const UNPOWERED_RAIL_BRAKE = 0.5;
 export const POWERED_RAIL_START_SPEED = 0.02;

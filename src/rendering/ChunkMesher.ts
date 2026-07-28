@@ -956,7 +956,7 @@ export class ChunkMesher {
           if (renderType === 'leaves') {
             for (const face of FACES) {
               const neighbourId = this.getBlockAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-              if (this.hidesLeafFace(neighbourId)) {
+              if (this.hidesLeafFace(neighbourId, face)) {
                 continue;
               }
               const textureName = resolveBlockTexture(definition, face.slot!);
@@ -1569,8 +1569,10 @@ export class ChunkMesher {
     return neighbourDef.solid && !neighbourDef.transparent && neighbourDef.renderType === 'opaque';
   }
 
-  private hidesLeafFace(_neighbourId: BlockId): boolean {
-    return false;
+  private hidesLeafFace(neighbourId: BlockId, face: { readonly dy: number }): boolean {
+    if (face.dy !== 0) return false;
+    const neighbourDef = this.blockRegistry.getById(neighbourId);
+    return neighbourDef?.renderType === 'leaves';
   }
 
   private hidesCactusFace(faceIndex: number, neighbourId: BlockId): boolean {
@@ -1799,7 +1801,7 @@ export class ChunkMesher {
         [minX, h, maxZ], [maxX, h, maxZ], [maxX, h, minZ], [minX, h, minZ]
     ];
 
-    const rotate = straightPass === 1;
+    const rotate = straightPass === 2;
     const finalUvs: Quad8 = rotate 
         ? [u1, v0, u1, v1, u0, v1, u0, v0] 
         : [u0, v1, u1, v1, u1, v0, u0, v0];
@@ -1883,43 +1885,50 @@ export class ChunkMesher {
     // Top face
     const th = 0.625;
     const topV = [
-        [px - w + dx * (1 - th), y + th + oy, pz - w + dz * (1 - th)],
-        [px - w + dx * (1 - th), y + th + oy, pz + w + dz * (1 - th)],
-        [px + w + dx * (1 - th), y + th + oy, pz + w + dz * (1 - th)],
-        [px + w + dx * (1 - th), y + th + oy, pz - w + dz * (1 - th)]
+        [px - w, y + th + oy, pz - w],
+        [px - w, y + th + oy, pz + w],
+        [px + w, y + th + oy, pz + w],
+        [px + w, y + th + oy, pz - w]
     ] as const;
     const tu0 = u0 + (u1 - u0) * 7/16, tv0 = v0 + (v1 - v0) * 6/16, tu1 = u0 + (u1 - u0) * 9/16, tv1 = v0 + (v1 - v0) * 8/16;
     buffers.pushQuad(topV as any, [0, 1, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, [tu0, tv1, tu0, tv0, tu1, tv0, tu1, tv1]);
 
-    // Side faces (1.0 height quads, tilted)
+    const su0 = u0 + (u1 - u0) * 7 / 16;
+    const su1 = u0 + (u1 - u0) * 9 / 16;
+    const sv0 = v0 + (v1 - v0) * 6 / 16;
+    const sv1 = v1;
+    const sideUvsTopBottom: Quad8 = [su0, sv0, su0, sv1, su1, sv1, su1, sv0];
+    const sideUvsAcrossTop: Quad8 = [su0, sv0, su1, sv0, su1, sv1, su0, sv1];
+
+    // Side faces use the central 2-pixel torch strip, not the whole tile.
     // -X face
     buffers.pushQuad([
-        [px - w, y + 1 + oy, pz + w],
+        [px - w, y + th + oy, pz + w],
         [px - w + dx, y + oy, pz + w + dz],
         [px - w + dx, y + oy, pz - w + dz],
-        [px - w, y + 1 + oy, pz - w]
-    ], [-1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
+        [px - w, y + th + oy, pz - w]
+    ], [-1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, sideUvsTopBottom);
     // +X face
     buffers.pushQuad([
-        [px + w, y + 1 + oy, pz - w],
+        [px + w, y + th + oy, pz - w],
         [px + w + dx, y + oy, pz - w + dz],
         [px + w + dx, y + oy, pz + w + dz],
-        [px + w, y + 1 + oy, pz + w]
-    ], [1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
+        [px + w, y + th + oy, pz + w]
+    ], [1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill, sideUvsTopBottom);
     // -Z face
     buffers.pushQuad([
-        [px - w, y + 1 + oy, pz - w],
-        [px + w, y + 1 + oy, pz - w],
+        [px - w, y + th + oy, pz - w],
+        [px + w, y + th + oy, pz - w],
         [px + w + dx, y + oy, pz - w + dz],
         [px - w + dx, y + oy, pz - w + dz]
-    ], [0, 0, -1], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
+    ], [0, 0, -1], uvRect, tint, light, 1, FluidTextureKind.WaterStill, sideUvsAcrossTop);
     // +Z face
     buffers.pushQuad([
-        [px - w, y + 1 + oy, pz + w],
+        [px - w, y + th + oy, pz + w],
         [px - w + dx, y + oy, pz + w + dz],
         [px + w + dx, y + oy, pz + w + dz],
-        [px + w, y + 1 + oy, pz + w]
-    ], [0, 0, 1], uvRect, tint, light, 1, FluidTextureKind.WaterStill);
+        [px + w, y + th + oy, pz + w]
+    ], [0, 0, 1], uvRect, tint, light, 1, FluidTextureKind.WaterStill, sideUvsTopBottom);
   }
 
   /**
@@ -2402,100 +2411,74 @@ export class ChunkMesher {
     definition: BlockDefinition,
   ): void {
     const metadata = chunk.getBlockMetadata(x, y, z);
-    // Beta's `isBlockFootOfBed` tests bit 8, which actually marks the HEAD.
-    const isHead = (metadata & 8) !== 0;
     const direction = metadata & 3;
+    const isHead = (metadata & 8) !== 0;
 
-    const top = this.getSafeUvRect(isHead ? 'bed_head_top' : 'bed_feet_top');
-    const side = this.getSafeUvRect(isHead ? 'bed_head_side' : 'bed_feet_side');
-    const end = this.getSafeUvRect(isHead ? 'bed_head_end' : 'bed_feet_end');
-    const plank = this.getSafeUvRect(resolveBlockTexture(definition, 'bottom') ?? 'planks_oak');
-    if (top === undefined || side === undefined || end === undefined) return;
+    const topRect = this.getSafeUvRect(isHead ? 'bed_head_top' : 'bed_feet_top');
+    const sideRect = this.getSafeUvRect(isHead ? 'bed_head_side' : 'bed_feet_side');
+    const endRect = this.getSafeUvRect(isHead ? 'bed_head_end' : 'bed_feet_end');
+    const baseRect = this.getSafeUvRect(resolveBlockTexture(definition, 'bottom') ?? 'planks_oak');
+    if (topRect === undefined || sideRect === undefined || endRect === undefined) return;
 
     const tint = resolveBlockTint(definition, 'side');
     const light = this.getLightComponentsAt(chunk, x, y, z);
-
-    const x0 = x, x1 = x + 1;
-    const z0 = z, z1 = z + 1;
     const yTop = y + BED_HEIGHT;
-    // Beta draws the underside plank 3/16 above the block floor.
-    const yPlank = y + 0.1875;
+    const bedSideHeight = 9 / 16;
+    const y0 = yTop - bedSideHeight;
+    const yBase = y + 0.1875;
+    const x0 = x, x1 = x + 1, z0 = z, z1 = z + 1;
 
-    const quad = (
+    const uv = (
+      rect: { u0: number; v0: number; u1: number; v1: number },
+      quarterTurns = 0,
+      mirror = false,
+    ): Quad8 => {
+      let corners: [number, number][] = [[rect.u0, rect.v1], [rect.u1, rect.v1], [rect.u1, rect.v0], [rect.u0, rect.v0]];
+      if (mirror) corners = [corners[1]!, corners[0]!, corners[3]!, corners[2]!];
+      const turns = ((quarterTurns % 4) + 4) % 4;
+      const out = corners.slice(turns).concat(corners.slice(0, turns));
+      return [out[0]![0], out[0]![1], out[1]![0], out[1]![1], out[2]![0], out[2]![1], out[3]![0], out[3]![1]];
+    };
+
+    const push = (
       corners: [Corner, Corner, Corner, Corner],
       normal: readonly [number, number, number],
       rect: { u0: number; v0: number; u1: number; v1: number },
-      uvs?: readonly [number, number, number, number, number, number, number, number],
-    ): void => {
-      buffers.pushQuad(corners, normal, rect, tint, light, 1, FluidTextureKind.WaterStill, uvs);
-    };
+      faceUvs?: Quad8,
+    ): void => buffers.pushQuad(corners, normal, rect, tint, light, 1, FluidTextureKind.WaterStill, faceUvs);
 
-    /** Corner UVs in draw order, optionally rotated and/or mirrored. */
-    const mapUv = (
-      rect: { u0: number; v0: number; u1: number; v1: number },
-      quarterTurns: number,
-      mirror: boolean,
-    ): readonly [number, number, number, number, number, number, number, number] => {
-      let corners: [number, number][] = [
-        [rect.u0, rect.v1], [rect.u1, rect.v1], [rect.u1, rect.v0], [rect.u0, rect.v0],
-      ];
-      if (mirror) corners = [corners[1]!, corners[0]!, corners[3]!, corners[2]!];
-      const turns = ((quarterTurns % 4) + 4) % 4;
-      const turned = corners.slice(turns).concat(corners.slice(0, turns));
-      return [
-        turned[0]![0], turned[0]![1], turned[1]![0], turned[1]![1],
-        turned[2]![0], turned[2]![1], turned[3]![0], turned[3]![1],
-      ] as const;
-    };
-
-    // Top surface. Beta swaps/flips the UV corners per direction so the
-    // pillow always points along the bed; that is equivalent to a quarter-turn
-    // per facing value.
-    quad(
+    // One canonical cuboid half. Metadata controls only which side face is the
+    // hidden join and which side receives the end texture; the cuboid itself is
+    // never hand-authored per direction, so all four rotations stay coherent.
+    push(
       [[x0, yTop, z1], [x1, yTop, z1], [x1, yTop, z0], [x0, yTop, z0]],
-      // Beta `bedDirection` rotates the top texture so the pillow always runs
-      // along the bed's length. The table is the NEGATED facing (Beta indexes
-      // it in the opposite rotational sense to this mesher's corner order),
-      // which is why the previous `direction` term rotated the top textures
-      // a quarter-turn to the left.
-      [0, 1, 0], top, mapUv(top, ChunkMesher.BED_TOP_UV_TURNS_TABLE[direction & 3] ?? 0, false),
+      [0, 1, 0],
+      topRect,
+      uv(topRect, (ChunkMesher.BED_TOP_UV_TURNS_TABLE[direction & 3] ?? 0) + 2),
     );
 
-    // Underside plank (Beta uses the plank texture, drawn downward-facing).
-    if (plank !== undefined) {
-      quad([[x0, yPlank, z0], [x1, yPlank, z0], [x1, yPlank, z1], [x0, yPlank, z1]], [0, -1, 0], plank);
+    if (baseRect !== undefined) {
+      push([[x0, yBase, z0], [x1, yBase, z0], [x1, yBase, z1], [x0, yBase, z1]], [0, -1, 0], baseRect);
     }
 
-    // Beta `ModelBed.headInvisibleFace` / `footInvisibleFaceRemap`, shared with
-    // the collision/validation side so render and logic cannot drift apart.
     const hiddenFace = bedHiddenFace(direction, isHead);
-    const outward = bedOutwardFace(direction, isHead);
+    const outwardFace = bedOutwardFace(direction, isHead);
     const flippedFace = bedFlippedFace(direction);
-
-    // Sides, keyed by Beta's face numbering: 2 = -Z, 3 = +Z, 4 = -X, 5 = +X.
-    const sides: readonly {
+    const faces: readonly {
       face: number;
       corners: [Corner, Corner, Corner, Corner];
       normal: readonly [number, number, number];
     }[] = [
-      // Sides span the PLANK line to the mattress top. Beta's bed box is
-      // 0..0.5625 but its underside plank sits at 0.1875, so drawing the
-      // sides from y=0 left an open band between the plank and the floor
-      // that read as a gap under the bed.
-      { face: 2, corners: [[x1, yPlank, z0], [x0, yPlank, z0], [x0, yTop, z0], [x1, yTop, z0]], normal: [0, 0, -1] },
-      { face: 3, corners: [[x0, yPlank, z1], [x1, yPlank, z1], [x1, yTop, z1], [x0, yTop, z1]], normal: [0, 0, 1] },
-      { face: 4, corners: [[x0, yPlank, z0], [x0, yPlank, z1], [x0, yTop, z1], [x0, yTop, z0]], normal: [-1, 0, 0] },
-      { face: 5, corners: [[x1, yPlank, z1], [x1, yPlank, z0], [x1, yTop, z0], [x1, yTop, z1]], normal: [1, 0, 0] },
+      { face: 2, corners: [[x1, y0, z0], [x0, y0, z0], [x0, yTop, z0], [x1, yTop, z0]], normal: [0, 0, -1] },
+      { face: 3, corners: [[x0, y0, z1], [x1, y0, z1], [x1, yTop, z1], [x0, yTop, z1]], normal: [0, 0, 1] },
+      { face: 4, corners: [[x0, y0, z0], [x0, y0, z1], [x0, yTop, z1], [x0, yTop, z0]], normal: [-1, 0, 0] },
+      { face: 5, corners: [[x1, y0, z1], [x1, y0, z0], [x1, yTop, z0], [x1, yTop, z1]], normal: [1, 0, 0] },
     ];
 
-    for (const entry of sides) {
-      // Skip the joining face so the two halves read as one bed.
-      if (entry.face === hiddenFace) continue;
-      // Beta picks the end texture for the outward face of each half and the
-      // side texture elsewhere, via `bedDirection`. The end board faces away
-      // from the joint, i.e. the opposite of the hidden face.
-      const rect = entry.face === outward ? end : side;
-      quad(entry.corners, entry.normal, rect, mapUv(rect, 0, entry.face === flippedFace));
+    for (const face of faces) {
+      if (face.face === hiddenFace) continue;
+      const rect = face.face === outwardFace ? endRect : sideRect;
+      push(face.corners, face.normal, rect, uv(rect, 0, face.face === flippedFace));
     }
   }
 

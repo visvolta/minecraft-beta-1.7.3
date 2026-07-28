@@ -38,7 +38,8 @@ export class LadderBehaviour implements BlockBehaviour {
     }
   }
 
-  public getBoundingBoxes(ctx: BlockBehaviourContext, x: number, y: number, z: number, _type: 'collision' | 'selection' | 'interaction'): AABB[] | undefined {
+  public getBoundingBoxes(ctx: BlockBehaviourContext, x: number, y: number, z: number, type: 'collision' | 'selection' | 'interaction'): AABB[] | undefined {
+    if (type === 'collision') return [];
     const meta = ctx.world.getBlockMetadata(x, y, z);
     const t = 2 / 16; // 1/8 thick (approx, Beta actually uses bounds based on state)
 
@@ -47,7 +48,7 @@ export class LadderBehaviour implements BlockBehaviour {
     if (meta === 4) return [new AABB(x + 1 - t, y, z, x + 1, y + 1, z + 1)];
     if (meta === 5) return [new AABB(x, y, z, x + t, y + 1, z + 1)];
 
-    return [new AABB(x, y, z, x + 1, y + 1, z + 1)]; // fallback
+    return [];
   }
 }
 

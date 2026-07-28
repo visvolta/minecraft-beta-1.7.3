@@ -111,7 +111,7 @@ const U = PLAYER_MODEL_SCALE;
  * items rendered down by the player's leg.
  */
 export const HAND_ATTACHMENT_POSITION: readonly [number, number, number] =
-  [-1 * U, -7 * U, 1 * U];
+  [-1 * U, -7 * U, -1 * U];
 /** Beta applies no extra rotation at the wrist itself. */
 export const HAND_ATTACHMENT_ROTATION: readonly [number, number, number] = [0, 0, 0];
 
@@ -214,10 +214,10 @@ export const BETA_ARM_SWING_SCALE = 0.5;
 export const BETA_LEG_SWING_AMPLITUDE = 1.4;
 /** Beta `heldItemRight`: `rotateAngleX = rotateAngleX * 0.5F - 0.31415927F`. */
 export const BETA_HELD_ITEM_ARM_SCALE = 0.5;
-export const BETA_HELD_ITEM_ARM_OFFSET = -0.31415927;
+export const BETA_HELD_ITEM_ARM_OFFSET = 0.31415927;
 /** Beta riding pose: arms -0.62831855, legs -1.2566371 with +/-0.31415927 yaw. */
-export const BETA_RIDING_ARM_X = -0.62831855;
-export const BETA_RIDING_LEG_X = -1.2566371;
+export const BETA_RIDING_ARM_X = 0.62831855;
+export const BETA_RIDING_LEG_X = 1.2566371;
 export const BETA_RIDING_LEG_Y = 0.31415927;
 
 export const PLAYER_OUTER_LAYER_SCALE = 1.05;
@@ -244,7 +244,7 @@ export const ANIMATION_IDLE_ARM_X_AMPLITUDE = 0.05;
  * any future caller cannot reintroduce the backward-arm pose by accident.
  */
 export const ANIMATION_AIRBORNE_ARM_ROTATION = 0;
-export const ANIMATION_AIRBORNE_LEG_ROTATION = -0.2;
+export const ANIMATION_AIRBORNE_LEG_ROTATION = 0;
 
 // View Bobbing (Camera)
 export const CAMERA_VIEW_BOB_HORIZONTAL_AMPLITUDE = 0.01;

@@ -40,6 +40,14 @@ export class PressurePlateBehaviour implements BlockBehaviour {
     const box = new AABB(x + padding, y, z + padding, x + 1 - padding, y + 0.25, z + 1 - padding);
     let wantsPressed = entityAABB !== undefined && entityAABB.intersects(box) && (this.isWood || entity instanceof LivingEntity || (entity as { readonly typeStringId?: string } | undefined)?.typeStringId === 'Player');
 
+    if (!wantsPressed && ctx.player !== undefined) {
+        const playerLike = ctx.player as { getAABB?: () => AABB; readonly typeStringId?: string };
+        const playerBox = playerLike.getAABB?.();
+        if (playerBox !== undefined && playerBox.intersects(box) && (this.isWood || playerLike.typeStringId === 'Player')) {
+            wantsPressed = true;
+        }
+    }
+
     if (!wantsPressed && ctx.entities) {
         let entities;
         if (this.isWood) {
@@ -59,14 +67,14 @@ export class PressurePlateBehaviour implements BlockBehaviour {
       ctx.world.setBlockMetadataWithNotify(x, y, z, 1);
       this.notifyNeighbors(ctx, x, y, z);
       ctx.world.markDirty(x, z);
-      ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5);
+      ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5, 0.6);
     }
 
     if (!wantsPressed && isPressed) {
       ctx.world.setBlockMetadataWithNotify(x, y, z, 0);
       this.notifyNeighbors(ctx, x, y, z);
       ctx.world.markDirty(x, z);
-      ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5);
+      ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5, 0.5);
     }
 
     if (wantsPressed) {

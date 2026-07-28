@@ -1,15 +1,15 @@
-import { COLLISION_EPSILON, GRAVITY, TERMINAL_VELOCITY } from './physicsConstants';
+import { GRAVITY, TERMINAL_VELOCITY } from './physicsConstants';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import { CHUNK_SIZE_Y } from '../world/chunkConstants';
 import type { Player } from '../player/Player';
-import { AABB } from './AABB';
+import { BetaCollisionMover } from './BetaCollisionMover';
 import type { BlockBehaviourRegistry } from '../world/BlockBehaviour';
-import { forEachBlockBounds, getBlockBounds } from '../world/BlockBehaviour';
+import { getBlockBounds } from '../world/BlockBehaviour';
 import { BlockIds } from '../blocks/BlockId';
 
 /** Beta `BlockSoulSand.onEntityWalking`: motionX/Z *= 0.4. */
 const SOUL_SAND_HORIZONTAL_DRAG = 0.4;
-import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';import { CREATIVE_FLIGHT_ACCELERATION, CREATIVE_FLIGHT_DRAG_PER_SECOND, CREATIVE_FLIGHT_VERTICAL_SPEED } from '../player/PlayerConstants';import { isLavaInAABB,isWaterInAABB } from '../entities/living/HazardDetection';import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
+import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';import { CREATIVE_FLIGHT_ACCELERATION, CREATIVE_FLIGHT_DRAG_PER_SECOND, CREATIVE_FLIGHT_VERTICAL_SPEED } from '../player/PlayerConstants';import { isLavaInAABB,isWaterInAABB } from '../entities/living/HazardDetection';import { supportDirectionFromAttachedMetadata, supportOffset } from '../blocks/BlockOrientation';import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 
 /**
  * How quickly horizontal velocity is steered toward wishVelocity while
@@ -31,13 +31,6 @@ export const WATER_EXIT_VELOCITY = 6;
 /** Minimum downward entry speed required to emit a player splash. */
 export const SPLASH_ENTRY_MIN_DOWNWARD_SPEED = 3;
 
-/**
- * Order axes are resolved in during collision. Resolving Y first gives more
- * stable landings (grounded state settles before horizontal movement is
- * checked against the now-correct vertical position). Expressed as data so
- * the order is a one-line change if ever revisited.
- */
-const COLLISION_AXIS_ORDER: readonly ('x' | 'y' | 'z')[] = ['y', 'x', 'z'];
 /** Beta-style maximum height the player can step up without jumping. */
 const PLAYER_STEP_HEIGHT = 0.6;
 
@@ -50,14 +43,16 @@ const PLAYER_STEP_HEIGHT = 0.6;
  */
 export interface PlayerMovementResult{readonly previousX?:number;readonly previousY:number;readonly previousZ?:number;readonly currentX?:number;readonly currentY:number;readonly currentZ?:number;readonly wasGrounded:boolean;readonly grounded:boolean;readonly climbing:boolean;readonly inWater?:boolean;readonly inLava?:boolean;readonly enteredWaterThisTick?:boolean;readonly splashVolume?:number;}
 export class PlayerPhysics {
-  private readonly fullCubeCollisionScratch = new AABB(0, 0, 0, 1, 1, 1);
+  private readonly collisionMover: BetaCollisionMover;
 
   public constructor(
     
     private readonly blockRegistry: BlockRegistry,
     private readonly behaviourRegistry: BlockBehaviourRegistry,
     private readonly blockUpdateWorld: BlockUpdateWorld
-  ) {}
+  ) {
+    this.collisionMover = new BetaCollisionMover(blockRegistry, behaviourRegistry, blockUpdateWorld);
+  }
 
   /**
    * Integrates gravity and horizontal acceleration, then resolves movement
@@ -104,7 +99,10 @@ export class PlayerPhysics {
 
             if (intersects) {
               if (behaviour.isClimbable) {
-                isClimbing = true;
+                const support = supportDirectionFromAttachedMetadata(this.blockUpdateWorld.getBlockMetadata(bx, by, bz));
+                const offset = support === undefined ? undefined : supportOffset(support);
+                const pushingIntoLadder = offset !== undefined && (player.wishVelocity.x * offset.x + player.wishVelocity.z * offset.z) > 0.01;
+                if (pushingIntoLadder || isJumpPressed || isDescendPressed) isClimbing = true;
               }
               if (behaviour.onEntityCollidedWithBlock) {
                 behaviour.onEntityCollidedWithBlock({ world: this.blockUpdateWorld, gameTick: 0 } as any, bx, by, bz, playerBox, player);
@@ -116,10 +114,14 @@ export class PlayerPhysics {
     }
 
     if (isClimbing) {
-      player.velocity.y = Math.max(player.velocity.y, -0.15); // slow fall speed
-      if (player.wishVelocity.x !== 0 || player.wishVelocity.z !== 0 || isJumpPressed) {
-        player.velocity.y = 0.2; // climb speed
+      player.velocity.y = Math.max(player.velocity.y, -3);
+      if (isDescendPressed) {
+        player.velocity.y = -3;
+      } else if (isJumpPressed || player.wishVelocity.x !== 0 || player.wishVelocity.z !== 0) {
+        player.velocity.y = 3;
       }
+      player.velocity.x = Math.max(-3, Math.min(3, player.velocity.x * 0.35));
+      player.velocity.z = Math.max(-3, Math.min(3, player.velocity.z * 0.35));
     }
 
     const wasInWater = player.inWater;
@@ -197,149 +199,29 @@ export class PlayerPhysics {
     deltaSeconds: number,
     displacementVelocityY: number,
   ): void {
-    const delta = {
-      x: player.velocity.x * deltaSeconds,
-      y: displacementVelocityY * deltaSeconds,
-      z: player.velocity.z * deltaSeconds,
-    };
-    const startX = player.position.x;
-    const startY = player.position.y;
-    const startZ = player.position.z;
+    const dx = player.velocity.x * deltaSeconds;
+    const dy = displacementVelocityY * deltaSeconds;
+    const dz = player.velocity.z * deltaSeconds;
     const wasGrounded = player.grounded;
 
-    let grounded=false,collidedHorizontally=false,collidedVertically=false;
+    const result = this.collisionMover.move(player, dx, dy, dz, {
+      stepHeight: wasGrounded ? PLAYER_STEP_HEIGHT : 0,
+      wasGrounded,
+    });
 
-    for (const axis of COLLISION_AXIS_ORDER) {
-      const box = player.getAABB();
-      const resolved = this.resolveAxis(box, axis, delta[axis]);
+    if (result.collidedX) player.velocity.x = 0;
+    if (result.collidedY) player.velocity.y = 0;
+    if (result.collidedZ) player.velocity.z = 0;
 
-      if (axis === 'x') {
-        player.position.x += resolved;
-        if (resolved !== delta.x) {
-          collidedHorizontally=true;player.velocity.x = 0;
-        }
-      } else if (axis === 'z') {
-        player.position.z += resolved;
-        if (resolved !== delta.z) {
-          collidedHorizontally=true;player.velocity.z = 0;
-        }
-      } else {
-        player.position.y += resolved;
-
-        if (resolved !== delta.y) {
-          if (delta.y < 0) {
-            // Moving down and stopped short: resting on a solid block.
-            grounded = true;
-          }
-
-          collidedVertically = true;
-          player.velocity.y = 0;
-        }
-      }
-    }
-
-    if (collidedHorizontally && wasGrounded) {
-      const stepped = this.tryStepUp(player, startX, startY, startZ, delta.x, delta.z);
-      if (stepped) {
-        grounded = true;
-        collidedHorizontally = false;
-        collidedVertically = false;
-      }
-    }
-
-    player.grounded=grounded;player.onGround=grounded;player.collidedHorizontally=collidedHorizontally;player.isCollidedHorizontally=collidedHorizontally;player.isCollidedVertically=collidedVertically;
+    player.grounded = result.grounded;
+    player.onGround = result.grounded;
+    player.collidedHorizontally = result.collidedHorizontally;
+    player.isCollidedHorizontally = result.collidedHorizontally;
+    player.isCollidedVertically = result.collidedVertically;
 
     this.applyWalkedBlockDrag(player);
   }
 
-  private tryStepUp(player: Player, startX: number, startY: number, startZ: number, requestedX: number, requestedZ: number): boolean {
-    const nonStepX = player.position.x;
-    const nonStepY = player.position.y;
-    const nonStepZ = player.position.z;
-    const nonStepDistanceSq = (nonStepX - startX) ** 2 + (nonStepZ - startZ) ** 2;
-    const savedVelocityX = player.velocity.x;
-    const savedVelocityZ = player.velocity.z;
-
-    player.position.x = startX;
-    player.position.y = startY;
-    player.position.z = startZ;
-
-    const raised = this.resolveAxis(player.getAABB(), 'y', PLAYER_STEP_HEIGHT);
-    if (raised <= 0 || raised > PLAYER_STEP_HEIGHT) {
-      player.position.x = nonStepX;
-      player.position.y = nonStepY;
-      player.position.z = nonStepZ;
-      return false;
-    }
-    player.position.y += raised;
-    if (this.intersectsAnySolid(player.getAABB())) {
-      player.position.x = nonStepX;
-      player.position.y = nonStepY;
-      player.position.z = nonStepZ;
-      return false;
-    }
-
-    const movedX = this.resolveAxis(player.getAABB(), 'x', requestedX);
-    player.position.x += movedX;
-    const movedZ = this.resolveAxis(player.getAABB(), 'z', requestedZ);
-    player.position.z += movedZ;
-
-    const settled = this.resolveAxis(player.getAABB(), 'y', -raised);
-    player.position.y += settled;
-    const stepHeight = player.position.y - startY;
-    const stepDistanceSq = (player.position.x - startX) ** 2 + (player.position.z - startZ) ** 2;
-    const accepted = stepHeight > COLLISION_EPSILON
-      && stepHeight <= PLAYER_STEP_HEIGHT + COLLISION_EPSILON
-      && stepDistanceSq > nonStepDistanceSq + COLLISION_EPSILON * COLLISION_EPSILON;
-
-    if (!accepted) {
-      player.position.x = nonStepX;
-      player.position.y = nonStepY;
-      player.position.z = nonStepZ;
-      return false;
-    }
-
-    if (Math.abs(movedX - requestedX) > COLLISION_EPSILON) player.velocity.x = 0;
-    else player.velocity.x = savedVelocityX;
-    if (Math.abs(movedZ - requestedZ) > COLLISION_EPSILON) player.velocity.z = 0;
-    else player.velocity.z = savedVelocityZ;
-    player.velocity.y = 0;
-    return true;
-  }
-
-  private intersectsAnySolid(box: AABB): boolean {
-    const range = this.blockRangeCoveringBox(box);
-    for (let bx = range.minX; bx <= range.maxX; bx++) {
-      for (let by = range.minY; by <= range.maxY; by++) {
-        for (let bz = range.minZ; bz <= range.maxZ; bz++) {
-          if (by < 0 || by >= CHUNK_SIZE_Y) continue;
-          let hit = false;
-          forEachBlockBounds(
-            this.blockRegistry,
-            this.behaviourRegistry,
-            this.blockUpdateWorld,
-            bx,
-            by,
-            bz,
-            'collision',
-            this.fullCubeCollisionScratch,
-            (blockBox) => { if (box.intersects(blockBox)) hit = true; },
-          );
-          if (hit) return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Beta `Block.onEntityWalking`: the block being stood on may damp horizontal
-   * motion. Soul sand is the only such block in Beta 1.7.3, multiplying both
-   * horizontal components by 0.4 each tick.
-   *
-   * Sampled at the block just below the feet, matching Beta's use of
-   * `posY - yOffset - 1` when reporting the walked-on block.
-   */
   private applyWalkedBlockDrag(player: Player): void {
     const blockX = Math.floor(player.position.x);
     const blockY = Math.floor(player.position.y - 0.2);
@@ -349,121 +231,8 @@ export class PlayerPhysics {
     player.velocity.z *= SOUL_SAND_HORIZONTAL_DRAG;
   }
 
-  /**
-   * Sweeps `box` by `distance` along `axis`, stopping short of the first
-   * solid block it would otherwise penetrate. Returns the actual (possibly
-   * reduced) distance travelled.
-   *
-   * Only `axis` is moving during this step (the other two axes are
-   * resolved separately), so overlap on the other two axes is checked
-   * against the box's original, unmoved position.
-   */
-  private resolveAxis(box: AABB, axis: 'x' | 'y' | 'z', distance: number): number {
-    if (distance === 0) {
-      return 0;
-    }
-
-    const movingPositive = distance > 0;
-    const sweptBox = this.sweptBoxAlongAxis(box, axis, distance);
-    const blockRange = this.blockRangeCoveringBox(sweptBox);
-
-    let allowedDistance = distance;
-
-    for (let bx = blockRange.minX; bx <= blockRange.maxX; bx++) {
-      for (let by = blockRange.minY; by <= blockRange.maxY; by++) {
-        for (let bz = blockRange.minZ; bz <= blockRange.maxZ; bz++) {
-          if (by < 0 || by >= CHUNK_SIZE_Y) continue;
-
-          forEachBlockBounds(
-            this.blockRegistry,
-            this.behaviourRegistry,
-            this.blockUpdateWorld,
-            bx,
-            by,
-            bz,
-            'collision',
-            this.fullCubeCollisionScratch,
-            (blockBox) => {
-              if (!this.overlapsOnOtherAxes(box, blockBox, axis)) return;
-
-              const limited = this.limitDistance(box, blockBox, axis, movingPositive);
-
-              // Clamp to zero rather than letting a pre-existing overlap (e.g.
-              // floating-point skin contact) push the box backward.
-              if (movingPositive) {
-                allowedDistance = Math.min(allowedDistance, Math.max(0, limited));
-              } else {
-                allowedDistance = Math.max(allowedDistance, Math.min(0, limited));
-              }
-            },
-          );
-        }
-      }
-    }
-
-    return allowedDistance;
-  }
-
-
-  /** True if the box overlaps the block on the two axes other than `axis`. */
-  private overlapsOnOtherAxes(box: AABB, blockBox: AABB, axis: 'x' | 'y' | 'z'): boolean {
-    const xOverlap = axis === 'x' || (box.minX < blockBox.maxX && box.maxX > blockBox.minX);
-    const yOverlap = axis === 'y' || (box.minY < blockBox.maxY && box.maxY > blockBox.minY);
-    const zOverlap = axis === 'z' || (box.minZ < blockBox.maxZ && box.maxZ > blockBox.minZ);
-
-    return xOverlap && yOverlap && zOverlap;
-  }
-
-  /** Distance along `axis` the box can travel before touching blockBox's near face. */
-  private limitDistance(
-    box: AABB,
-    blockBox: AABB,
-    axis: 'x' | 'y' | 'z',
-    movingPositive: boolean,
-  ): number {
-    if (axis === 'x') {
-      return movingPositive
-        ? blockBox.minX - box.maxX - COLLISION_EPSILON
-        : blockBox.maxX - box.minX + COLLISION_EPSILON;
-    }
-
-    if (axis === 'y') {
-      return movingPositive
-        ? blockBox.minY - box.maxY - COLLISION_EPSILON
-        : blockBox.maxY - box.minY + COLLISION_EPSILON;
-    }
-
-    return movingPositive
-      ? blockBox.minZ - box.maxZ - COLLISION_EPSILON
-      : blockBox.maxZ - box.minZ + COLLISION_EPSILON;
-  }
-
-  /** The box extended along `axis` by `distance`, used to gather candidate blocks. */
-  private sweptBoxAlongAxis(box: AABB, axis: 'x' | 'y' | 'z', distance: number): AABB {
-    const dx = axis === 'x' ? distance : 0;
-    const dy = axis === 'y' ? distance : 0;
-    const dz = axis === 'z' ? distance : 0;
-
-    const moved = box.translated(dx, dy, dz);
-
-    return new AABB(
-      Math.min(box.minX, moved.minX),
-      Math.min(box.minY, moved.minY),
-      Math.min(box.minZ, moved.minZ),
-      Math.max(box.maxX, moved.maxX),
-      Math.max(box.maxY, moved.maxY),
-      Math.max(box.maxZ, moved.maxZ),
-    );
-  }
-
-  /** Inclusive integer block-coordinate range covering a world-space box. */
-  private blockRangeCoveringBox(box: AABB): {
-    minX: number;
-    maxX: number;
-    minY: number;
-    maxY: number;
-    minZ: number;
-    maxZ: number;
+  private blockRangeCoveringBox(box: { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number }): {
+    minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number;
   } {
     return {
       minX: Math.floor(box.minX),

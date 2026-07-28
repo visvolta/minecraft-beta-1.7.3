@@ -115,9 +115,18 @@ export class MinecartEntity extends Entity {
     }
     moveX = Math.max(-MINECART_MAX_RAIL_SPEED, Math.min(MINECART_MAX_RAIL_SPEED, moveX));
     moveZ = Math.max(-MINECART_MAX_RAIL_SPEED, Math.min(MINECART_MAX_RAIL_SPEED, moveZ));
+    const persistentVelocityX = this.velocity.x;
+    const persistentVelocityY = this.velocity.y;
+    const persistentVelocityZ = this.velocity.z;
     this.velocity.x = moveX;
+    this.velocity.y = 0;
     this.velocity.z = moveZ;
     this.ctx.physics.move(this);
+    const blockedX = moveX !== 0 && this.velocity.x === 0;
+    const blockedZ = moveZ !== 0 && this.velocity.z === 0;
+    this.velocity.x = blockedX ? 0 : persistentVelocityX;
+    this.velocity.y = persistentVelocityY;
+    this.velocity.z = blockedZ ? 0 : persistentVelocityZ;
 
     // Drag. Beta applies the push branch only to an unridden cart.
     if (this.riddenByEntity !== null) {
@@ -136,7 +145,7 @@ export class MinecartEntity extends Entity {
     // rail line so the cart hugs an ascending track.
     const correctedRail = findMinecartRail(world, this.position.x, this.position.y, this.position.z) ?? rail;
     const endY = projectMinecartToRail(this.position.x, this.position.y, this.position.z, correctedRail).y;
-    const heightDelta = (startY - endY) * 0.05;
+    const heightDelta = (startY - endY) * 0.025;
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     if (speed > 0) {
       this.velocity.x = this.velocity.x / speed * (speed + heightDelta);

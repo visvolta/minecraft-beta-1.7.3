@@ -94,7 +94,7 @@ export class AudioManager implements MobSoundSink {
   private readonly onVisibilityChange = (): void => this.handleVisibility();
   private readonly pendingLoopStarts = new Map<string, number>();
   private nextLoopStartToken = 0;
-  private readonly activeLoops = new Map<string, { source: AudioBufferSourceNode; gain: GainNode; session: number; volume: number }>();
+  private readonly activeLoops = new Map<string, { source: AudioBufferSourceNode; gain: GainNode; panner?: PannerNode; session: number; volume: number }>();
 
   public constructor() {
     if (typeof window !== 'undefined') {
@@ -135,7 +135,7 @@ export class AudioManager implements MobSoundSink {
       case 'block.break': this.playBlockMaterial(event.material, event.x, event.y, event.z, 1, 0.8, 'break'); break;
       case 'block.place': this.playBlockMaterial(event.material, event.x, event.y, event.z, 0.8, 0.8, 'place'); break;
       case 'block.mine': this.playBlockMaterial(event.material, event.x, event.y, event.z, 0.25, 0.5, 'mine'); break;
-      case 'block.action': this.playPositional(`random.${event.id}`, event.x, event.y, event.z, 1, 0.9 + Math.random() * 0.2, WORLD_AUDIO_LIMITS.defaultDistance, 'player', `block.action.${event.id}`, WORLD_AUDIO_LIMITS.shortDedupeMs); break;
+      case 'block.action': this.playPositional(`random.${event.id}`, event.x, event.y, event.z, event.volume ?? 1, event.pitch ?? (0.9 + Math.random() * 0.2), WORLD_AUDIO_LIMITS.defaultDistance, 'player', `block.action.${event.id}`, WORLD_AUDIO_LIMITS.shortDedupeMs); break;
       case 'step': this.playStepMaterial(event.material, event.x, event.y, event.z, event.volume ?? 0.15, event.pitch ?? 1); break;
       case 'player.damage': { const key = event.kind === 'hurt' ? this.randomVariant('damage.hit', ['damage.hit1','damage.hit2','damage.hit3']) : event.kind === 'fall-big' ? 'damage.fallbig' : 'damage.fallsmall'; const pitch = event.kind === 'hurt' ? 1 + (Math.random() - Math.random()) * 0.2 : 1; this.playPositional(key, event.x, event.y, event.z, 1, pitch, 16, 'important', `player.damage.${event.kind}`); break; }
       case 'random.explode': this.playPositional(this.randomKey(['random.explode1','random.explode2','random.explode3']), event.x, event.y, event.z, 4, 0.7 + Math.random() * 0.2, 64, 'critical', 'random.explode'); break;
@@ -217,11 +217,12 @@ export class AudioManager implements MobSoundSink {
     );
   }
 
-  public setMinecartLoop(id: string, inside: boolean, speed: number): void {
+  public setMinecartLoop(id: string, inside: boolean, speed: number, x: number, y: number, z: number): void {
     const key = `minecart.${id}.${inside ? 'inside' : 'base'}`;
     const soundKey = inside ? 'minecart.inside' : 'minecart.base';
-    if (speed < 0.01) { this.stopLoop(key); return; }
-    this.startLoop(key, soundKey, Math.min(1, speed * 2));
+    const distance = inside ? 10 : 18;
+    if (speed < 0.03 || !this.isAudible(x, y, z, distance, 1)) { this.stopLoop(key); return; }
+    this.startLoop(key, soundKey, Math.min(0.55, speed * 0.9), x, y, z, distance);
   }
 
   public stopMinecartLoops(id: string): void { this.stopLoop(`minecart.${id}.inside`); this.stopLoop(`minecart.${id}.base`); }
@@ -416,16 +417,36 @@ export class AudioManager implements MobSoundSink {
   private disposeRainLayer(layer: RainLayer): void { if(this.rainPrimary===layer)this.rainPrimary=undefined;if(this.rainFading===layer)this.rainFading=undefined;layer.source.onended=null;layer.source.stop();layer.source.disconnect();layer.filter.disconnect();layer.gain.disconnect();if(this.rainStrength>.01&&this.rainPrimary===undefined&&this.rainTimer===undefined&&!this.rainStartPending)this.startRainSegment(); }
   private stopRain(): void { this.rainGeneration++;if(this.rainTimer!==undefined)window.clearTimeout(this.rainTimer);if(this.rainFadeTimer!==undefined)window.clearTimeout(this.rainFadeTimer);this.rainTimer=undefined;this.rainFadeTimer=undefined;const ctx=this.context;for(const layer of [this.rainPrimary,this.rainFading])if(layer!==undefined){if(ctx!==undefined){layer.gain.gain.cancelScheduledValues(ctx.currentTime);layer.gain.gain.linearRampToValueAtTime(0,ctx.currentTime+.15);window.setTimeout(()=>this.disposeRainLayer(layer),150);}else this.disposeRainLayer(layer);} }
 
-  private startLoop(ownerKey: string, soundKey: string, volume: number): void {
+  private startLoop(ownerKey: string, soundKey: string, volume: number, x?: number, y?: number, z?: number, distance: number = WORLD_AUDIO_LIMITS.defaultDistance): void {
     const existing = this.activeLoops.get(ownerKey);
-    if (existing !== undefined) { existing.volume = volume; existing.gain.gain.value = this.worldPaused ? 0 : volume; return; }
+    if (existing !== undefined) {
+      existing.volume = volume;
+      existing.gain.gain.value = this.worldPaused ? 0 : volume;
+      if (existing.panner !== undefined && x !== undefined && y !== undefined && z !== undefined) this.setSpatialPosition(existing.panner as PannerNode & SpatialAudioNodeCompat, x, y, z);
+      return;
+    }
     if (this.pendingLoopStarts.has(ownerKey)) return;
     const token = ++this.nextLoopStartToken;
     this.pendingLoopStarts.set(ownerKey, token);
     const session = this.worldSession;
-    void this.activate().then(async () => { const ctx=this.context,dest=this.soundGain;if(!ctx||!dest)return; const buffer=await this.loadBuffer(soundKey); if(!buffer||session!==this.worldSession||this.pendingLoopStarts.get(ownerKey)!==token)return; const source=ctx.createBufferSource(); source.buffer=buffer; source.loop=true; const gain=ctx.createGain(); gain.gain.value=this.worldPaused?0:volume; source.connect(gain); gain.connect(dest); source.start(); this.activeLoops.set(ownerKey,{source,gain,session,volume}); }).finally(() => { if (this.pendingLoopStarts.get(ownerKey) === token) this.pendingLoopStarts.delete(ownerKey); });
+    void this.activate().then(async () => {
+      const ctx = this.context, dest = this.soundGain;
+      if (!ctx || !dest) return;
+      const buffer = await this.loadBuffer(soundKey);
+      if (!buffer || session !== this.worldSession || this.pendingLoopStarts.get(ownerKey) !== token) return;
+      const source = ctx.createBufferSource(); source.buffer = buffer; source.loop = true;
+      const gain = ctx.createGain(); gain.gain.value = this.worldPaused ? 0 : volume; source.connect(gain);
+      let panner: PannerNode | undefined;
+      if (x !== undefined && y !== undefined && z !== undefined) {
+        panner = ctx.createPanner(); panner.panningModel = 'HRTF'; panner.distanceModel = 'linear'; panner.maxDistance = distance; panner.refDistance = 1;
+        this.setSpatialPosition(panner as PannerNode & SpatialAudioNodeCompat, x, y, z);
+        gain.connect(panner); panner.connect(dest);
+      } else gain.connect(dest);
+      source.start();
+      this.activeLoops.set(ownerKey, panner === undefined ? { source, gain, session, volume } : { source, gain, panner, session, volume });
+    }).finally(() => { if (this.pendingLoopStarts.get(ownerKey) === token) this.pendingLoopStarts.delete(ownerKey); });
   }
-  private stopLoop(ownerKey: string): void { this.pendingLoopStarts.delete(ownerKey); const loop=this.activeLoops.get(ownerKey); if(!loop)return; loop.source.stop(); loop.source.disconnect(); loop.gain.disconnect(); this.activeLoops.delete(ownerKey); }
+  private stopLoop(ownerKey: string): void { this.pendingLoopStarts.delete(ownerKey); const loop=this.activeLoops.get(ownerKey); if(!loop)return; loop.source.stop(); loop.source.disconnect(); loop.gain.disconnect(); loop.panner?.disconnect(); this.activeLoops.delete(ownerKey); }
   private stopCurrentMusic(): void { if (this.musicTimer !== undefined) window.clearTimeout(this.musicTimer); this.musicTimer = undefined; this.musicGeneration++; const source = this.currentMusic; this.currentMusic = undefined; if (source !== undefined) { source.onended = null; source.stop(); source.disconnect(); } }
   private scheduleNextMusic(delay: number): void { if (this.musicContext === 'none' || typeof window === 'undefined') return; if (this.musicTimer !== undefined) window.clearTimeout(this.musicTimer); this.musicTimer = window.setTimeout(() => void this.startMusic(), delay); }
   private async startMusic(): Promise<void> { if (this.context === undefined) return; const generation=this.musicGeneration; const keys=this.musicKeys(); if(keys.length===0)return; let key=this.randomKey(keys); if(keys.length>1 && key===this.lastMusicKey) key=this.randomKey(keys.filter(k=>k!==this.lastMusicKey)); this.lastMusicKey=key; await this.activate(); const ctx=this.context,dest=this.musicGain;if(!ctx||!dest||generation!==this.musicGeneration)return; const buffer=await this.loadBuffer(key); if(generation!==this.musicGeneration)return; if(!buffer){this.scheduleNextMusic(10_000);return;} const source=ctx.createBufferSource(); source.buffer=buffer; source.connect(dest); source.onended=()=>{source.disconnect(); if(this.currentMusic===source){this.currentMusic=undefined; const min=this.musicContext==='menu'?MENU_MUSIC_MIN_SILENCE_MS:GAME_MUSIC_MIN_SILENCE_MS; const max=this.musicContext==='menu'?MENU_MUSIC_MAX_SILENCE_MS:GAME_MUSIC_MAX_SILENCE_MS; this.scheduleNextMusic(min+Math.random()*(max-min));}}; this.currentMusic=source; source.start(); }

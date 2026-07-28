@@ -2,7 +2,6 @@ import { PerspectiveCamera } from 'three';
 import { Player } from './Player.ts';
 import { FirstPersonArmRenderer } from '../rendering/FirstPersonArmRenderer.ts';
 import {
-  CAMERA_VIEW_BOB_FREQUENCY,
   CAMERA_VIEW_BOB_HORIZONTAL_AMPLITUDE,
   CAMERA_VIEW_BOB_VERTICAL_AMPLITUDE,
   CAMERA_VIEW_BOB_PITCH_AMPLITUDE,
@@ -38,16 +37,20 @@ export class FirstPersonMotionController {
     const limbSwingPhase = player.prevLimbSwingPhase + (player.limbSwingPhase - player.prevLimbSwingPhase) * partialTick;
     const rawLimbSwingAmount = player.prevLimbSwingAmount + (player.limbSwingAmount - player.prevLimbSwingAmount) * partialTick;
     const limbSwingAmount = player.grounded && !player.isFlying ? rawLimbSwingAmount : 0;
+    const walkedDelta = player.distanceWalkedModified - player.prevDistanceWalkedModified;
+    const bobPhase = -(player.distanceWalkedModified + walkedDelta * partialTick);
+    const cameraYaw = player.prevCameraYaw + (player.cameraYaw - player.prevCameraYaw) * partialTick;
+    const cameraPitch = player.prevCameraPitch + (player.cameraPitch - player.prevCameraPitch) * partialTick;
 
-    // Apply View Bobbing to Camera
-    if (player.viewBobbingEnabled !== false && limbSwingAmount > 0.001) {
-      const transX = Math.sin(limbSwingPhase * CAMERA_VIEW_BOB_FREQUENCY) * limbSwingAmount * CAMERA_VIEW_BOB_HORIZONTAL_AMPLITUDE;
-      const transY = -Math.abs(Math.cos(limbSwingPhase * CAMERA_VIEW_BOB_FREQUENCY) * limbSwingAmount * CAMERA_VIEW_BOB_VERTICAL_AMPLITUDE);
+    // Apply Beta-style view bobbing to Camera
+    if (player.viewBobbingEnabled !== false && cameraYaw > 0.001) {
+      const transX = Math.sin(bobPhase * Math.PI) * cameraYaw * 0.5 * CAMERA_VIEW_BOB_HORIZONTAL_AMPLITUDE;
+      const transY = -Math.abs(Math.cos(bobPhase * Math.PI) * cameraYaw * CAMERA_VIEW_BOB_VERTICAL_AMPLITUDE);
       camera.translateX(transX);
       camera.translateY(transY);
 
-      const roll = Math.sin(limbSwingPhase * CAMERA_VIEW_BOB_FREQUENCY) * limbSwingAmount * CAMERA_VIEW_BOB_ROLL_AMPLITUDE;
-      const pitch = Math.abs(Math.cos(limbSwingPhase * CAMERA_VIEW_BOB_FREQUENCY - 0.2) * limbSwingAmount) * CAMERA_VIEW_BOB_PITCH_AMPLITUDE;
+      const roll = Math.sin(bobPhase * Math.PI) * cameraYaw * CAMERA_VIEW_BOB_ROLL_AMPLITUDE;
+      const pitch = Math.abs(Math.cos(bobPhase * Math.PI - 0.2) * cameraYaw) * CAMERA_VIEW_BOB_PITCH_AMPLITUDE + cameraPitch;
 
       camera.rotateZ(roll);
       camera.rotateX(pitch);
