@@ -53,37 +53,20 @@ const DIGIT_KEY_CODES: Record<DigitKey, string> = {
 };
 
 /**
- * Debug-only function keys: F3 toggles the debug overlay, F4 toggles
- * raw-light debug rendering, and F7 toggles AO-only debug rendering.
- * Edge-triggered like the digit keys above, not
- * bound through the InputAction system since they control debug systems
- * rather than gameplay.
+ * The single debug function key. F3 toggles the Beta-style debug overlay.
+ * Edge-triggered like the digit keys above, and deliberately not bound
+ * through the InputAction system: it controls a debug view rather than
+ * gameplay, and it is the only player-facing debug hotkey.
  */
-/**
- * Debug function keys. F3/F4/F7 are the original set; Stage 18 adds
- * F5/F8/F9/F10 for weather debug controls:
- *   F5  = return to automatic weather
- *   F8  = force clear
- *   F9  = force rain
- *   F10 = force thunder
- */
-export type DebugKey = 'F2' | 'F3' | 'F4' | 'F5' | 'F7' | 'F8' | 'F9' | 'F10';
+export type DebugKey = 'F3';
 
 const DEBUG_KEY_CODES: Record<DebugKey, string> = {
-  F2: 'F2',
   F3: 'F3',
-  F4: 'F4',
-  F5: 'F5',
-  F7: 'F7',
-  F8: 'F8',
-  F9: 'F9',
-  F10: 'F10',
 };
 
 /**
- * Modifier keys queried as simple held-state (not edge-triggered), used by
- * debug no-clip (Shift = 2x speed) and left available generically. Checks
- * both left/right variants of each modifier.
+ * Modifier keys queried as simple held-state (not edge-triggered).
+ * Checks both left/right variants of each modifier.
  */
 export type ModifierKey = 'shift' | 'ctrl';
 
@@ -139,22 +122,10 @@ export class Input {
       event.preventDefault();
     }
 
-    // Debug toggles must reach the game even without pointer lock (e.g.
-    // right after page load, before the first click), and must never
-    // trigger the browser's own F-key behaviour.
-    if (
-      event.code === DEBUG_KEY_CODES.F3 ||
-      event.code === DEBUG_KEY_CODES.F4 ||
-      event.code === DEBUG_KEY_CODES.F5 ||
-      event.code === DEBUG_KEY_CODES.F7 ||
-      event.code === DEBUG_KEY_CODES.F8 ||
-      event.code === DEBUG_KEY_CODES.F9 ||
-      event.code === DEBUG_KEY_CODES.F10 ||
-      event.code === 'ArrowLeft' ||
-      event.code === 'ArrowRight' ||
-      event.code === 'ArrowUp' ||
-      event.code === 'ArrowDown'
-    ) {
+    // F3 must reach the game even without pointer lock (e.g. right after
+    // page load, before the first click), and must never trigger the
+    // browser's own F-key behaviour.
+    if (event.code === DEBUG_KEY_CODES.F3) {
       event.preventDefault();
     }
   };

@@ -1,339 +1,103 @@
-import type { Renderer } from '../rendering/Renderer';
 import type * as THREE from 'three';
 import type { Player } from '../player/Player';
 import type { ChunkManager } from '../world/ChunkManager';
 import type { ChunkRenderer } from '../rendering/ChunkRenderer';
+import type { ChunkStreamer } from '../world/ChunkStreamer';
+import type { EntityManager } from '../entities/core/EntityManager';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from '../world/chunkConstants';
-import { ClimateSampler } from '../world/generation/climate/ClimateSampler';
-import { selectBiome } from '../world/generation/climate/BiomeSelector';
 import { FrameTimeTracker } from './DebugStats';
 import type { DebugStats } from './DebugStats';
-import type { WorldTime } from '../world/WorldTime';
-import type { SkyRenderer } from '../rendering/sky/SkyRenderer';
-import type { CloudRenderer } from '../rendering/sky/CloudRenderer';
-import type { WeatherController } from '../world/weather/WeatherController';
-import type { PrecipitationRenderer } from '../rendering/weather/PrecipitationRenderer';
-import type { RainSplashRenderer } from '../rendering/weather/RainSplashRenderer';
-import type { LightningRenderer } from '../rendering/weather/LightningRenderer';
-import type { PerformanceProfiler } from './PerformanceProfiler';
-import type { WorldTickScheduler } from '../world/ticks/WorldTickScheduler';
-import type { FallingBlockManager } from '../world/entities/FallingBlockManager';
-import type { WorldEventQueue } from '../world/events/WorldEventQueue';
-import { SectionVisibilityAnalyzer } from '../world/visibility/SectionVisibility';
 
-function formatHexColor(hex: number): string {
-  return `#${hex.toString(16).padStart(6, '0').toUpperCase()}`;
+/** Beta `GuiIngame`: f = floor(yaw * 4 / 360 + 0.5) & 3, 0 = south. */
+const FACING_NAMES: readonly string[] = ['South', 'West', 'North', 'East'];
+
+/**
+ * Heap sampling is comparatively expensive and changes slowly, so it is
+ * refreshed on a timer rather than every frame.
+ */
+const MEMORY_SAMPLE_INTERVAL_MS = 500;
+
+interface HeapCapableP {
+  memory?: { usedJSHeapSize: number; totalJSHeapSize: number };
 }
 
+/**
+ * Gathers the handful of values the Beta-style F3 overlay shows.
+ *
+ * Every read here is an already-maintained counter (`chunkManager.size`,
+ * `entityManager.activeCount`, `renderer.info`, queue depths) — populating
+ * F3 must never trigger a world scan, a biome sample or an occlusion
+ * analysis. Deep profiling belongs to PerformanceProfiler, reachable via
+ * the `window.__mcDebug` console API.
+ */
 export class DebugStatsCollector {
-  private readonly player: Player;
-  private readonly chunkManager: ChunkManager;
-  private readonly chunkRenderer: ChunkRenderer;
-  private readonly sceneRenderer: Renderer;
-  private readonly skyRenderer: SkyRenderer;
-  private readonly cloudRenderer: CloudRenderer;
-  private readonly weatherController: WeatherController;
-  private readonly precipitationRenderer: PrecipitationRenderer;
-  private readonly rainSplashRenderer: RainSplashRenderer;
-  private readonly lightningRenderer: LightningRenderer;
-  private readonly threeRenderer: THREE.WebGLRenderer;
-  private readonly worldSeed: bigint;
-  private readonly climateSampler: ClimateSampler;
-  private readonly worldTime: WorldTime;
-  private readonly performanceProfiler: PerformanceProfiler;
-  private readonly worldTickScheduler: WorldTickScheduler;
-  private readonly fallingBlockManager: FallingBlockManager;
-  private readonly events: WorldEventQueue | undefined;
-  private readonly visibilityAnalyzer: SectionVisibilityAnalyzer;
   private readonly frameTimeTracker = new FrameTimeTracker();
+  private nextMemorySampleMs = 0;
+  private memoryUsedMb = 0;
+  private memoryTotalMb = 0;
 
   public constructor(
-    player: Player,
-    chunkManager: ChunkManager,
-    chunkRenderer: ChunkRenderer,
-    sceneRenderer: Renderer,
-    skyRenderer: SkyRenderer,
-    cloudRenderer: CloudRenderer,
-    weatherController: WeatherController,
-    precipitationRenderer: PrecipitationRenderer,
-    rainSplashRenderer: RainSplashRenderer,
-    lightningRenderer: LightningRenderer,
-    threeRenderer: THREE.WebGLRenderer,
-    worldSeed: bigint,
-    worldTime: WorldTime,
-    performanceProfiler: PerformanceProfiler,
-    worldTickScheduler: WorldTickScheduler,
-    fallingBlockManager: FallingBlockManager,
-    events: WorldEventQueue | undefined,
-  ) {
-    this.player = player;
-    this.chunkManager = chunkManager;
-    this.chunkRenderer = chunkRenderer;
-    this.sceneRenderer = sceneRenderer;
-    this.skyRenderer = skyRenderer;
-    this.cloudRenderer = cloudRenderer;
-    this.weatherController = weatherController;
-    this.precipitationRenderer = precipitationRenderer;
-    this.rainSplashRenderer = rainSplashRenderer;
-    this.lightningRenderer = lightningRenderer;
-    this.threeRenderer = threeRenderer;
-    this.worldSeed = worldSeed;
-    this.worldTime = worldTime;
-    this.performanceProfiler = performanceProfiler;
-    this.worldTickScheduler = worldTickScheduler;
-    this.fallingBlockManager = fallingBlockManager;
-    this.events = events;
-    this.climateSampler = new ClimateSampler(worldSeed);
-    this.visibilityAnalyzer = new SectionVisibilityAnalyzer(chunkManager, chunkRenderer.getBlockRegistry());
-  }
+    private readonly player: Player,
+    private readonly chunkManager: ChunkManager,
+    private readonly chunkRenderer: ChunkRenderer,
+    private readonly chunkStreamer: ChunkStreamer,
+    private readonly entityManager: EntityManager,
+    private readonly threeRenderer: THREE.WebGLRenderer,
+    private readonly getCameraYaw: () => number,
+  ) {}
 
   public recordFrame(deltaSeconds: number): void {
     this.frameTimeTracker.record(deltaSeconds);
   }
 
-  /**
-   * Stage 18B: called once per frame by Engine so the F3 overlay can
-   * show the computed weather-skylight penalty, final effective
-   * subtraction (after flash), and the shared wind vector. Kept as a
-   * setter to avoid coupling DebugStatsCollector to AtmosphericState's
-   * concrete shape.
-   */
-  public setStormReadout(readout: {
-    weatherSkylightPenalty: number;
-    effectiveSkylightSubtracted: number;
-    windX: number;
-    windZ: number;
-  }): void {
-    this.stormReadout = readout;
-  }
-  private stormReadout: {
-    weatherSkylightPenalty: number;
-    effectiveSkylightSubtracted: number;
-    windX: number;
-    windZ: number;
-  } = { weatherSkylightPenalty: 0, effectiveSkylightSubtracted: 0, windX: 0, windZ: 0 };
-
-  public collect(noClip: boolean): DebugStats {
-    const chunkX = Math.floor(this.player.position.x / CHUNK_SIZE_X);
-    const chunkZ = Math.floor(this.player.position.z / CHUNK_SIZE_Z);
-
-    const [climate] = this.climateSampler.sampleRegion(
-      Math.floor(this.player.position.x),
-      Math.floor(this.player.position.z),
-      1,
-      1,
-    );
-    const biome = selectBiome(climate!);
-
+  public collect(): DebugStats {
     const info = this.threeRenderer.info;
-    const fog = this.sceneRenderer.getCurrentFogState();
-    const sky = this.skyRenderer.getCurrentState();
-    const cloudInfo = this.cloudRenderer.getDebugInfo();
-    const perf = this.performanceProfiler.getSnapshot();
-    const tickMetrics = this.worldTickScheduler.getMetrics();
-    const passCounts = this.chunkRenderer.getPassMeshCounts();
-    const compiledProgramCount = ((this.threeRenderer.info as unknown as { programs?: unknown[] }).programs?.length) ?? 0;
+    const meshingStats = this.chunkRenderer.getMeshingStats();
+    const generationStats = this.chunkStreamer.getGenerationStats();
 
-    // Stage 18: weather stats.
-    const w = this.weatherController.getState();
-    const forcedMode = this.weatherController.getForcedMode();
-    const weatherStats = {
-      mode: w.getEffectiveMode(w.partialTick),
-      forced: forcedMode === null ? 'auto' : forcedMode,
-      rainStrength: w.rainingStrength,
-      prevRainStrength: w.prevRainingStrength,
-      thunderStrength: w.thunderingStrength,
-      prevThunderStrength: w.prevThunderingStrength,
-      rainTime: w.rainTime,
-      thunderTime: w.thunderTime,
-    };
-    const precipStats = this.precipitationRenderer.getStats();
-    const occlusionStats = this.visibilityAnalyzer.analyze(this.sceneRenderer.camera);
+    const yawDegrees = (this.getCameraYaw() * 180) / Math.PI;
+    const facingIndex = Math.floor(yawDegrees * 4 / 360 + 0.5) & 3;
+
+    this.sampleMemory();
 
     return {
       fps: this.frameTimeTracker.getFps(),
-      averageFps: perf.averageFps,
-      onePercentLowFps: perf.onePercentLowFps,
       frameTimeMs: this.frameTimeTracker.getAverageFrameTimeMs(),
-      averageFrameTimeMs: perf.averageFrameTimeMs,
-      worstFrameTimeMs: perf.worstFrameTimeMs,
-      p95FrameTimeMs: perf.p95FrameTimeMs,
-      p99FrameTimeMs: perf.p99FrameTimeMs,
-      updateTimeMs: perf.updateTimeMs,
-      renderTimeMs: perf.renderTimeMs,
-      jsHeapUsedMb: perf.jsHeapUsedMb,
-      jsHeapTotalMb: perf.jsHeapTotalMb,
-      dirtyChunkScanMs: this.chunkRenderer.getLastDirtyScanMs(),
 
       playerX: this.player.position.x,
       playerY: this.player.position.y,
       playerZ: this.player.position.z,
-      chunkX,
-      chunkZ,
+      chunkX: Math.floor(this.player.position.x / CHUNK_SIZE_X),
+      chunkZ: Math.floor(this.player.position.z / CHUNK_SIZE_Z),
+      facingIndex,
+      facingName: FACING_NAMES[facingIndex] ?? 'South',
 
-      biomeName: biome.displayName,
-      worldSeed: this.worldSeed.toString(),
-      worldTime: this.worldTime.getTimeOfDayTicks(),
-      dayNumber: this.worldTime.getDayNumber(),
-      celestialAngle: this.worldTime.getCelestialAngle(),
-      skyPhase: sky.skyPhase,
       loadedChunks: this.chunkManager.size,
-      visibleChunkMeshes: this.chunkRenderer.getVisibleMeshCount(),
+      entityCount: this.entityManager.activeCount,
 
       triangleCount: info.render.triangles,
       drawCalls: info.render.calls,
-      compiledProgramCount,
-      rendererGeometryCount: info.memory.geometries,
-      rendererTextureCount: info.memory.textures,
-      terrainPassMeshes: passCounts.terrain,
-      cutoutPassMeshes: passCounts.cutout,
-      waterPassMeshes: passCounts.water,
-      lavaPassMeshes: passCounts.lava,
-      translucentPassMeshes: passCounts.translucent,
-      firePassMeshes: passCounts.fire,
-      depthPassMeshes: passCounts.depth,
-      approximateStateBuckets: passCounts.stateBuckets,
-      transparentPassOrder: '19 depth -> 20 translucent -> 21 water -> 22 lava -> 25 fire -> 30 weather',
-      occlusionLoadedSections: occlusionStats.loadedSections,
-      occlusionRenderableSections: occlusionStats.renderableSections,
-      occlusionEmptySections: occlusionStats.emptySections,
-      occlusionFrustumVisibleSections: occlusionStats.frustumVisibleSections,
-      occlusionFrustumRejectedSections: occlusionStats.frustumRejectedSections,
-      occlusionReachableSections: occlusionStats.reachableSections,
-      occlusionPortalVisibleSections: occlusionStats.portalVisibleSections,
-      occlusionPortalCulledSections: occlusionStats.portalCulledSections,
-      occlusionFrustumVisibleChunks: occlusionStats.frustumVisibleChunks,
-      occlusionPortalVisibleChunks: occlusionStats.portalVisibleChunks,
-      occlusionCpuMs: occlusionStats.occlusionCpuMs,
-      dirtyChunkQueueSize: this.chunkManager.countDirtyChunks(),
-      chunkGenerationQueueSize: perf.generationQueue.current,
-      generationQueueAvg: perf.generationQueue.average,
-      generationQueueMax: perf.generationQueue.maximum,
-      oldestCriticalGenerationAgeMs: perf.oldestCriticalGenerationAgeMs,
-      chunkMeshingQueueSize: perf.meshingQueue.current,
-      meshingQueueAvg: perf.meshingQueue.average,
-      meshingQueueMax: perf.meshingQueue.maximum,
-      lightingQueueCurrent: perf.lightingQueue.current,
-      lightingQueueAvg: perf.lightingQueue.average,
-      lightingQueueMax: perf.lightingQueue.maximum,
-      persistenceQueueCurrent: perf.persistenceQueue.current,
-      persistenceQueueAvg: perf.persistenceQueue.average,
-      persistenceQueueMax: perf.persistenceQueue.maximum,
-      activeWorkerCount: perf.activeWorkerCount,
-      completedWorkerJobs: perf.completedWorkerJobs,
-      staleWorkerJobs: perf.staleWorkerJobs,
-      meshUploadsThisFrame: perf.meshUploadsThisFrame,
-      approximateGeometryMemoryMb: perf.approximateGeometryMemoryMb,
 
-      fogMode: fog.mode,
-      fogKind: fog.kind,
-      fogNear: fog.near,
-      fogFar: fog.far,
-      fogDensity: fog.density,
-      starOpacity: sky.starOpacity,
-      sunAltitude: sky.sunAltitude,
-      skyColorHex: formatHexColor(sky.skyColorHex),
-      horizonColorHex: formatHexColor(sky.horizonColorHex),
-      fogColorHex: formatHexColor(fog.colorHex),
+      memoryUsedMb: this.memoryUsedMb,
+      memoryTotalMb: this.memoryTotalMb,
 
-      // "Overall daylight reaching an open outdoor block" — max(0..15
-      // effective sky) × sun-brightness, normalised. 1.0 = full noon,
-      // ~0 = midnight enclosed.
-      skylightFactor: Math.max(0, (15 - sky.skylightSubtracted) / 15) * sky.sunBrightnessFactor,
-      skylightSubtracted: sky.skylightSubtracted,
-      sunBrightnessFactor: sky.sunBrightnessFactor,
-
-      // Stage 17: cloud debug snapshot.
-      cloudOffsetX: cloudInfo.cloudOffsetX,
-      cloudWindSpeed: cloudInfo.windSpeedBlocksPerSecond,
-      cloudColorHex: formatHexColor(cloudInfo.colorHex),
-      cloudCellCount: cloudInfo.cellCountVisible,
-
-      // Stage 18 weather snapshot.
-      weatherMode: weatherStats.mode,
-      weatherForced: weatherStats.forced,
-      rainStrength: weatherStats.rainStrength,
-      prevRainStrength: weatherStats.prevRainStrength,
-      thunderStrength: weatherStats.thunderStrength,
-      prevThunderStrength: weatherStats.prevThunderStrength,
-      rainTime: weatherStats.rainTime,
-      thunderTime: weatherStats.thunderTime,
-      precipitationRain: precipStats.rain,
-      precipitationSnow: precipStats.snow,
-      precipitationBuildMs: precipStats.buildMs,
-      precipitationUpdateMs: precipStats.updateMs,
-      precipitationVertices: precipStats.vertices,
-      splashActive: this.rainSplashRenderer.getActiveCount(),
-      lightningActive: this.lightningRenderer.getActiveBoltCount(),
-      lightningFlash: this.lightningRenderer.getFlashStrength(),
-
-      weatherSimulationMs: perf.weather.simulationMs,
-      weatherSplashMs: perf.weather.splashMs,
-      weatherHeightmapResampleMs: perf.weather.heightmapResampleMs,
-      weatherGeometryRebuildMs: perf.weather.geometryRebuildMs,
-      weatherDrawMs: perf.weather.drawMs,
-      weatherTransparentRenderingMs: perf.weather.transparentRenderingMs,
-
-      lightingPropagationMs: perf.lighting.propagationMs,
-      lightingAvgBfsQueueSize: perf.lighting.averageBfsQueueSize,
-      lightingMaxBfsQueueSize: perf.lighting.maximumBfsQueueSize,
-      lightingPropagationCalls: perf.lighting.propagationCalls,
-      lightingNodesProcessed: perf.lighting.nodesProcessed,
-      lightingInitializationMs: perf.lighting.initializationMs,
-      lightingBorderReconcileMs: perf.lighting.borderReconcileMs,
-      lightingLocalRelightMs: perf.lighting.localRelightMs,
-
-      meshUploadGpuMs: perf.meshUpload.gpuBufferUploadMs,
-      meshUploadSceneInsertMs: perf.meshUpload.sceneInsertionMs,
-      meshUploadTotalMs: perf.meshUpload.totalUploadMs,
-
-      generationTimeMs: perf.generation.queueProcessMs,
-      generationWorkerMs: perf.generation.workerDurationMs,
-      generationIntegrationMs: perf.generation.integrationMs,
-      generationBytesReceived: perf.generation.bytesReceived,
-      generationTransferLatencyMs: perf.generation.transferLatencyMs,
-      meshingTimeMs: perf.meshing.workerDurationMs,
-      meshingJobBuildMs: perf.meshing.jobBuildMs,
-      meshingDispatchMs: perf.meshing.dispatchMs,
-      meshingResultDrainMs: perf.meshing.resultDrainMs,
-      meshingWorkerMs: perf.meshing.workerDurationMs,
-      meshingBytesCopied: perf.meshing.bytesCopied,
-      meshingBytesTransferred: perf.meshing.bytesTransferred,
-      meshingBytesReturned: perf.meshing.bytesReturned,
-      meshingTransferLatencyMs: perf.meshing.transferLatencyMs,
-      profilerEnabled: perf.profilerOverhead.enabled,
-      profilerSelfMs: perf.profilerOverhead.selfMs,
-      profilerDebugCollectMs: perf.profilerOverhead.debugCollectMs,
-      profilerDebugRenderMs: perf.profilerOverhead.debugRenderMs,
-      profilerTotalOverheadMs: perf.profilerOverhead.totalMs,
-      longFrameCount: perf.longFrameCount,
-      longFrameThresholdMs: perf.longFrameThresholdMs,
-
-      weatherSkylightPenalty: this.stormReadout.weatherSkylightPenalty,
-      effectiveSkylightSubtracted: this.stormReadout.effectiveSkylightSubtracted,
-      windX: this.stormReadout.windX,
-      windZ: this.stormReadout.windZ,
-
-      scheduledTicksPending: tickMetrics.pendingScheduledTicks,
-      scheduledTicksOverdue: tickMetrics.overdueScheduledTicks,
-      scheduledTicksProcessed: tickMetrics.processedScheduledTicks,
-      neighbourUpdatesPending: tickMetrics.pendingNeighbourUpdates,
-      neighbourUpdatesProcessed: tickMetrics.processedNeighbourUpdates,
-      randomTicksProcessed: tickMetrics.randomTicksProcessed,
-      skippedStaleTicks: tickMetrics.skippedStaleTicks,
-      duplicateScheduledTicks: tickMetrics.duplicateSuppressedTicks,
-      tickDispatcherTimeMs: tickMetrics.dispatcherTimeMs,
-      oldestScheduledTickAge: tickMetrics.oldestPendingScheduledTickAge,
-      detachedTickQueues: tickMetrics.detachedChunkTickQueues,
-
-      fallingEntityCount: this.fallingBlockManager.getCount(),
-      fallingPersistedCount: this.fallingBlockManager.getPersistedCount(),
-      fallingMeshCount: this.fallingBlockManager.getMeshCount(),
-      fallingSimulationTick: this.fallingBlockManager.getSimulationTick(),
-      fallingInterpolationAlpha: this.fallingBlockManager.getInterpolationAlpha(),
-      fallingPendingDrops: this.events?.getBlockDropCount() ?? 0,
-
-      noClip,
+      generationQueueSize: generationStats.queued,
+      meshingQueueSize: meshingStats.queued + meshingStats.pendingUploads,
     };
+  }
+
+  private sampleMemory(): void {
+    const now = performance.now();
+    if (now < this.nextMemorySampleMs) return;
+    this.nextMemorySampleMs = now + MEMORY_SAMPLE_INTERVAL_MS;
+
+    const memory = (performance as unknown as HeapCapableP).memory;
+    if (memory === undefined) {
+      this.memoryUsedMb = 0;
+      this.memoryTotalMb = 0;
+      return;
+    }
+    this.memoryUsedMb = memory.usedJSHeapSize / (1024 * 1024);
+    this.memoryTotalMb = memory.totalJSHeapSize / (1024 * 1024);
   }
 }

@@ -52,24 +52,6 @@ export class WeatherController {
     this.state.partialTick = acc;
   }
 
-  /**
-   * Force a specific weather mode. The Beta timer machinery keeps
-   * running underneath so returning to `setAuto()` picks up the natural
-   * schedule cleanly.
-   */
-  public forceMode(mode: WeatherMode): void {
-    this.forced = mode;
-    this.state.raining = mode === 'rain' || mode === 'thunder';
-    this.state.thundering = mode === 'thunder';
-  }
-
-  public setAuto(): void {
-    this.forced = null;
-    // Do NOT overwrite state.raining/thundering here — let the natural
-    // timers gradually take over. Next tick will keep the current
-    // strengths ramping toward whatever the timers say.
-  }
-
   public getForcedMode(): ForcedMode {
     return this.forced;
   }

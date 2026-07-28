@@ -118,19 +118,23 @@ export class WorkerValidationHarness {
     const populated: PopulatedMeshAttributeBuffers = actual;
     const checks: Array<[string, Float32Array, Float32Array, number]> = [
       ['position', expected.getAttribute('position')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.positions), 1e-6],
-      ['normal', expected.getAttribute('normal')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.normals), 1e-6],
       ['uv', expected.getAttribute('uv')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.uvs), 1e-6],
-      ['normalColor', expected.getAttribute('normalColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.normalColors), 1e-5],
-      ['debugColor', expected.getAttribute('debugColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.debugColors), 1e-5],
-      ['aoColor', expected.getAttribute('aoColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.aoColors), 1e-5],
       ['tintColor', expected.getAttribute('tintColor')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.tintColors), 1e-5],
-      ['skyLightLevel', expected.getAttribute('skyLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.skyLightLevels), 0],
-      ['blockLightLevel', expected.getAttribute('blockLightLevel')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.blockLightLevels), 0],
-      ['aoFactorScalar', expected.getAttribute('aoFactorScalar')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.aoFactorScalars), 1e-5],
-      ['faceBrightness', expected.getAttribute('faceBrightness')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.faceBrightness), 1e-5],
       ['fluidTextureKind', expected.getAttribute('fluidTextureKind')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.fluidTextureKinds), 0],
       ['fluidFrameUv', expected.getAttribute('fluidFrameUv')?.array as Float32Array ?? new Float32Array(), new Float32Array(populated.fluidFrameUvs), 1e-6],
     ];
+
+    // Packed lighting is byte-exact between the sync and worker paths.
+    const expectedPacked = expected.getAttribute('packedLight')?.array as Uint8Array ?? new Uint8Array();
+    const actualPacked = new Uint8Array(populated.packedLight);
+    if (expectedPacked.length !== actualPacked.length) {
+      return `${label}.packedLight length mismatch ${expectedPacked.length} !== ${actualPacked.length}`;
+    }
+    for (let i = 0; i < expectedPacked.length; i++) {
+      if (expectedPacked[i] !== actualPacked[i]) {
+        return `${label}.packedLight[${i}] mismatch: sync=${expectedPacked[i]} worker=${actualPacked[i]}`;
+      }
+    }
     for (const [name, a, b, epsilon] of checks) {
       if (a.length !== b.length) return `${label}.${name} length mismatch ${a.length} !== ${b.length}`;
       for (let i = 0; i < a.length; i++) {

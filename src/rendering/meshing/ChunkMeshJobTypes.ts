@@ -44,16 +44,11 @@ export interface EmptyMeshAttributeBuffers {
 export interface PopulatedMeshAttributeBuffers {
   readonly empty?: false;
   readonly positions: ArrayBuffer;
-  readonly normals: ArrayBuffer;
   readonly uvs: ArrayBuffer;
-  readonly normalColors: ArrayBuffer;
-  readonly debugColors: ArrayBuffer;
-  readonly aoColors: ArrayBuffer;
   readonly tintColors: ArrayBuffer;
-  readonly skyLightLevels: ArrayBuffer;
-  readonly blockLightLevels: ArrayBuffer;
-  readonly aoFactorScalars: ArrayBuffer;
-  readonly faceBrightness: ArrayBuffer;
+  /** Normalized uint8x4: sky, block, ao, faceBrightness. */
+  readonly packedLight: ArrayBuffer;
+  /** Fluid/fire passes only; zero-length for the general layout. */
   readonly fluidTextureKinds: ArrayBuffer;
   readonly fluidFrameUvs: ArrayBuffer;
   readonly indices: ArrayBuffer;

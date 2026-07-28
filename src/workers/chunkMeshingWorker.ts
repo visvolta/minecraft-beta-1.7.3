@@ -54,16 +54,11 @@ function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
   if (vertexCount === 0 || indexCount === 0) return createEmptyMeshAttributeBuffers();
   return {
     positions: attributeBuffer(geometry, 'position'),
-    normals: attributeBuffer(geometry, 'normal'),
+
     uvs: attributeBuffer(geometry, 'uv'),
-    normalColors: attributeBuffer(geometry, 'normalColor'),
-    debugColors: attributeBuffer(geometry, 'debugColor'),
-    aoColors: attributeBuffer(geometry, 'aoColor'),
+
     tintColors: attributeBuffer(geometry, 'tintColor'),
-    skyLightLevels: attributeBuffer(geometry, 'skyLightLevel'),
-    blockLightLevels: attributeBuffer(geometry, 'blockLightLevel'),
-    aoFactorScalars: attributeBuffer(geometry, 'aoFactorScalar'),
-    faceBrightness: attributeBuffer(geometry, 'faceBrightness'),
+    packedLight: attributeBuffer(geometry, 'packedLight'),
     fluidTextureKinds: attributeBuffer(geometry, 'fluidTextureKind'),
     fluidFrameUvs: attributeBuffer(geometry, 'fluidFrameUv'),
     indices: index === null ? new Uint32Array().buffer : ownArrayBuffer(index.array as ArrayBufferView),
@@ -87,16 +82,10 @@ function transferList(result: ChunkMeshResult): Transferable[] {
     if (!isPopulatedMesh(mesh)) continue;
     list.push(
       mesh.positions,
-      mesh.normals,
       mesh.uvs,
-      mesh.normalColors,
-      mesh.debugColors,
-      mesh.aoColors,
+
       mesh.tintColors,
-      mesh.skyLightLevels,
-      mesh.blockLightLevels,
-      mesh.aoFactorScalars,
-      mesh.faceBrightness,
+      mesh.packedLight,
       mesh.fluidTextureKinds,
       mesh.fluidFrameUvs,
       mesh.indices,

@@ -18,8 +18,6 @@ export interface PartUVs {
 
 export class PlayerSkinManager {
   private activeTexture: THREE.Texture | null = null;
-  private debugSkinTexture: THREE.Texture | null = null;
-  private debugModeActive = false;
   private isLegacySkin = false;
   private skinPath = '/textures/skins/steve.png';
 
@@ -31,15 +29,6 @@ export class PlayerSkinManager {
 
   public getSkinPath(): string {
     return this.skinPath;
-  }
-
-  public toggleDebugMode(): boolean {
-    this.debugModeActive = !this.debugModeActive;
-    return this.debugModeActive;
-  }
-
-  public isDebugModeActive(): boolean {
-    return this.debugModeActive;
   }
 
   /**
@@ -103,12 +92,6 @@ export class PlayerSkinManager {
   }
 
   public getActiveTexture(): THREE.Texture | null {
-    if (this.debugModeActive) {
-      if (!this.debugSkinTexture) {
-        this.debugSkinTexture = this.generateDebugSkinTexture();
-      }
-      return this.debugSkinTexture;
-    }
     return this.activeTexture;
   }
 
@@ -332,98 +315,4 @@ export class PlayerSkinManager {
     uvAttribute.needsUpdate = true;
   }
 
-  /**
-   * Generates a face-labeled visual UV debug canvas texture to inspect orientations.
-   */
-  private generateDebugSkinTexture(): THREE.Texture {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-
-    // Background grey
-    ctx.fillStyle = '#444444';
-    ctx.fillRect(0, 0, 64, 64);
-
-    const drawDebugPart = (tx: number, ty: number, w: number, h: number, d: number, name: string) => {
-      // Top: Cyan
-      ctx.fillStyle = '#00ffff';
-      ctx.fillRect(tx + d, ty, w, d);
-      ctx.fillStyle = '#000000';
-      ctx.font = '3px monospace';
-      ctx.fillText('T', tx + d + w / 2 - 1, ty + d / 2 + 1);
-
-      // Bottom: Magenta
-      ctx.fillStyle = '#ff00ff';
-      ctx.fillRect(tx + d + w, ty, w, d);
-      ctx.fillStyle = '#000000';
-      ctx.fillText('D', tx + d + w + w / 2 - 1, ty + d / 2 + 1);
-
-      // Right: Yellow
-      ctx.fillStyle = '#ffff00';
-      ctx.fillRect(tx, ty + d, d, h);
-      ctx.fillStyle = '#000000';
-      ctx.fillText('R', tx + d / 2 - 1, ty + d + h / 2 + 1);
-
-      // Front: Red
-      ctx.fillStyle = '#ff0000';
-      ctx.fillRect(tx + d, ty + d, w, h);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(name + 'F', tx + d + 1, ty + d + h / 2 + 1);
-
-      // Left: Blue
-      ctx.fillStyle = '#0000ff';
-      ctx.fillRect(tx + d + w, ty + d, d, h);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText('L', tx + d + w + d / 2 - 1, ty + d + h / 2 + 1);
-
-      // Back: Green
-      ctx.fillStyle = '#00ff00';
-      ctx.fillRect(tx + d + w + d, ty + d, w, h);
-      ctx.fillStyle = '#000000';
-      ctx.fillText('B', tx + d + w + d + w / 2 - 1, ty + d + h / 2 + 1);
-
-      // Border outline
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 0.5;
-      ctx.strokeRect(tx, ty, w + d + w + d, h + d);
-    };
-
-    // Head
-    drawDebugPart(0, 0, 8, 8, 8, 'H');
-    // Body
-    drawDebugPart(16, 16, 8, 12, 4, 'B');
-    // Right Arm
-    drawDebugPart(40, 16, 4, 12, 4, 'RA');
-    // Right Leg
-    drawDebugPart(0, 16, 4, 12, 4, 'RL');
-
-    if (!this.isLegacySkin) {
-      // Left Arm
-      drawDebugPart(32, 48, 4, 12, 4, 'LA');
-      // Left Leg
-      drawDebugPart(16, 48, 4, 12, 4, 'LL');
-
-      // Overlays
-      drawDebugPart(32, 0, 8, 8, 8, 'H2');
-      drawDebugPart(16, 32, 8, 12, 4, 'TS2');
-      drawDebugPart(40, 32, 4, 12, 4, 'RA2');
-      drawDebugPart(48, 48, 4, 12, 4, 'LA2');
-      drawDebugPart(0, 32, 4, 12, 4, 'RL2');
-      drawDebugPart(0, 48, 4, 12, 4, 'LL2');
-    }
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    texture.generateMipmaps = false;
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.flipY = false;
-    texture.needsUpdate = true;
-
-    this.debugSkinTexture = texture;
-    return texture;
-  }
 }

@@ -52,6 +52,8 @@ export interface ChunkGenerationStats {
 export interface CompletedChunkGeneration {
   readonly chunk: Chunk;
   readonly durationMs: number;
+  /** True when the worker supplied initial lighting the main thread can adopt. */
+  readonly lightingAdopted: boolean;
 }
 
 import { chunkKey } from '../chunkKey';
@@ -192,7 +194,7 @@ export class ChunkGenerationQueue {
       this.lastSyncGenerationMs += duration;
       this.recordDuration(duration);
       this.completed += 1;
-      completed.push({ chunk, durationMs: duration });
+      completed.push({ chunk, durationMs: duration, lightingAdopted: false });
       count += 1;
     }
     this.lastDispatchMs = 0;
@@ -315,7 +317,7 @@ export class ChunkGenerationQueue {
 
       const mapKey = chunkKey(result.chunkX, result.chunkZ);
       if (active !== undefined) {
-        const bytes = result.blocks.byteLength + result.metadata.byteLength;
+        const bytes = result.blocks.byteLength + result.metadata.byteLength + (result.light?.byteLength ?? 0);
         this.lastTransferBytes += bytes;
         this.totalTransferBytes += bytes;
         this.lastWorkerDurationMs = result.durationMs;
@@ -328,13 +330,21 @@ export class ChunkGenerationQueue {
 
       const chunk = this.chunkManager.getOrCreateChunk(result.chunkX, result.chunkZ);
       chunk.adoptGeneratedStorage(new Uint8Array(result.blocks), new Uint8Array(result.metadata));
+      // Adopt the worker's initial lighting rather than repeating the same
+      // BFS on the main thread. Border reconciliation still runs during
+      // integration, so cross-chunk seams remain the main thread's job.
+      let lightingAdopted = false;
+      if (result.light !== undefined && result.light.byteLength > 0) {
+        chunk.loadLightData(new Uint8Array(result.light));
+        lightingAdopted = true;
+      }
       if (result.featuresJson) {
         storeGeneratedFeatures(result.chunkX, result.chunkZ, parseFeaturesJson(result.featuresJson));
       }
       chunk.setTerrainPopulated(true);
       this.recordDuration(result.durationMs);
       this.completed += 1;
-      completed.push({ chunk, durationMs: result.durationMs });
+      completed.push({ chunk, durationMs: result.durationMs, lightingAdopted });
     }
   }
 

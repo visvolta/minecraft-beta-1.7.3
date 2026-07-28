@@ -77,19 +77,9 @@ import { chunkKey } from '../../world/chunkKey';
 function emptyGeometryFromBuffers(): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(), 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
-  geometry.setAttribute('normalColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('debugColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('aoColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
   geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
-  geometry.setAttribute('color', geometry.getAttribute('normalColor'));
+  geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(new Uint8Array(), 4, true));
   geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(), 1));
   return geometry;
 }
@@ -103,19 +93,13 @@ function geometryFromBuffers(buffers: MeshAttributeBuffers): THREE.BufferGeometr
   if (!isPopulatedMeshAttributeBuffers(buffers)) return emptyGeometryFromBuffers();
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buffers.positions), 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(buffers.normals), 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(buffers.uvs), 2));
-  geometry.setAttribute('normalColor', new THREE.BufferAttribute(new Float32Array(buffers.normalColors), 3));
-  geometry.setAttribute('debugColor', new THREE.BufferAttribute(new Float32Array(buffers.debugColors), 3));
-  geometry.setAttribute('aoColor', new THREE.BufferAttribute(new Float32Array(buffers.aoColors), 3));
   geometry.setAttribute('tintColor', new THREE.BufferAttribute(new Float32Array(buffers.tintColors), 3));
-  geometry.setAttribute('skyLightLevel', new THREE.BufferAttribute(new Float32Array(buffers.skyLightLevels), 1));
-  geometry.setAttribute('blockLightLevel', new THREE.BufferAttribute(new Float32Array(buffers.blockLightLevels), 1));
-  geometry.setAttribute('aoFactorScalar', new THREE.BufferAttribute(new Float32Array(buffers.aoFactorScalars), 1));
-  geometry.setAttribute('faceBrightness', new THREE.BufferAttribute(new Float32Array(buffers.faceBrightness), 1));
-  geometry.setAttribute('fluidTextureKind', new THREE.BufferAttribute(new Float32Array(buffers.fluidTextureKinds), 1));
-  geometry.setAttribute('fluidFrameUv', new THREE.BufferAttribute(new Float32Array(buffers.fluidFrameUvs), 2));
-  geometry.setAttribute('color', geometry.getAttribute('normalColor'));
+  geometry.setAttribute('packedLight', new THREE.BufferAttribute(new Uint8Array(buffers.packedLight), 4, true));
+  if (buffers.fluidTextureKinds.byteLength > 0) {
+    geometry.setAttribute('fluidTextureKind', new THREE.BufferAttribute(new Float32Array(buffers.fluidTextureKinds), 1));
+    geometry.setAttribute('fluidFrameUv', new THREE.BufferAttribute(new Float32Array(buffers.fluidFrameUvs), 2));
+  }
   geometry.setIndex(new THREE.BufferAttribute(
     buffers.indexType === 'uint16' ? new Uint16Array(buffers.indices) : new Uint32Array(buffers.indices),
     1,
@@ -556,16 +540,9 @@ export class ChunkMeshingQueue {
     for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.leaves, result.fire, result.translucent]) {
       if (!isPopulatedMeshAttributeBuffers(mesh)) continue;
       total += mesh.positions.byteLength;
-      total += mesh.normals.byteLength;
       total += mesh.uvs.byteLength;
-      total += mesh.normalColors.byteLength;
-      total += mesh.debugColors.byteLength;
-      total += mesh.aoColors.byteLength;
       total += mesh.tintColors.byteLength;
-      total += mesh.skyLightLevels.byteLength;
-      total += mesh.blockLightLevels.byteLength;
-      total += mesh.aoFactorScalars.byteLength;
-      total += mesh.faceBrightness.byteLength;
+      total += mesh.packedLight.byteLength;
       total += mesh.fluidTextureKinds.byteLength;
       total += mesh.fluidFrameUvs.byteLength;
       total += mesh.indices.byteLength;

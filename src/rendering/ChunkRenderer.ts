@@ -10,7 +10,7 @@ import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { TextureAtlas } from '../assets/TextureAtlas';
 import { ChunkMeshingQueue, type ChunkMeshQueueStats, type ChunkMeshGeometrySet } from './meshing/ChunkMeshingQueue';
 import { ChunkPassMask, computeChunkPassMask, hasChunkPass } from './meshing/ChunkPassMask';
-import { getLightBrightness, TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
+import { TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
 import type { FluidAnimationSystem } from './fluid/FluidAnimationSystem';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import type { FireAnimationSystem } from './fire/FireAnimationSystem';
@@ -48,19 +48,9 @@ const RUNTIME_GEOMETRY_VALIDATION_ENABLED = typeof import.meta !== 'undefined' &
 function createEmptyGeometry(): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(), 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
-  geometry.setAttribute('normalColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('debugColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('aoColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
   geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-  geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
-  geometry.setAttribute('color', geometry.getAttribute('normalColor'));
+  geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(new Uint8Array(), 4, true));
   geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(), 1));
   return geometry;
 }
@@ -90,10 +80,10 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
         '#include <common>',
         `#include <common>
         attribute vec3 tintColor;
-        attribute float skyLightLevel;
-        attribute float blockLightLevel;
-        attribute float aoFactorScalar;
-        attribute float faceBrightness;
+        // Normalized uint8x4: x=sky*17, y=block*17, z=ao, w=faceBrightness.
+        // Reading .xy back through *15.0 recovers the exact Beta light level
+        // because 255/17 == 15 for every one of the 16 discrete levels.
+        attribute vec4 packedLight;
         uniform float uSkylightSubtracted;
         uniform float uSunBrightnessFactor;
         uniform float uTextureMinBrightness;
@@ -108,6 +98,10 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
         '#include <color_vertex>',
         `#include <color_vertex>
         if (uDynamicLightingEnabled > 0.5) {
+          float skyLightLevel = packedLight.x * 15.0;
+          float blockLightLevel = packedLight.y * 15.0;
+          float aoFactorScalar = packedLight.z;
+          float faceBrightness = packedLight.w;
           float effectiveSky = max(0.0, skyLightLevel - uSkylightSubtracted);
           float skyBrightness = betaLightBrightness(effectiveSky) * uSunBrightnessFactor;
           float blockBrightness = betaLightBrightness(blockLightLevel);
@@ -432,12 +426,9 @@ export class ChunkRenderer {
   private readonly lavaDepthMeshes = new Map<number, THREE.Mesh>();
   private readonly translucentDepthMeshes = new Map<number, THREE.Mesh>();
 
-  private readonly atlas: TextureAtlas;
   private readonly fluidAnimationSystem: FluidAnimationSystem;
   private readonly fireAnimationSystem: FireAnimationSystem;
 
-  private rawLightDebugMode = false;
-  private ambientOcclusionDebugMode = false;
   private skylightSubtracted = 0;
   private sunBrightnessFactor = 1;
   private meshUploadsThisFrame = 0;
@@ -458,7 +449,6 @@ export class ChunkRenderer {
     this.blockRegistry = blockRegistry;
     this.mesher = new ChunkMesher(chunkManager, blockRegistry, atlas, new VegetationColorProvider(worldSeed));
     this.meshQueue = new ChunkMeshingQueue(chunkManager, atlas, worldSeed);
-    this.atlas = atlas;
     this.fluidAnimationSystem = fluidAnimationSystem;
     this.fireAnimationSystem = fireAnimationSystem;
 
@@ -664,20 +654,6 @@ export class ChunkRenderer {
     this.lastMeshUpdateMs = performance.now() - updateStart;
   }
 
-  public setRawLightDebugMode(enabled: boolean): void {
-    if (this.rawLightDebugMode === enabled) return;
-    this.rawLightDebugMode = enabled;
-    if (enabled) this.ambientOcclusionDebugMode = false;
-    this.applyDebugModeToAllMeshes();
-  }
-
-  public setAmbientOcclusionDebugMode(enabled: boolean): void {
-    if (this.ambientOcclusionDebugMode === enabled) return;
-    this.ambientOcclusionDebugMode = enabled;
-    if (enabled) this.rawLightDebugMode = false;
-    this.applyDebugModeToAllMeshes();
-  }
-
   public setSkylightSubtracted(value: number): void {
     const clamped = THREE.MathUtils.clamp(Math.round(value), 0, 11);
     if (clamped === this.skylightSubtracted) return;
@@ -694,6 +670,10 @@ export class ChunkRenderer {
 
   public removeChunkMesh(chunkX: number, chunkZ: number): void {
     const key = chunkKey(chunkX, chunkZ);
+    // Drop any queued meshing work for a chunk that is going away, so an
+    // unloaded chunk cannot still occupy a worker or produce an upload that is
+    // discarded on arrival.
+    this.meshQueue.cancel(chunkX, chunkZ);
     this.removeSharedPassMeshes(this.waterMeshes, this.waterGroup, this.waterDepthMeshes, this.waterDepthGroup, key, 'water');
     this.removeSharedPassMeshes(this.lavaMeshes, this.lavaGroup, this.lavaDepthMeshes, this.lavaDepthGroup, key, 'lava');
     this.removeSharedPassMeshes(this.translucentMeshes, this.translucentGroup, this.translucentDepthMeshes, this.translucentDepthGroup, key, 'translucent');
@@ -919,15 +899,9 @@ export class ChunkRenderer {
     if (position === undefined) return false;
     const vertexCount = position.count;
     const required: ReadonlyArray<readonly [string, number]> = [
-      ['normal', 3],
       ['uv', 2],
-      ['normalColor', 3],
-      ['debugColor', 3],
-      ['aoColor', 3],
       ['tintColor', 3],
-      ['skyLightLevel', 1],
-      ['blockLightLevel', 1],
-      ['aoFactorScalar', 1],
+      ['packedLight', 4],
     ];
     for (const [name] of required) {
       const attr = geometry.getAttribute(name) as THREE.BufferAttribute | undefined;
@@ -1043,121 +1017,20 @@ export class ChunkRenderer {
       uniforms.uSkylightSubtracted.value = this.skylightSubtracted;
       uniforms.uSunBrightnessFactor.value = this.sunBrightnessFactor;
       uniforms.uTextureMinBrightness.value = TEXTURE_MIN_BRIGHTNESS;
-      uniforms.uDynamicLightingEnabled.value = this.rawLightDebugMode || this.ambientOcclusionDebugMode ? 0 : 1;
+      uniforms.uDynamicLightingEnabled.value = 1;
     }
   }
 
-  private applyDebugModeToAllMeshes(): void {
-    this.applyMaterialMode();
-    this.updateDynamicColorsOnAllMeshes();
-    for (const mesh of this.terrainMeshes.values()) this.applyColorModeToGeometry(mesh.geometry);
-    for (const mesh of this.waterMeshes.values()) this.applyColorModeToGeometry(mesh.geometry);
-    for (const mesh of this.lavaMeshes.values()) this.applyColorModeToGeometry(mesh.geometry);
-    for (const mesh of this.cutoutMeshes.values()) this.applyColorModeToGeometry(mesh.geometry);
-    for (const mesh of this.leavesMeshes.values()) this.applyColorModeToGeometry(mesh.geometry);
-    for (const mesh of this.fireMeshes.values()) this.applyColorModeToGeometry(mesh.geometry);
-    for (const mesh of this.translucentMeshes.values()) this.applyColorModeToGeometry(mesh.geometry);
-  }
-
-  private updateDynamicColorsOnAllMeshes(): void {
-    // No-op in production: sky lighting is uniform-driven in the vertex shader.
-    if (!this.rawLightDebugMode && !this.ambientOcclusionDebugMode) return;
-    for (const mesh of this.terrainMeshes.values()) this.updateDynamicColorAttributes(mesh.geometry);
-    for (const mesh of this.waterMeshes.values()) this.updateDynamicColorAttributes(mesh.geometry);
-    for (const mesh of this.lavaMeshes.values()) this.updateDynamicColorAttributes(mesh.geometry);
-    for (const mesh of this.cutoutMeshes.values()) this.updateDynamicColorAttributes(mesh.geometry);
-    for (const mesh of this.leavesMeshes.values()) this.updateDynamicColorAttributes(mesh.geometry);
-    for (const mesh of this.fireMeshes.values()) this.updateDynamicColorAttributes(mesh.geometry);
-    for (const mesh of this.translucentMeshes.values()) this.updateDynamicColorAttributes(mesh.geometry);
-  }
-
-  private updateDynamicColorAttributes(geometry: THREE.BufferGeometry): void {
-    const tintAttribute = geometry.getAttribute('tintColor') as THREE.BufferAttribute | undefined;
-    const skyAttribute = geometry.getAttribute('skyLightLevel') as THREE.BufferAttribute | undefined;
-    const blockAttribute = geometry.getAttribute('blockLightLevel') as THREE.BufferAttribute | undefined;
-    const aoAttribute = geometry.getAttribute('aoFactorScalar') as THREE.BufferAttribute | undefined;
-    const normalColorAttribute = geometry.getAttribute('normalColor') as THREE.BufferAttribute | undefined;
-    const debugColorAttribute = geometry.getAttribute('debugColor') as THREE.BufferAttribute | undefined;
-
-    if (
-      tintAttribute === undefined ||
-      skyAttribute === undefined ||
-      blockAttribute === undefined ||
-      aoAttribute === undefined ||
-      normalColorAttribute === undefined ||
-      debugColorAttribute === undefined
-    )
-      return;
-
-    const tint = tintAttribute.array as Float32Array;
-    const sky = skyAttribute.array as Float32Array;
-    const block = blockAttribute.array as Float32Array;
-    const ao = aoAttribute.array as Float32Array;
-    const normalColor = normalColorAttribute.array as Float32Array;
-    const debugColor = debugColorAttribute.array as Float32Array;
-
-    const vertexCount = skyAttribute.count;
-    for (let i = 0; i < vertexCount; i++) {
-      const effectiveSky = Math.max(0, sky[i]! - this.skylightSubtracted);
-      const skyBrightness = getLightBrightness(effectiveSky) * this.sunBrightnessFactor;
-      const blockBrightness = getLightBrightness(block[i]!);
-      const shadedBrightness = Math.max(skyBrightness, blockBrightness);
-      const rawBrightness = getLightBrightness(Math.max(effectiveSky, block[i]!));
-      const aoFactor = ao[i]!;
-
-      const clampedLight = shadedBrightness < TEXTURE_MIN_BRIGHTNESS ? TEXTURE_MIN_BRIGHTNESS : shadedBrightness;
-      const visibility = clampedLight * aoFactor;
-
-      normalColor[i * 3] = tint[i * 3]! * visibility;
-      normalColor[i * 3 + 1] = tint[i * 3 + 1]! * visibility;
-      normalColor[i * 3 + 2] = tint[i * 3 + 2]! * visibility;
-
-      debugColor[i * 3] = rawBrightness;
-      debugColor[i * 3 + 1] = rawBrightness;
-      debugColor[i * 3 + 2] = rawBrightness;
-    }
-
-    normalColorAttribute.needsUpdate = true;
-    debugColorAttribute.needsUpdate = true;
-  }
-
+  /**
+   * `vertexColors: true` requires a `color` attribute. The vertex shader
+   * recomputes vColor from tintColor x light x AO, so `color` simply aliases
+   * `tintColor`: correct as the pre-lighting base and, being an alias, it
+   * costs no additional vertex storage or GPU upload.
+   */
   private applyColorModeToGeometry(geometry: THREE.BufferGeometry): void {
-    // Production path: vertex shader composes tint × light × AO from attributes + uniforms.
-    // Only rewrite CPU colors when a debug visualization mode is active.
-    if (this.rawLightDebugMode || this.ambientOcclusionDebugMode) {
-      this.updateDynamicColorAttributes(geometry);
-    }
-    const attributeName = this.rawLightDebugMode ? 'debugColor' : this.ambientOcclusionDebugMode ? 'aoColor' : 'normalColor';
-    const colorAttribute = geometry.getAttribute(attributeName);
-    if (colorAttribute === undefined) throw new Error(`Missing geometry colour attribute: ${attributeName}`);
-    geometry.setAttribute('color', colorAttribute);
-  }
-
-  private applyMaterialMode(): void {
-    if (this.rawLightDebugMode || this.ambientOcclusionDebugMode) {
-      this.terrainMaterial.map = null;
-      this.waterMaterial.map = this.atlas.debugTexture;
-      this.lavaMaterial.map = this.atlas.debugTexture;
-      this.cutoutMaterial.map = this.atlas.debugTexture;
-      this.leavesMaterial.map = this.atlas.debugTexture;
-      this.translucentMaterial.map = this.atlas.debugTexture;
-    } else {
-      this.terrainMaterial.map = this.atlas.texture;
-      this.waterMaterial.map = this.atlas.texture;
-      this.lavaMaterial.map = this.atlas.texture;
-      this.cutoutMaterial.map = this.atlas.texture;
-      this.leavesMaterial.map = this.atlas.texture;
-      this.translucentMaterial.map = this.atlas.texture;
-    }
-
-    this.updateDynamicLightingUniforms();
-    this.terrainMaterial.needsUpdate = true;
-    this.waterMaterial.needsUpdate = true;
-    this.lavaMaterial.needsUpdate = true;
-    this.cutoutMaterial.needsUpdate = true;
-    this.leavesMaterial.needsUpdate = true;
-    this.fireMaterial.needsUpdate = true;
-    this.translucentMaterial.needsUpdate = true;
+    const tint = geometry.getAttribute('tintColor');
+    if (tint === undefined) throw new Error('Missing geometry colour attribute: tintColor');
+    geometry.setAttribute('color', tint);
   }
 
   private passGeometryKey(chunkKeyValue: number, pass: string): string {

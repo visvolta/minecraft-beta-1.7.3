@@ -19,14 +19,14 @@ import {
   CHUNK_SIZE_Z,
 } from '../world/chunkConstants';
 import { getWireConnections, WireConnection, getRedstoneColor } from '../world/redstone/RedstoneWireConnectivity';
-import { clampedVisibility, getLightBrightness } from './voxelLighting';
 import { isFallingFluid } from '../world/fluid/FluidMetadata';
+import { packLightByte, packUnitByte } from './meshing/ChunkVertexLayout';
 import { FluidTextureKind } from '../world/fluid/FluidTextureKind';
 import { computeFluidFlowVector } from '../world/fluid/FluidFlowVector';
 import { getBetaFluidCornerHeight } from './fluid/FluidSurfaceGeometry';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import { ChunkPassMask, classifyBlockPassMask, hasChunkPass } from './meshing/ChunkPassMask';
-import { FloatBuilder, IndexBuilder, emptyLeafCullStats, type LeafCullStats } from './meshing/TypedMeshBuilder';
+import { FloatBuilder, IndexBuilder, Uint8Builder, emptyLeafCullStats, type LeafCullStats } from './meshing/TypedMeshBuilder';
 import { getRailShapeForBlock } from '../world/rails/RailShapes';
 import { isDoorBlockId } from '../blocks/shapes/BlockShapes';
 import {
@@ -75,8 +75,6 @@ interface SectionPassCache {
 
 const AO_LEVEL_TO_FACTOR = [0.4, 0.6, 0.8, 1.0] as const;
 const DEFAULT_VALUES: Quad4 = [1, 1, 1, 1];
-const CROSS_NORMAL_A = 1 / Math.sqrt(2);
-const CROSS_NORMAL_B = -CROSS_NORMAL_A;
 
 const FACES: readonly FaceDef[] = [
   {
@@ -205,16 +203,10 @@ function getLinearTint(tint: readonly [number, number, number]): readonly [numbe
 
 class MeshBuffers {
   public readonly positions = new FloatBuilder(4096);
-  public readonly normals = new FloatBuilder(4096);
   public readonly uvs = new FloatBuilder(4096);
-  public readonly normalColors = new FloatBuilder(4096);
-  public readonly debugColors = new FloatBuilder(4096);
-  public readonly aoColors = new FloatBuilder(4096);
   public readonly tintColors = new FloatBuilder(4096);
-  public readonly skyLightLevels = new FloatBuilder(1024);
-  public readonly blockLightLevels = new FloatBuilder(1024);
-  public readonly aoFactorScalars = new FloatBuilder(1024);
-  public readonly faceBrightness = new FloatBuilder(1024);
+  /** Normalized uint8x4: sky, block, ao, faceBrightness. */
+  public readonly packedLight = new Uint8Builder(4096);
   public readonly fluidTextureKinds = new FloatBuilder(1024);
   public readonly fluidFrameUvs = new FloatBuilder(2048);
   public readonly indices = new IndexBuilder(6144);
@@ -222,16 +214,9 @@ class MeshBuffers {
 
   public clear(): void {
     this.positions.clear();
-    this.normals.clear();
     this.uvs.clear();
-    this.normalColors.clear();
-    this.debugColors.clear();
-    this.aoColors.clear();
     this.tintColors.clear();
-    this.skyLightLevels.clear();
-    this.blockLightLevels.clear();
-    this.aoFactorScalars.clear();
-    this.faceBrightness.clear();
+    this.packedLight.clear();
     this.fluidTextureKinds.clear();
     this.fluidFrameUvs.clear();
     this.indices.clear();
@@ -266,10 +251,8 @@ class MeshBuffers {
       const sky = skyLevels[i]!;
       const block = blockLevels[i]!;
       const ao = aoByVertex[i]!;
-      const rawBrightness = getLightBrightness(Math.max(sky, block));
 
       this.positions.push3(x + cx, y + cy, z + cz);
-      this.normals.push3(face.nx, face.ny, face.nz);
       if (uvRect !== undefined) {
         const [localU, localV] = localCornerToTextureUv(face, corner);
         this.uvs.push2(
@@ -280,17 +263,8 @@ class MeshBuffers {
         this.uvs.push2(0, 0);
       }
 
-      const visibility = clampedVisibility(rawBrightness, ao);
-      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
-      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push3(ao, ao, ao);
       this.tintColors.push3(tintR, tintG, tintB);
-      this.skyLightLevels.push(sky);
-      this.blockLightLevels.push(block);
-      this.aoFactorScalars.push(ao);
-      this.faceBrightness.push(1);
-      this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
-      this.fluidFrameUvs.push2(0, 0);
+      this.packedLight.push4(packLightByte(sky), packLightByte(block), packUnitByte(ao), packUnitByte(1));
     }
 
     if (flipDiagonal) {
@@ -309,12 +283,10 @@ class MeshBuffers {
     light: LightSample,
   ): void {
     const [tintR, tintG, tintB] = getLinearTint(tint);
-    const rawBrightness = getLightBrightness(Math.max(light.sky, light.block));
     const u0 = uvRect ? uvRect.u0 : 0;
     const v0 = uvRect ? uvRect.v0 : 0;
     const u1 = uvRect ? uvRect.u1 : 0;
     const v1 = uvRect ? uvRect.v1 : 0;
-    const visibility = clampedVisibility(rawBrightness, 1);
 
     let offset = this.vertexCount;
     this.positions.push3(x, y, z);
@@ -322,17 +294,8 @@ class MeshBuffers {
     this.positions.push3(x + 1, y + 1, z + 1);
     this.positions.push3(x, y + 1, z);
     for (let i = 0; i < 4; i++) {
-      this.normals.push3(CROSS_NORMAL_A, 0, CROSS_NORMAL_B);
-      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
-      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push3(1, 1, 1);
       this.tintColors.push3(tintR, tintG, tintB);
-      this.skyLightLevels.push(light.sky);
-      this.blockLightLevels.push(light.block);
-      this.aoFactorScalars.push(1);
-      this.faceBrightness.push(1);
-      this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
-      this.fluidFrameUvs.push2(0, 0);
+      this.packedLight.push4(packLightByte(light.sky), packLightByte(light.block), packUnitByte(1), packUnitByte(1));
     }
     this.uvs.push2(u0, v1);
     this.uvs.push2(u1, v1);
@@ -346,17 +309,8 @@ class MeshBuffers {
     this.positions.push3(x + 1, y + 1, z);
     this.positions.push3(x, y + 1, z + 1);
     for (let i = 0; i < 4; i++) {
-      this.normals.push3(CROSS_NORMAL_A, 0, CROSS_NORMAL_A);
-      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
-      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push3(1, 1, 1);
       this.tintColors.push3(tintR, tintG, tintB);
-      this.skyLightLevels.push(light.sky);
-      this.blockLightLevels.push(light.block);
-      this.aoFactorScalars.push(1);
-      this.faceBrightness.push(1);
-      this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
-      this.fluidFrameUvs.push2(0, 0);
+      this.packedLight.push4(packLightByte(light.sky), packLightByte(light.block), packUnitByte(1), packUnitByte(1));
     }
     this.uvs.push2(u0, v1);
     this.uvs.push2(u1, v1);
@@ -428,49 +382,42 @@ class MeshBuffers {
     let px: number[] = [];
     let py: number[] = [];
     let pz: number[] = [];
-    let nx = 0, ny = 0, nz = 0;
     let faceUvs: number[] = [];
     switch (faceIndex) {
       case 0:
         px = [x + oinset, x + oinset, x + oinset, x + oinset];
         py = [y, y + 1, y + 1, y];
         pz = [z + inset, z + inset, z + oinset, z + oinset];
-        nx = 1; ny = 0; nz = 0;
         faceUvs = [u0 + (u1 - u0) * inset, v1, u0 + (u1 - u0) * inset, v0, u0 + (u1 - u0) * oinset, v0, u0 + (u1 - u0) * oinset, v1];
         break;
       case 1:
         px = [x + inset, x + inset, x + inset, x + inset];
         py = [y, y + 1, y + 1, y];
         pz = [z + oinset, z + oinset, z + inset, z + inset];
-        nx = -1; ny = 0; nz = 0;
         faceUvs = [u0 + (u1 - u0) * oinset, v1, u0 + (u1 - u0) * oinset, v0, u0 + (u1 - u0) * inset, v0, u0 + (u1 - u0) * inset, v1];
         break;
       case 2:
         px = [x + inset, x + oinset, x + oinset, x + inset];
         py = [y + 1, y + 1, y + 1, y + 1];
         pz = [z + oinset, z + oinset, z + inset, z + inset];
-        nx = 0; ny = 1; nz = 0;
         faceUvs = [u0 + (u1 - u0) * inset, v0 + (v1 - v0) * oinset, u0 + (u1 - u0) * oinset, v0 + (v1 - v0) * oinset, u0 + (u1 - u0) * oinset, v0 + (v1 - v0) * inset, u0 + (u1 - u0) * inset, v0 + (v1 - v0) * inset];
         break;
       case 3:
         px = [x + inset, x + oinset, x + oinset, x + inset];
         py = [y, y, y, y];
         pz = [z + inset, z + inset, z + oinset, z + oinset];
-        nx = 0; ny = -1; nz = 0;
         faceUvs = [u0 + (u1 - u0) * inset, v0 + (v1 - v0) * inset, u0 + (u1 - u0) * oinset, v0 + (v1 - v0) * inset, u0 + (u1 - u0) * oinset, v0 + (v1 - v0) * oinset, u0 + (u1 - u0) * inset, v0 + (v1 - v0) * oinset];
         break;
       case 4:
         px = [x + inset, x + oinset, x + oinset, x + inset];
         py = [y, y, y + 1, y + 1];
         pz = [z + oinset, z + oinset, z + oinset, z + oinset];
-        nx = 0; ny = 0; nz = 1;
         faceUvs = [u0 + (u1 - u0) * inset, v1, u0 + (u1 - u0) * oinset, v1, u0 + (u1 - u0) * oinset, v0, u0 + (u1 - u0) * inset, v0];
         break;
       default:
         px = [x + oinset, x + inset, x + inset, x + oinset];
         py = [y, y, y + 1, y + 1];
         pz = [z + inset, z + inset, z + inset, z + inset];
-        nx = 0; ny = 0; nz = -1;
         faceUvs = [u0 + (u1 - u0) * oinset, v1, u0 + (u1 - u0) * inset, v1, u0 + (u1 - u0) * inset, v0, u0 + (u1 - u0) * oinset, v0];
         break;
     }
@@ -478,21 +425,10 @@ class MeshBuffers {
       const sky = skyLevels[i]!;
       const block = blockLevels[i]!;
       const ao = aoByVertex[i]!;
-      const rawBrightness = getLightBrightness(Math.max(sky, block));
-      const visibility = clampedVisibility(rawBrightness, ao);
       this.positions.push3(px[i]!, py[i]!, pz[i]!);
-      this.normals.push3(nx, ny, nz);
       this.uvs.push2(faceUvs[i * 2]!, faceUvs[i * 2 + 1]!);
-      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
-      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push3(ao, ao, ao);
       this.tintColors.push3(tintR, tintG, tintB);
-      this.skyLightLevels.push(sky);
-      this.blockLightLevels.push(block);
-      this.aoFactorScalars.push(ao);
-      this.faceBrightness.push(1);
-      this.fluidTextureKinds.push(FluidTextureKind.WaterStill);
-      this.fluidFrameUvs.push2(0, 0);
+      this.packedLight.push4(packLightByte(sky), packLightByte(block), packUnitByte(ao), packUnitByte(1));
     }
     if (flipDiagonal) {
       this.indices.push6(vertexOffset, vertexOffset + 1, vertexOffset + 3, vertexOffset + 1, vertexOffset + 2, vertexOffset + 3);
@@ -504,7 +440,9 @@ class MeshBuffers {
 
   public pushQuad(
     vertices: readonly [Corner, Corner, Corner, Corner],
-    normal: readonly [number, number, number],
+    // Face normal is still supplied by callers for readability at the call
+    // site, but is not emitted: chunk materials are unlit MeshBasicMaterial.
+    _normal: readonly [number, number, number],
     uvRect: { u0: number; v0: number; u1: number; v1: number } | undefined,
     tint: readonly [number, number, number],
     light: LightSample,
@@ -516,8 +454,6 @@ class MeshBuffers {
   ): void {
     const [tintR, tintG, tintB] = getLinearTint(tint);
     const vertexOffset = this.vertexCount;
-    const rawBrightness = getLightBrightness(Math.max(light.sky, light.block));
-    const visibility = clampedVisibility(rawBrightness, ao) * faceBrightness;
     const u0 = uvRect?.u0 ?? 0;
     const v0 = uvRect?.v0 ?? 0;
     const u1 = uvRect?.u1 ?? 1;
@@ -527,16 +463,9 @@ class MeshBuffers {
     for (let i = 0; i < 4; i++) {
       const vertex = vertices[i]!;
       this.positions.push3(vertex[0], vertex[1], vertex[2]);
-      this.normals.push3(normal[0], normal[1], normal[2]);
       this.uvs.push2(uvs[i * 2]!, uvs[i * 2 + 1]!);
-      this.normalColors.push3(tintR * visibility, tintG * visibility, tintB * visibility);
-      this.debugColors.push3(rawBrightness, rawBrightness, rawBrightness);
-      this.aoColors.push3(ao, ao, ao);
       this.tintColors.push3(tintR, tintG, tintB);
-      this.skyLightLevels.push(light.sky);
-      this.blockLightLevels.push(light.block);
-      this.aoFactorScalars.push(ao);
-      this.faceBrightness.push(faceBrightness);
+      this.packedLight.push4(packLightByte(light.sky), packLightByte(light.block), packUnitByte(ao), packUnitByte(faceBrightness));
       this.fluidTextureKinds.push(fluidTextureKind);
       this.fluidFrameUvs.push2(frameUv[i * 2]!, frameUv[i * 2 + 1]!);
     }
@@ -546,32 +475,20 @@ class MeshBuffers {
   public toGeometry(): THREE.BufferGeometry {
     const geometry = new THREE.BufferGeometry();
     const pos = new Float32Array(this.positions.view());
-    const nor = new Float32Array(this.normals.view());
     const uv = new Float32Array(this.uvs.view());
-    const nc = new Float32Array(this.normalColors.view());
-    const dc = new Float32Array(this.debugColors.view());
-    const ao = new Float32Array(this.aoColors.view());
     const tc = new Float32Array(this.tintColors.view());
-    const sky = new Float32Array(this.skyLightLevels.view());
-    const bl = new Float32Array(this.blockLightLevels.view());
-    const aof = new Float32Array(this.aoFactorScalars.view());
-    const fb = new Float32Array(this.faceBrightness.view());
-    const fk = new Float32Array(this.fluidTextureKinds.view());
-    const ff = new Float32Array(this.fluidFrameUvs.view());
+    const pl = new Uint8Array(this.packedLight.view());
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    geometry.setAttribute('normalColor', new THREE.Float32BufferAttribute(nc, 3));
-    geometry.setAttribute('debugColor', new THREE.Float32BufferAttribute(dc, 3));
-    geometry.setAttribute('aoColor', new THREE.Float32BufferAttribute(ao, 3));
     geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(tc, 3));
-    geometry.setAttribute('skyLightLevel', new THREE.Float32BufferAttribute(sky, 1));
-    geometry.setAttribute('blockLightLevel', new THREE.Float32BufferAttribute(bl, 1));
-    geometry.setAttribute('aoFactorScalar', new THREE.Float32BufferAttribute(aof, 1));
-    geometry.setAttribute('faceBrightness', new THREE.Float32BufferAttribute(fb, 1));
-    geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(fk, 1));
-    geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(ff, 2));
-    geometry.setAttribute('color', geometry.getAttribute('normalColor'));
+    // Normalized so the shader reads sky/block as 0..15 and ao/brightness as 0..1.
+    geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(pl, 4, true));
+    if (this.fluidTextureKinds.count > 0) {
+      const fk = new Float32Array(this.fluidTextureKinds.view());
+      const ff = new Float32Array(this.fluidFrameUvs.view());
+      geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(fk, 1));
+      geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(ff, 2));
+    }
     const { buffer, indexType } = this.indices.toArrayBuffer(this.vertexCount <= 65535);
     geometry.setIndex(new THREE.BufferAttribute(
       indexType === 'uint16' ? new Uint16Array(buffer) : new Uint32Array(buffer),
@@ -583,16 +500,9 @@ class MeshBuffers {
   /** Transferable attribute pack for workers — each buffer is an owned copy ready to transfer. */
   public toAttributeBuffers(): {
     positions: ArrayBuffer;
-    normals: ArrayBuffer;
     uvs: ArrayBuffer;
-    normalColors: ArrayBuffer;
-    debugColors: ArrayBuffer;
-    aoColors: ArrayBuffer;
     tintColors: ArrayBuffer;
-    skyLightLevels: ArrayBuffer;
-    blockLightLevels: ArrayBuffer;
-    aoFactorScalars: ArrayBuffer;
-    faceBrightness: ArrayBuffer;
+    packedLight: ArrayBuffer;
     fluidTextureKinds: ArrayBuffer;
     fluidFrameUvs: ArrayBuffer;
     indices: ArrayBuffer;
@@ -605,16 +515,9 @@ class MeshBuffers {
     if (vertexCount === 0 || indexCount === 0) {
       return {
         positions: new ArrayBuffer(0),
-        normals: new ArrayBuffer(0),
         uvs: new ArrayBuffer(0),
-        normalColors: new ArrayBuffer(0),
-        debugColors: new ArrayBuffer(0),
-        aoColors: new ArrayBuffer(0),
         tintColors: new ArrayBuffer(0),
-        skyLightLevels: new ArrayBuffer(0),
-        blockLightLevels: new ArrayBuffer(0),
-        aoFactorScalars: new ArrayBuffer(0),
-        faceBrightness: new ArrayBuffer(0),
+        packedLight: new ArrayBuffer(0),
         fluidTextureKinds: new ArrayBuffer(0),
         fluidFrameUvs: new ArrayBuffer(0),
         indices: new ArrayBuffer(0),
@@ -626,16 +529,9 @@ class MeshBuffers {
     const idx = this.indices.toArrayBuffer(vertexCount <= 65535);
     return {
       positions: this.positions.toArrayBuffer(),
-      normals: this.normals.toArrayBuffer(),
       uvs: this.uvs.toArrayBuffer(),
-      normalColors: this.normalColors.toArrayBuffer(),
-      debugColors: this.debugColors.toArrayBuffer(),
-      aoColors: this.aoColors.toArrayBuffer(),
       tintColors: this.tintColors.toArrayBuffer(),
-      skyLightLevels: this.skyLightLevels.toArrayBuffer(),
-      blockLightLevels: this.blockLightLevels.toArrayBuffer(),
-      aoFactorScalars: this.aoFactorScalars.toArrayBuffer(),
-      faceBrightness: this.faceBrightness.toArrayBuffer(),
+      packedLight: this.packedLight.toArrayBuffer(),
       fluidTextureKinds: this.fluidTextureKinds.toArrayBuffer(),
       fluidFrameUvs: this.fluidFrameUvs.toArrayBuffer(),
       indices: idx.buffer,

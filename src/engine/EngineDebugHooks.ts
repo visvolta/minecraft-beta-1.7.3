@@ -1,5 +1,4 @@
 import type { BlockRegistry } from '../blocks/BlockRegistry';
-import type { BlockTestGrid } from '../debug/BlockTestGrid';
 import type { PerformanceProfiler } from '../debug/PerformanceProfiler';
 import type { WorkerValidationHarness } from '../debug/WorkerValidationHarness';
 import type { EntityManager } from '../entities/core/EntityManager';
@@ -44,7 +43,6 @@ export interface EngineDebugHookDependencies {
   readonly lightEngine: LightEngine;
   readonly fallingBlockManager: FallingBlockManager;
   readonly worldEventQueue: WorldEventQueue;
-  readonly blockTestGrid: BlockTestGrid;
   readonly weatherController: WeatherController;
   readonly precipitationSimulator: PrecipitationSimulator;
   readonly blockUpdateWorld: BlockUpdateWorld;
@@ -105,14 +103,6 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
       ...deps.fireAnimationSystem.getDebugInfo() as Record<string, unknown>,
       tntIgniteAttempts: deps.worldEventQueue.getTotalTntIgniteAttempts(),
       pendingTntIgnitions: deps.worldEventQueue.getTntIgniteAttemptCount(),
-    }),
-    getBlockTestGrid: () => ({
-      grid: deps.blockTestGrid.getGridState(),
-      blocks: deps.blockTestGrid.getInfo(),
-      totalBlocks: deps.blockTestGrid.getInfo().length,
-      origin: deps.blockTestGrid.getGridState()
-        ? { x: deps.blockTestGrid.getGridState()!.originX, y: deps.blockTestGrid.getGridState()!.originY, z: deps.blockTestGrid.getGridState()!.originZ }
-        : null,
     }),
     getWeatherMetrics: () => ({
       ...deps.precipitationSimulator.getMetrics(),

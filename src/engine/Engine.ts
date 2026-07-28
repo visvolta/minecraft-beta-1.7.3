@@ -128,7 +128,6 @@ import { DebugOverlay } from '../debug/DebugOverlay';
 import { DebugStatsCollector } from '../debug/DebugStatsCollector';
 import { PerformanceProfiler } from '../debug/PerformanceProfiler';
 import { WorkerValidationHarness } from '../debug/WorkerValidationHarness';
-import { BlockTestGrid } from '../debug/BlockTestGrid';
 import type { IUpdatable } from './IUpdatable';
 import { WorldPersistenceService, WRITE_PRIORITY_BACKGROUND, WRITE_PRIORITY_FORCED, type ServiceDiagnostics } from '../persistence2/WorldPersistenceService';
 import type { RecordCorruptionError } from '../persistence2/codec/PersistenceError';
@@ -210,7 +209,6 @@ interface AutosaveStats {
   lastFailureMs: number;
   lastFailure: string | null;
 }
-const DEBUG_GEOMETRY_MEMORY_SAMPLE_MS = 250;
 
 function readProfilerEnabledSetting(): boolean {
   try {
@@ -219,6 +217,8 @@ function readProfilerEnabledSetting(): boolean {
     return true;
   }
 }
+
+const GEOMETRY_MEMORY_SAMPLE_MS = 250;
 
 export class Engine {
   private readonly renderer: Renderer;
@@ -316,12 +316,9 @@ export class Engine {
 
   private readonly debugOverlay: DebugOverlay;
   private readonly debugStatsCollector: DebugStatsCollector;
-  private readonly blockTestGrid: BlockTestGrid;
+  private nextGeometryMemorySampleMs = 0;
   private readonly performanceProfiler = new PerformanceProfiler();
   private removeDebugHooks: (() => void) | null = null;
-  private nextDebugGeometryMemorySampleMs = 0;
-  private rawLightDebugMode = false;
-  private ambientOcclusionDebugMode = false;
   private readonly activeMinecartAudioLoops = new Set<string>();
 
   private simulationPaused = false;
@@ -919,9 +916,16 @@ export class Engine {
 
     this.chestRenderer = new ChestRenderer(this.renderer.scene, this.chestManager, this.atlas, this.chunkRenderer.getOpaqueMaterial());
     this.signTextRenderer = new SignTextRenderer(this.renderer.scene, this.signManager, this.blockUpdateWorld);
-    this.blockTestGrid = new BlockTestGrid(blockRegistry, this.blockUpdateWorld);
     this.debugOverlay = new DebugOverlay();
-    this.debugStatsCollector = new DebugStatsCollector(this.player, this.chunkManager, this.chunkRenderer, this.renderer, this.skyRenderer, this.cloudRenderer, this.weatherController, this.precipitationRenderer, this.rainSplashRenderer, this.lightningRenderer, this.renderer.renderer, worldSeed, this.worldTime, this.performanceProfiler, this.worldTickScheduler, this.fallingBlockManager, this.worldEventQueue);
+    this.debugStatsCollector = new DebugStatsCollector(
+      this.player,
+      this.chunkManager,
+      this.chunkRenderer,
+      this.chunkStreamer,
+      this.entityManager,
+      this.renderer.renderer,
+      () => this.cameraController.getYaw(),
+    );
 
     const validationHarness = new WorkerValidationHarness(worldSeed, this.atlas);
     this.removeDebugHooks = installEngineDebugHooks({
@@ -934,7 +938,6 @@ export class Engine {
       lightEngine: this.lightEngine,
       fallingBlockManager: this.fallingBlockManager,
       worldEventQueue: this.worldEventQueue,
-      blockTestGrid: this.blockTestGrid,
       weatherController: this.weatherController,
       precipitationSimulator: this.precipitationSimulator,
       blockUpdateWorld: this.blockUpdateWorld,
@@ -1277,24 +1280,8 @@ export class Engine {
       this.performanceProfiler.endFrame();
       return;
     }
-    if (this.input.isDebugKeyJustPressed('F2')) this.blockTestGrid.generate(this.player.position.x, this.player.position.z);
+    // F3 is the only player-facing debug hotkey.
     if (this.input.isDebugKeyJustPressed('F3')) this.debugOverlay.toggle();
-    if (this.input.isKeyJustPressed('KeyU')) {
-      const active = this.skinManager.toggleDebugMode();
-      this.playerModel.updateSkin(this.skinManager);
-      this.firstPersonArmRenderer.updateSkin(this.skinManager);
-      if (import.meta.env.DEV) console.log(`[SkinManager] Toggled UV-debug skin diagnostic mode. Active: ${active}`);
-    }
-    if (this.input.isDebugKeyJustPressed('F4')) { this.rawLightDebugMode = !this.rawLightDebugMode; if (this.rawLightDebugMode) { this.ambientOcclusionDebugMode = false; this.chunkRenderer.setAmbientOcclusionDebugMode(false); } this.chunkRenderer.setRawLightDebugMode(this.rawLightDebugMode); }
-    if (this.input.isDebugKeyJustPressed('F7')) { this.ambientOcclusionDebugMode = !this.ambientOcclusionDebugMode; if (this.ambientOcclusionDebugMode) { this.rawLightDebugMode = false; this.chunkRenderer.setRawLightDebugMode(false); } this.chunkRenderer.setAmbientOcclusionDebugMode(this.ambientOcclusionDebugMode); }
-    if (this.input.isDebugKeyJustPressed('F5')) this.weatherController.setAuto();
-    if (this.input.isDebugKeyJustPressed('F8')) this.weatherController.forceMode('clear');
-    if (this.input.isDebugKeyJustPressed('F9')) this.weatherController.forceMode('rain');
-    if (this.input.isDebugKeyJustPressed('F10')) this.weatherController.forceMode('thunder');
-    if (this.input.isKeyJustPressed('ArrowLeft')) this.worldTime.addTicks(-1000);
-    if (this.input.isKeyJustPressed('ArrowRight')) this.worldTime.addTicks(1000);
-    if (this.input.isKeyJustPressed('ArrowUp')) this.worldTime.setDay();
-    if (this.input.isKeyJustPressed('ArrowDown')) this.worldTime.setNight();
 
     this.worldTime.update(deltaSeconds);
     this.simulationAccumulatorTicks += deltaSeconds * 20;
@@ -1307,6 +1294,11 @@ export class Engine {
       this.playerDeathController.update(); this.respawnController.update(); this.naturalMobSpawner.tick();
       this.entityManager.tick(); this.entityManager.collideWithPlayer(this.player); this.itemEntityManager.tickPickups(this.player);
       if(this.deathSavePending){this.deathSavePending=false;void this.saveMetadata(true);}
+      // Logical, tick-rate work: these sample the world or advance animation
+      // state and must run at Beta's fixed 20 Hz, not once per rendered frame
+      // (which made their cost scale with monitor refresh rate).
+      this.updateAnimatedItemIcons();
+      this.updateAmbientBlockAudio();
       this.worldTickScheduler.endTick();
       this.simulationAccumulatorTicks--;
     }
@@ -1325,10 +1317,8 @@ export class Engine {
     this.worldEventQueue.drainNoop();
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
-    this.updateAnimatedItemIcons();
     this.updateSleepPresentation();
     this.updateUnderwaterOverlay();
-    this.updateAmbientBlockAudio();
     this.updateFishingLine();
     if (this.animatedIconsDirty) {
       this.animatedIconsDirty = false;
@@ -1400,7 +1390,6 @@ export class Engine {
     if (this.rainCoverSampleSeconds <= 0) { this.rainCoverSampleSeconds = 0.25; this.audioManager.setRainCover(this.sampleRainCover(camera.position.x, camera.position.y, camera.position.z)); }
     this.chunkRenderer.setSkylightSubtracted(atmos.effectiveSkylightSubtracted);
     this.chunkRenderer.setSunBrightnessFactor(atmos.sunBrightnessFactor);
-    this.debugStatsCollector.setStormReadout({ weatherSkylightPenalty: atmos.weatherSkylightPenalty, effectiveSkylightSubtracted: atmos.effectiveSkylightSubtracted, windX: atmos.wind.x, windZ: atmos.wind.z });
     const cloudColor = { r: atmos.cloud.r, g: atmos.cloud.g, b: atmos.cloud.b, hex: atmos.cloud.hex };
     this.cloudRenderer.update(camera.position.x, camera.position.z, deltaSeconds, cloudColor, atmos.cloudFogStrength);
 
@@ -1553,7 +1542,7 @@ export class Engine {
       remeshFanOutChunks: lightingMetrics.remeshFanOutChunks,
     });
 
-    const fogState = this.fogController.compute({ eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z, rawLightDebugMode: this.rawLightDebugMode, ambientOcclusionDebugMode: this.ambientOcclusionDebugMode, overworldColorHex: atmos.horizon.hex, overworldDensityMultiplier: atmos.fogDensityMultiplier });
+    const fogState = this.fogController.compute({ eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z, overworldColorHex: atmos.horizon.hex, overworldDensityMultiplier: atmos.fogDensityMultiplier });
     this.renderer.setFogState(fogState);
     this.blockHighlight.setTarget(this.interactionController.getCurrentHit());
     const activeMiningPos = this.interactionController.breakingController.getMiningBlockPos(); const progress = this.interactionController.breakingController.getProgress();
@@ -1580,7 +1569,7 @@ export class Engine {
     this.debugStatsCollector.recordFrame(deltaSeconds);
     if (this.debugOverlay.isVisible()) {
       const debugCollectStart = performance.now();
-      const debugStats = this.debugStatsCollector.collect(false);
+      const debugStats = this.debugStatsCollector.collect();
       const debugCollectMs = performance.now() - debugCollectStart;
       const debugRenderStart = performance.now();
       this.debugOverlay.render(debugStats);
@@ -1591,11 +1580,14 @@ export class Engine {
     for (const system of this.updatables) system.update(deltaSeconds);
 
     this.performanceProfiler.recordMeshUpload(this.chunkRenderer.getMeshUploadsThisFrame());
-    if (this.debugOverlay.isVisible()) {
-      const debugNow = performance.now();
-      if (debugNow >= this.nextDebugGeometryMemorySampleMs) {
+    // Geometry-memory estimation walks every chunk geometry, so it is sampled
+    // on a slow timer and only while the internal profiler is enabled. It is
+    // profiler data, not F3 data, and must never be tied to overlay visibility.
+    if (this.performanceProfiler.isEnabled()) {
+      const profilerNow = performance.now();
+      if (profilerNow >= this.nextGeometryMemorySampleMs) {
         this.performanceProfiler.setApproximateGeometryMemoryMb(this.chunkRenderer.getApproximateGeometryMemoryBytes() / (1024 * 1024));
-        this.nextDebugGeometryMemorySampleMs = debugNow + DEBUG_GEOMETRY_MEMORY_SAMPLE_MS;
+        this.nextGeometryMemorySampleMs = profilerNow + GEOMETRY_MEMORY_SAMPLE_MS;
       }
     }
     this.performanceProfiler.endUpdate();

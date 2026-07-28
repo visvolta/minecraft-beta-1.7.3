@@ -60,6 +60,57 @@ export class FloatBuilder {
   }
 }
 
+/**
+ * Growable byte builder, used for the packed normalized light/AO/brightness
+ * attribute so lighting costs 4 bytes per vertex instead of 4 floats.
+ */
+export class Uint8Builder {
+  private data: Uint8Array;
+  private length = 0;
+
+  public constructor(initialCapacity = 256) {
+    this.data = new Uint8Array(Math.max(8, initialCapacity));
+  }
+
+  public get count(): number {
+    return this.length;
+  }
+
+  public clear(): void {
+    this.length = 0;
+  }
+
+  public push4(a: number, b: number, c: number, d: number): void {
+    this.ensure(4);
+    this.data[this.length++] = a;
+    this.data[this.length++] = b;
+    this.data[this.length++] = c;
+    this.data[this.length++] = d;
+  }
+
+  /** Returns a tightly sized copy suitable for transfer. */
+  public toArrayBuffer(): ArrayBuffer {
+    const out = new Uint8Array(this.length);
+    out.set(this.data.subarray(0, this.length));
+    return out.buffer;
+  }
+
+  /** Zero-copy view of the filled region — only valid until the next mutate/clear. */
+  public view(): Uint8Array {
+    return this.data.subarray(0, this.length);
+  }
+
+  private ensure(extra: number): void {
+    const need = this.length + extra;
+    if (need <= this.data.length) return;
+    let cap = this.data.length;
+    while (cap < need) cap *= 2;
+    const next = new Uint8Array(cap);
+    next.set(this.data.subarray(0, this.length));
+    this.data = next;
+  }
+}
+
 export class IndexBuilder {
   private data: Uint32Array;
   private length = 0;

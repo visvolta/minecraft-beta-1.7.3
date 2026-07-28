@@ -41,27 +41,16 @@ function configureAtlasTexture(texture: THREE.CanvasTexture): void {
  */
 export class TextureAtlas {
   public readonly texture: THREE.CanvasTexture;
-  /**
-   * Debug-only atlas variant with pure-white RGB and the original source
-   * alpha preserved. Used by F4 raw-light mode so cutouts/fluids keep
-   * their transparency masks while all colour information is removed.
-   */
-  public readonly debugTexture: THREE.CanvasTexture;
-
   private readonly uvByName = new Map<string, AtlasUvRect>();
 
   private constructor(
     canvas: HTMLCanvasElement,
-    debugCanvas: HTMLCanvasElement,
     uvByName: Map<string, AtlasUvRect>,
   ) {
     this.uvByName = uvByName;
 
     this.texture = new THREE.CanvasTexture(canvas);
     configureAtlasTexture(this.texture);
-
-    this.debugTexture = new THREE.CanvasTexture(debugCanvas);
-    configureAtlasTexture(this.debugTexture);
   }
 
   /**
@@ -86,16 +75,6 @@ export class TextureAtlas {
     }
     context.imageSmoothingEnabled = false;
 
-    const debugCanvas = document.createElement('canvas');
-    debugCanvas.width = canvas.width;
-    debugCanvas.height = canvas.height;
-
-    const debugContext = debugCanvas.getContext('2d');
-    if (debugContext === null) {
-      throw new Error('Failed to acquire 2D context for debug texture atlas.');
-    }
-    debugContext.imageSmoothingEnabled = false;
-
     const uvByName = new Map<string, AtlasUvRect>();
 
     names.forEach((name, index) => {
@@ -114,15 +93,6 @@ export class TextureAtlas {
 
       context.drawImage(image, 0, 0, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE, pixelX, pixelY, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE);
 
-      // Build the debug atlas tile as solid white with the source alpha
-      // preserved exactly (no recoloured asset file on disk; debug-only,
-      // runtime-generated data for F4 mode).
-      debugContext.fillStyle = '#ffffff';
-      debugContext.fillRect(pixelX, pixelY, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE);
-      debugContext.globalCompositeOperation = 'destination-in';
-      debugContext.drawImage(image, 0, 0, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE, pixelX, pixelY, ATLAS_TILE_SIZE, ATLAS_TILE_SIZE);
-      debugContext.globalCompositeOperation = 'source-over';
-
       const atlasWidth = canvas.width;
       const atlasHeight = canvas.height;
       const inset = UV_EDGE_INSET;
@@ -135,7 +105,7 @@ export class TextureAtlas {
       });
     });
 
-    return new TextureAtlas(canvas, debugCanvas, uvByName);
+    return new TextureAtlas(canvas, uvByName);
   }
 
   /**
@@ -152,6 +122,5 @@ export class TextureAtlas {
 
   public dispose(): void {
     this.texture.dispose();
-    this.debugTexture.dispose();
   }
 }

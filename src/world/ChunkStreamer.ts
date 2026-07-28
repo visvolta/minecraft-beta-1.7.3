@@ -9,6 +9,15 @@ import { ChunkGenerationQueue, type ChunkGenerationStats } from './streaming/Chu
 import type { WorldPersistenceService } from '../persistence2/WorldPersistenceService';
 import { RecordCorruptionError } from '../persistence2/codec/PersistenceError';
 
+/** A completed chunk result waiting to be adopted under the frame budget. */
+interface PendingIntegration {
+  readonly chunk: Chunk;
+  /** Already-resident managed chunk for persisted reads; undefined for generated. */
+  readonly persisted: boolean;
+  readonly trustLighting: boolean;
+  readonly readyAtMs: number;
+}
+
 export interface ChunkIntegrationStats {
   readonly lastIntegrationMs: number;
   readonly lastGeneratedIntegrationMs: number;
@@ -17,6 +26,10 @@ export interface ChunkIntegrationStats {
   readonly lastLightingInitMs: number;
   readonly lastBorderReconcileMs: number;
   readonly lastNeighbourDirtyCount: number;
+  /** Results completed but not yet adopted, under the frame budget. */
+  readonly pendingIntegrations: number;
+  /** Generation/read completion -> visible adoption latency for the last chunk. */
+  readonly lastIntegrationLatencyMs: number;
 }
 
 /** Chebyshev radius (square) for loading chunks around the camera. */
@@ -24,6 +37,21 @@ export const CHUNK_LOAD_RADIUS = 6;
 
 /** Unload when farther than this (hysteresis vs load radius). */
 export const CHUNK_UNLOAD_RADIUS = CHUNK_LOAD_RADIUS + 1;
+
+/**
+ * Frame budget for adopting completed chunk results (generated or persisted).
+ *
+ * Worker results used to be drained and fully integrated in one go, so a burst
+ * of completions ran an unbounded number of full lighting initialisations plus
+ * border reconciliations inside a single frame — the classic exploration
+ * hitch. Integration is now pulled from a priority queue under both a count
+ * and a wall-clock budget.
+ *
+ * Chunks inside CRITICAL_CHUNK_RADIUS bypass the budget so the area
+ * immediately around the player can never visibly fail to appear.
+ */
+const MAX_INTEGRATIONS_PER_FRAME = 2;
+const MAX_INTEGRATION_MS_PER_FRAME = 3;
 
 const MAX_SYNC_GENERATION_JOBS_PER_FRAME = 1;
 const MAX_SYNC_GENERATION_MS_PER_FRAME = 6;
@@ -73,6 +101,11 @@ export class ChunkStreamer {
   private lastLightingInitMs = 0;
   private lastBorderReconcileMs = 0;
   private lastNeighbourDirtyCount = 0;
+  /** Completed results awaiting budgeted adoption, keyed by chunk. */
+  private readonly pendingIntegrations = new Map<number, PendingIntegration>();
+  private lastIntegrationQueueDepth = 0;
+  private lastIntegrationLatencyMs = 0;
+  private stalePendingIntegrations = 0;
 
   public constructor(
     chunkManager: ChunkManager,
@@ -148,21 +181,95 @@ export class ChunkStreamer {
       this.desiredChunks,
       allowNonCriticalDispatch,
     );
-    for (const { chunk } of completed) {
-      const integrationStart = performance.now();
+    for (const { chunk, lightingAdopted } of completed) {
+      this.pendingIntegrations.set(chunkKey(chunk.chunkX, chunk.chunkZ), {
+        chunk,
+        persisted: false,
+        // Worker-generated chunks already carry deterministic initial light
+        // from the shared module; only border reconciliation remains.
+        trustLighting: lightingAdopted,
+        readyAtMs: performance.now(),
+      });
+    }
+
+    this.drainPendingIntegrations(chunkX, chunkZ);
+  }
+
+  /**
+   * Adopt completed chunk results under a frame budget.
+   *
+   * Generated and persisted results share this one pipeline, so budgeting
+   * cannot be defeated by a second unbudgeted path. Ordering is by distance
+   * to the camera, and chunks within CRITICAL_CHUNK_RADIUS ignore the budget
+   * entirely: a high frame rate with a hole around the player is not a win.
+   */
+  private drainPendingIntegrations(cameraChunkX: number, cameraChunkZ: number): void {
+    if (this.pendingIntegrations.size === 0) {
+      this.lastIntegrationQueueDepth = 0;
+      return;
+    }
+
+    const ordered = [...this.pendingIntegrations.entries()].sort((a, b) => {
+      const da = Math.max(Math.abs(a[1].chunk.chunkX - cameraChunkX), Math.abs(a[1].chunk.chunkZ - cameraChunkZ));
+      const db = Math.max(Math.abs(b[1].chunk.chunkX - cameraChunkX), Math.abs(b[1].chunk.chunkZ - cameraChunkZ));
+      return da - db;
+    });
+
+    const start = performance.now();
+    let adopted = 0;
+
+    for (const [key, entry] of ordered) {
+      const distance = Math.max(
+        Math.abs(entry.chunk.chunkX - cameraChunkX),
+        Math.abs(entry.chunk.chunkZ - cameraChunkZ),
+      );
+      const critical = distance <= CRITICAL_CHUNK_RADIUS;
+
+      if (!critical) {
+        if (adopted >= MAX_INTEGRATIONS_PER_FRAME) break;
+        if (performance.now() - start >= MAX_INTEGRATION_MS_PER_FRAME) break;
+      }
+
+      this.pendingIntegrations.delete(key);
+
+      // A chunk that left the desired set while queued is pure waste: drop it
+      // rather than paying for lighting and border reconciliation.
+      if (!this.desiredChunks.has(key)) {
+        this.stalePendingIntegrations += 1;
+        continue;
+      }
+
+      this.integrateChunk(entry);
+      adopted += 1;
+    }
+
+    this.lastIntegrationQueueDepth = this.pendingIntegrations.size;
+  }
+
+  /** The single staged adoption path: light -> border reconcile -> notify. */
+  private integrateChunk(entry: PendingIntegration): void {
+    const chunk = entry.chunk;
+    const integrationStart = performance.now();
+
+    if (!entry.trustLighting) {
       const lightStart = performance.now();
       this.lightEngine.initializeChunkLighting(chunk);
       this.lastLightingInitMs = performance.now() - lightStart;
-      const borderStart = performance.now();
-      this.lightEngine.reconcileChunkBorders(chunk);
-      this.lastBorderReconcileMs = performance.now() - borderStart;
-      this.lastNeighbourDirtyCount = this.markNeighboursDirty(chunk.chunkX, chunk.chunkZ);
-      this.onChunkLoaded?.(chunk);
-      const integrationMs = performance.now() - integrationStart;
-      this.lastGeneratedIntegrationMs += integrationMs;
-      this.lastIntegrationMs = integrationMs;
-      this.integratedChunks += 1;
     }
+
+    const borderStart = performance.now();
+    this.lightEngine.reconcileChunkBorders(chunk);
+    this.lastBorderReconcileMs = performance.now() - borderStart;
+
+    this.lastNeighbourDirtyCount = this.markNeighboursDirty(chunk.chunkX, chunk.chunkZ);
+    this.onChunkLoaded?.(chunk);
+
+    const integrationMs = performance.now() - integrationStart;
+    if (entry.persisted) this.lastReadIntegrationMs = integrationMs;
+    else this.lastGeneratedIntegrationMs += integrationMs;
+    this.lastIntegrationMs = integrationMs;
+    this.lastIntegrationLatencyMs = performance.now() - entry.readyAtMs;
+    this.integratedChunks += 1;
   }
 
   public getGenerationStats(): ChunkGenerationStats {
@@ -178,6 +285,8 @@ export class ChunkStreamer {
       lastLightingInitMs: this.lastLightingInitMs,
       lastBorderReconcileMs: this.lastBorderReconcileMs,
       lastNeighbourDirtyCount: this.lastNeighbourDirtyCount,
+      pendingIntegrations: this.lastIntegrationQueueDepth,
+      lastIntegrationLatencyMs: this.lastIntegrationLatencyMs,
     };
   }
 
@@ -185,6 +294,7 @@ export class ChunkStreamer {
     this.disposed = true;
     this.desiredChunks.clear();
     this.loadingChunks.clear();
+    this.pendingIntegrations.clear();
     this.generationQueue.dispose();
   }
 
@@ -340,8 +450,9 @@ export class ChunkStreamer {
         // Miss, fallback to generation
         this.generationQueue.enqueue(x, z, priority, critical);
       } else {
-        // Hit, integrate chunk
-        const integrationStart = performance.now();
+        // Hit: adopt storage immediately (cheap), then queue the expensive
+        // lighting/border stages through the same budgeted pipeline the
+        // generated results use.
         const managed = this.chunkManager.getOrCreateChunk(x, z);
         managed.adoptStorageFrom(chunk);
         managed.setPersistedLightingDataLoaded(chunk.loadedPersistedLightingData());
@@ -349,20 +460,12 @@ export class ChunkStreamer {
         managed.getScheduledTicks().load(chunk.getScheduledTicks().drainAll());
         managed.markPersistenceClean(chunk.getPersistenceRevision());
 
-        if (!(this.trustPersistedLighting && chunk.loadedPersistedLightingData())) {
-          const lightStart = performance.now();
-          this.lightEngine.initializeChunkLighting(managed);
-          this.lastLightingInitMs = performance.now() - lightStart;
-        }
-        const borderStart = performance.now();
-        this.lightEngine.reconcileChunkBorders(managed);
-        this.lastBorderReconcileMs = performance.now() - borderStart;
-        this.lastNeighbourDirtyCount = this.markNeighboursDirty(managed.chunkX, managed.chunkZ);
-        this.onChunkLoaded?.(managed);
-        const integrationMs = performance.now() - integrationStart;
-        this.lastReadIntegrationMs = integrationMs;
-        this.lastIntegrationMs = integrationMs;
-        this.integratedChunks += 1;
+        this.pendingIntegrations.set(k, {
+          chunk: managed,
+          persisted: true,
+          trustLighting: this.trustPersistedLighting && chunk.loadedPersistedLightingData(),
+          readyAtMs: performance.now(),
+        });
       }
     }).catch((error) => {
       // During/after quiesce, detached read errors are observed (no unhandled

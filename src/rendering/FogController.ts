@@ -114,8 +114,6 @@ export interface FogControllerInputs {
   readonly eyeX: number;
   readonly eyeY: number;
   readonly eyeZ: number;
-  readonly rawLightDebugMode: boolean;
-  readonly ambientOcclusionDebugMode: boolean;
   /**
    * Overworld fog colour for the current frame, packed 0xRRGGBB.
    *
@@ -179,17 +177,6 @@ export class FogController {
       };
     }
 
-    if (inputs.rawLightDebugMode || inputs.ambientOcclusionDebugMode) {
-      return {
-        mode: 'debug-bypass',
-        kind: 'none',
-        enabled: false,
-        colorHex: inputs.overworldColorHex,
-        near: 0,
-        far: 0,
-        density: 0,
-      };
-    }
 
     // Overworld = exponential-density fog. Both `far` and `density` are
     // reported so the F3 overlay can print a useful "range" value even
