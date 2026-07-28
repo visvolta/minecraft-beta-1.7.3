@@ -44,6 +44,7 @@ export class DebugStatsCollector {
     private readonly entityManager: EntityManager,
     private readonly threeRenderer: THREE.WebGLRenderer,
     private readonly getCameraYaw: () => number,
+    private readonly getDimensionLabel: () => string,
   ) {}
 
   public recordFrame(deltaSeconds: number): void {
@@ -72,6 +73,7 @@ export class DebugStatsCollector {
       facingIndex,
       facingName: FACING_NAMES[facingIndex] ?? 'South',
 
+      dimensionLabel: this.getDimensionLabel(),
       loadedChunks: this.chunkManager.size,
       entityCount: this.entityManager.activeCount,
 

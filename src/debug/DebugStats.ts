@@ -28,6 +28,8 @@ export interface DebugStats {
   /** Human-readable compass direction for the facing index. */
   readonly facingName: string;
 
+  /** Active dimension, e.g. "Nether (-1)". */
+  readonly dimensionLabel: string;
   readonly loadedChunks: number;
   readonly entityCount: number;
 

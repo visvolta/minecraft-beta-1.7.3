@@ -70,18 +70,39 @@ function cellIndex(x: number, y: number, z: number): number {
 }
 
 /**
+ * Dimension lighting rules consumed by the shared initial-light pass.
+ *
+ * Only `hasSkyLight` affects propagation. The dimension's ambient brightness
+ * floor is deliberately NOT accepted here: it is a rendering/light-table
+ * concept, and injecting it as propagated light would incorrectly illuminate
+ * sealed caves.
+ */
+export interface InitialLightOptions {
+  /** False for dimensions with no sky (Beta `WorldProvider.hasNoSky`). */
+  readonly hasSkyLight?: boolean;
+}
+
+/**
  * Computes chunk-local initial skylight and blocklight for `blocks`.
+ *
+ * When the dimension has no skylight the entire sky projection is skipped —
+ * both correct (the Nether has no sun) and cheaper than filling zeros. Block
+ * light from lava, glowstone, fire, portals and any other emissive block
+ * still propagates normally.
  *
  * @param blocks Chunk block ids in XZY order (length CHUNK_VOLUME).
  * @param tables Opacity/emission LUTs from {@link buildLightLookupTables}.
+ * @param options Dimension lighting rules; defaults to a sky-lit dimension.
  * @param out Optional destination buffer to fill (length CHUNK_VOLUME).
  * @returns Packed light bytes: skylight in the high nibble, blocklight in the low nibble.
  */
 export function computeInitialChunkLight(
   blocks: Uint8Array,
   tables: LightLookupTables,
+  options: InitialLightOptions = {},
   out?: Uint8Array,
 ): Uint8Array {
+  const hasSkyLight = options.hasSkyLight ?? true;
   const light = out ?? new Uint8Array(CHUNK_VOLUME);
   light.fill(0);
 
@@ -96,6 +117,8 @@ export function computeInitialChunkLight(
   let queueTail = 0;
 
   // ---- 1. Vertical skylight projection -------------------------------------
+  // Skipped entirely for no-sky dimensions.
+  if (hasSkyLight) {
   for (let z = 0; z < CHUNK_SIZE_Z; z++) {
     for (let x = 0; x < CHUNK_SIZE_X; x++) {
       let current = MAX_LIGHT;
@@ -139,6 +162,7 @@ export function computeInitialChunkLight(
   }
 
   propagate(sky, blocks, opacity, queue, queueHead, queueTail);
+  }
 
   // ---- 2. Block-light sources ---------------------------------------------
   queueHead = 0;

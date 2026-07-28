@@ -1,3 +1,5 @@
+import { DIMENSION_OVERWORLD, type DimensionId } from '../../world/dimension/DimensionId';
+import { dimensionChunkCoordKey, dimensionScopedKey } from '../../world/dimension/dimensionKeys';
 /**
  * Narrow, swappable storage backend. The persistence service depends only on
  * this interface — never on IndexedDB directly. Transaction ownership lives
@@ -29,14 +31,33 @@ export interface WorldSummary {
   lastPlayedMs: number;
 }
 
-/** Deterministic logical key for a chunk record. */
-export function chunkRecordKey(worldId: string, chunkX: number, chunkZ: number): string {
-  return `world/${worldId}/chunk/${chunkX},${chunkZ}`;
+/**
+ * Deterministic logical key for a chunk record.
+ *
+ * The coordinate component is produced by the dimension-aware key helper, so
+ * dimension 0 keeps emitting exactly the historical `"<x>,<z>"` text (existing
+ * Overworld saves open with no migration) while other dimensions are
+ * namespaced and can never collide on the same coordinates.
+ */
+export function chunkRecordKey(
+  worldId: string,
+  chunkX: number,
+  chunkZ: number,
+  dimension: DimensionId = DIMENSION_OVERWORLD,
+): string {
+  return `world/${worldId}/chunk/${dimensionChunkCoordKey(dimension, chunkX, chunkZ)}`;
 }
 
-/** Deterministic logical key for a world-scoped record (metadata, player, …). */
-export function worldRecordKey(worldId: string, key: string): string {
-  return `world/${worldId}/record/${key}`;
+/**
+ * Deterministic logical key for a world-scoped record (metadata, player,
+ * containers, signs, portal indexes, …). Dimension 0 is unchanged.
+ */
+export function worldRecordKey(
+  worldId: string,
+  key: string,
+  dimension: DimensionId = DIMENSION_OVERWORLD,
+): string {
+  return `world/${worldId}/record/${dimensionScopedKey(dimension, key)}`;
 }
 
 export interface StorageBackend {
@@ -44,15 +65,15 @@ export interface StorageBackend {
   open(): Promise<void>;
 
   /** Returns the stored chunk record bytes, or `undefined` if absent (not an error). */
-  readChunk(worldId: string, chunkX: number, chunkZ: number): Promise<Uint8Array | undefined>;
+  readChunk(worldId: string, chunkX: number, chunkZ: number, dimension?: DimensionId): Promise<Uint8Array | undefined>;
   /** Atomically writes one chunk record (one bounded transaction in IDB). */
-  writeChunk(worldId: string, chunkX: number, chunkZ: number, record: Uint8Array): Promise<void>;
-  deleteChunk(worldId: string, chunkX: number, chunkZ: number): Promise<void>;
+  writeChunk(worldId: string, chunkX: number, chunkZ: number, record: Uint8Array, dimension?: DimensionId): Promise<void>;
+  deleteChunk(worldId: string, chunkX: number, chunkZ: number, dimension?: DimensionId): Promise<void>;
 
   /** World-scoped records (metadata, player). `undefined` if absent. */
-  readRecord(worldId: string, key: string): Promise<Uint8Array | undefined>;
-  writeRecord(worldId: string, key: string, value: Uint8Array): Promise<void>;
-  deleteRecord(worldId: string, key: string): Promise<void>;
+  readRecord(worldId: string, key: string, dimension?: DimensionId): Promise<Uint8Array | undefined>;
+  writeRecord(worldId: string, key: string, value: Uint8Array, dimension?: DimensionId): Promise<void>;
+  deleteRecord(worldId: string, key: string, dimension?: DimensionId): Promise<void>;
 
   /** World index. */
   listWorlds(): Promise<WorldSummary[]>;

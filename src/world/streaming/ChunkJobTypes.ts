@@ -1,14 +1,37 @@
+/**
+ * Identity of the world context a job belongs to.
+ *
+ * dimensionId alone is not sufficient: a context can be disposed and
+ * recreated (re-entering a dimension) while an old worker result is still in
+ * flight, so a monotonic generation counter is included. Results whose
+ * identity does not match the live context are rejected rather than
+ * integrated into the wrong world.
+ */
+export interface WorldContextIdentity {
+  readonly worldId: string;
+  readonly dimensionId: number;
+  readonly contextGeneration: number;
+}
+
 export interface ChunkGenerationJob {
   readonly type: 'generate';
   readonly jobId: number;
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly seed: string;
+  /** Which world context requested this chunk. */
+  readonly context: WorldContextIdentity;
+  /** Dimension-specific generator selector (e.g. 'overworld', 'nether'). */
+  readonly generatorKind: string;
+  /** Skip skylight projection for dimensions without a sky. */
+  readonly hasSkyLight: boolean;
 }
 
 export interface ChunkGenerationResult {
   readonly type: 'generated';
   readonly jobId: number;
+  /** Echoed back so the main thread can reject stale/cross-dimension results. */
+  readonly context: WorldContextIdentity;
   readonly chunkX: number;
   readonly chunkZ: number;
   readonly blocks: ArrayBuffer;

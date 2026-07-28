@@ -1,7 +1,7 @@
 import { Chunk } from '../Chunk';
 import type { ChunkManager } from '../ChunkManager';
 import type { WorldGenerator } from '../WorldGenerator';
-import type { ChunkGenerationJob, ChunkGenerationResult, ChunkWorkerError } from './ChunkJobTypes';
+import type { WorldContextIdentity, ChunkGenerationJob, ChunkGenerationResult, ChunkWorkerError } from './ChunkJobTypes';
 import { getWorkerCount, isWorkerFeatureEnabled } from './WorkerFeatureFlags';
 import { storeGeneratedFeatures } from '../generation/decoration/GeneratedFeaturesRegistry';
 import type { GeneratedChunkFeatures } from '../generation/decoration/GeneratedChunkFeatures';
@@ -90,7 +90,17 @@ export class ChunkGenerationQueue {
   private totalTransferBytes = 0;
   private lastTransferLatencyMs = 0;
 
-  public constructor(chunkManager: ChunkManager, fallbackGenerator: WorldGenerator, worldSeed: bigint) {
+  public constructor(
+    chunkManager: ChunkManager,
+    fallbackGenerator: WorldGenerator,
+    worldSeed: bigint,
+    /** Identity of the owning world context, echoed through every job. */
+    private readonly contextIdentity: WorldContextIdentity,
+    /** Generator selector for the worker ('overworld' | 'nether' | custom). */
+    private readonly generatorKind: string,
+    /** Dimension lighting rule forwarded to the worker's initial-light pass. */
+    private readonly hasSkyLight: boolean,
+  ) {
     this.chunkManager = chunkManager;
     this.fallbackGenerator = fallbackGenerator;
     this.worldSeed = worldSeed;
@@ -300,6 +310,9 @@ export class ChunkGenerationQueue {
         chunkX: next.chunkX,
         chunkZ: next.chunkZ,
         seed: this.worldSeed.toString(),
+        context: this.contextIdentity,
+        generatorKind: this.generatorKind,
+        hasSkyLight: this.hasSkyLight,
       };
       worker.postMessage(job);
     }
@@ -313,6 +326,20 @@ export class ChunkGenerationQueue {
       if (active !== undefined) {
         this.activeChunkKeys.delete(chunkKey(active.chunkX, active.chunkZ));
         this.idleWorkers.push(active.worker);
+      }
+
+      // A result from a disposed or different world context must never be
+      // integrated: re-entering a dimension recreates the context, and an old
+      // in-flight chunk would otherwise land in the wrong world.
+      const identity = result.context;
+      if (
+        identity === undefined ||
+        identity.worldId !== this.contextIdentity.worldId ||
+        identity.dimensionId !== this.contextIdentity.dimensionId ||
+        identity.contextGeneration !== this.contextIdentity.contextGeneration
+      ) {
+        this.stale += 1;
+        continue;
       }
 
       const mapKey = chunkKey(result.chunkX, result.chunkZ);

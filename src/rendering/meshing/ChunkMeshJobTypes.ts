@@ -72,6 +72,7 @@ export interface ChunkMeshResult {
   readonly leaves: MeshAttributeBuffers;
   readonly fire: MeshAttributeBuffers;
   readonly translucent: MeshAttributeBuffers;
+  readonly portal: MeshAttributeBuffers;
   readonly durationMs: number;
   readonly voxelVisits?: number;
 }

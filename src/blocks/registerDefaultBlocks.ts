@@ -713,6 +713,27 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.BrickBlock, 'brick_block', 'Bricks', { all: 'brick' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   // Glowstone emits Beta's full light value (setLightValue(1.0F) -> 15).
   registerSimple(BlockIds.Glowstone, 'glowstone', 'Glowstone', { all: 'glowstone' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: 15 });
+
+  // Beta `Block.portal`: new BlockPortal(90, 14).setHardness(-1.0F)
+  //   .setStepSound(soundGlassFootstep).setLightValue(0.75F)
+  // 0.75 * 15 = light level 11. Hardness -1 makes it unbreakable by hand, and
+  // it is never placed from the inventory: fire on an obsidian frame creates
+  // it. Rendered by its own animated pass, not as ordinary terrain.
+  registerBlock(registry, {
+    id: BlockIds.Portal,
+    name: 'portal',
+    displayName: 'Portal',
+    solid: false,
+    transparent: true,
+    replaceable: false,
+    blocksWeather: false,
+    unbreakable: true,
+    textures: { all: 'portal' },
+    renderType: 'portal',
+    lightEmission: 11,
+    lightOpacity: 0,
+    creativeVisible: false,
+  });
   // Soul sand: a full-width block standing 1/8 short, so entities sink into it.
   registerSimple(BlockIds.SoulSand, 'soul_sand', 'Soul Sand', { all: 'soul_sand' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   // Cobblestone stairs share the stair geometry/bounds with wooden stairs.

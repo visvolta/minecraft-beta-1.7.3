@@ -32,6 +32,12 @@ export const RENDER_ORDER = {
   translucent: 20,
   water: 21,
   lava: 22,
+  /**
+   * Nether portals. Beta draws them in alpha render pass 1 alongside other
+   * blended terrain; they sit above the fluids so a portal remains visible
+   * through water/lava surfaces.
+   */
+  portal: 23,
 } as const;
 
 /**

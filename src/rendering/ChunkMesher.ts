@@ -1149,6 +1149,7 @@ export class ChunkMesher {
     translucent: THREE.BufferGeometry;
     water: THREE.BufferGeometry;
     lava: THREE.BufferGeometry;
+    portal: THREE.BufferGeometry;
   } {
     this.vegetationColors?.beginMeshBuild();
     this.lastVoxelVisits = 0;
@@ -1159,6 +1160,7 @@ export class ChunkMesher {
     const translucent = new MeshBuffers();
     const water = new MeshBuffers(true);
     const lava = new MeshBuffers(true);
+    const portal = new MeshBuffers();
 
     for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
       if (chunk.isSectionEmpty(sectionIndex)) continue;
@@ -1195,6 +1197,9 @@ export class ChunkMesher {
             if ((pass & ChunkPassMask.Lava) !== 0) {
               this.emitLavaBlock(chunk, lava, x, y, z, blockId, definition);
             }
+            if ((pass & ChunkPassMask.Portal) !== 0) {
+              this.emitPortalBlock(chunk, portal, x, y, z);
+            }
           }
         }
       }
@@ -1209,7 +1214,41 @@ export class ChunkMesher {
       translucent: translucent.toGeometry(),
       water: water.toGeometry(),
       lava: lava.toGeometry(),
+      portal: portal.toGeometry(),
     };
+  }
+
+  /**
+   * Emits one portal block's thin oriented plane pair. Shared by the
+   * single-pass worker traversal and the standalone buildPortals() path so
+   * both produce identical geometry.
+   */
+  private emitPortalBlock(chunk: Chunk, buffers: MeshBuffers, x: number, y: number, z: number): void {
+    const uvRect = this.getSafeUvRect('portal');
+    const light = this.getLightComponentsAt(chunk, x, y, z);
+    const tint: readonly [number, number, number] = [1, 1, 1];
+    const inset = 0.125;
+
+    // Canonical axis: along X when an X neighbour is also a portal block.
+    const hasXNeighbour =
+      this.getBlockAt(chunk, x - 1, y, z) === BlockIds.Portal ||
+      this.getBlockAt(chunk, x + 1, y, z) === BlockIds.Portal;
+
+    if (hasXNeighbour) {
+      for (const zOffset of [0.5 - inset, 0.5 + inset]) {
+        buffers.pushQuad(
+          [[x, y, z + zOffset], [x + 1, y, z + zOffset], [x + 1, y + 1, z + zOffset], [x, y + 1, z + zOffset]],
+          [0, 0, 1], uvRect, tint, light, 1, FluidTextureKind.WaterStill,
+        );
+      }
+    } else {
+      for (const xOffset of [0.5 - inset, 0.5 + inset]) {
+        buffers.pushQuad(
+          [[x + xOffset, y, z], [x + xOffset, y, z + 1], [x + xOffset, y + 1, z + 1], [x + xOffset, y + 1, z]],
+          [1, 0, 0], uvRect, tint, light, 1, FluidTextureKind.WaterStill,
+        );
+      }
+    }
   }
 
   public build(chunk: Chunk): THREE.BufferGeometry {
@@ -1841,6 +1880,86 @@ export class ChunkMesher {
       }
     }
     this.lastLeafCullStats = { ...buffers.leafStats };
+    return buffers.toGeometry();
+  }
+
+  /**
+   * Beta 1.7.3 Nether portal plane (`BlockPortal`, render pass 1).
+   *
+   * The portal is a thin quad pair inset into the block, oriented by the
+   * canonical portal axis so frame validation, collision bounds, meshing,
+   * particles and teleport placement all agree. Beta's
+   * `BlockPortal.shouldSideBeRendered` only draws the two faces across the
+   * thin axis, which is reproduced here by emitting one plane per side.
+   *
+   * Animation is driven by a frame uniform on the portal material, so the
+   * geometry is never rebuilt to advance the animation.
+   */
+  public buildPortals(chunk: Chunk): THREE.BufferGeometry {
+    const buffers = new MeshBuffers();
+    const sectionPassMasks = this.getSectionPassMasks(chunk);
+    const uvRect = this.getSafeUvRect('portal');
+
+    for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
+      if (!hasChunkPass(sectionPassMasks[sectionIndex]!, ChunkPassMask.Portal)) continue;
+      const { startY, endY } = this.sectionYRange(sectionIndex);
+      for (let y = startY; y < endY; y++) {
+        for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+          for (let x = 0; x < CHUNK_SIZE_X; x++) {
+            if (chunk.getBlock(x, y, z) !== BlockIds.Portal) continue;
+
+            // Canonical axis: plane runs along X when an X neighbour is also
+            // a portal block, otherwise along Z.
+            const hasXNeighbour =
+              this.getBlockAt(chunk, x - 1, y, z) === BlockIds.Portal ||
+              this.getBlockAt(chunk, x + 1, y, z) === BlockIds.Portal;
+
+            const light = this.getLightComponentsAt(chunk, x, y, z);
+            const tint: readonly [number, number, number] = [1, 1, 1];
+            const inset = 0.125;
+
+            if (hasXNeighbour) {
+              // Plane spans X, thin in Z: two quads at z = 0.5 -/+ inset.
+              for (const zOffset of [0.5 - inset, 0.5 + inset]) {
+                buffers.pushQuad(
+                  [
+                    [x, y, z + zOffset],
+                    [x + 1, y, z + zOffset],
+                    [x + 1, y + 1, z + zOffset],
+                    [x, y + 1, z + zOffset],
+                  ],
+                  [0, 0, 1],
+                  uvRect,
+                  tint,
+                  light,
+                  1,
+                  FluidTextureKind.WaterStill,
+                );
+              }
+            } else {
+              // Plane spans Z, thin in X.
+              for (const xOffset of [0.5 - inset, 0.5 + inset]) {
+                buffers.pushQuad(
+                  [
+                    [x + xOffset, y, z],
+                    [x + xOffset, y, z + 1],
+                    [x + xOffset, y + 1, z + 1],
+                    [x + xOffset, y + 1, z],
+                  ],
+                  [1, 0, 0],
+                  uvRect,
+                  tint,
+                  light,
+                  1,
+                  FluidTextureKind.WaterStill,
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+
     return buffers.toGeometry();
   }
 

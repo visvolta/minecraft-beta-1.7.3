@@ -31,6 +31,18 @@ export const MUSIC_MENU = numbered('music.menu.menu', '/audio/music/menu/menu', 
  */
 export const LIQUID_SOUNDS = ['water','lava','lavapop'].map((name) => sound(`liquid.${name}`, `/audio/sounds/liquid/${name}.ogg`, 'liquid'));
 
+/**
+ * Beta Nether portal sounds:
+ *   portal.portal  — ambient hum near an active portal (BlockPortal.randomDisplayTick)
+ *   portal.trigger — plays as the travel charge begins
+ *   portal.travel  — plays as the dimension switch fires
+ */
+export const PORTAL_SOUNDS = [
+  sound('portal.portal', '/audio/sounds/portal/portal.ogg', 'portal'),
+  sound('portal.trigger', '/audio/sounds/portal/trigger.ogg', 'portal'),
+  sound('portal.travel', '/audio/sounds/portal/travel.ogg', 'portal'),
+];
+
 export const FIRE_SOUNDS = ['fire','ignite'].map((name) => sound(`fire.${name}`, `/audio/sounds/fire/${name}.ogg`, 'fire'));
 export const RANDOM_SOUNDS = [
   'splash','pop','glass1','glass2','glass3','chestclosed','chestopen','click','door_close','door_open','drink','eat1','eat2','eat3','explode1','explode2','explode3',
@@ -72,7 +84,7 @@ export const STEP_SOUND_MATERIALS: Readonly<Record<StepSoundMaterial, readonly A
 
 export const DIG_SOUNDS = Object.values(DIG_SOUND_MATERIALS).flat();
 export const STEP_SOUNDS = Object.values(STEP_SOUND_MATERIALS).flat();
-export const AUDIO_MANIFEST = [...MUSIC_GAME,...MUSIC_CREATIVE,...MUSIC_NETHER,...MUSIC_MENU,...FIRE_SOUNDS,...LIQUID_SOUNDS,...RANDOM_SOUNDS,...MOB_SOUNDS,...CAVE_SOUNDS,...WEATHER_SOUNDS,...DAMAGE_SOUNDS,...MINECART_SOUNDS,...DIG_SOUNDS,...STEP_SOUNDS] as const;
+export const AUDIO_MANIFEST = [...MUSIC_GAME,...MUSIC_CREATIVE,...MUSIC_NETHER,...MUSIC_MENU,...PORTAL_SOUNDS,...FIRE_SOUNDS,...LIQUID_SOUNDS,...RANDOM_SOUNDS,...MOB_SOUNDS,...CAVE_SOUNDS,...WEATHER_SOUNDS,...DAMAGE_SOUNDS,...MINECART_SOUNDS,...DIG_SOUNDS,...STEP_SOUNDS] as const;
 
 export function entriesForKeys(keys: readonly string[]): AudioEntry[] { return keys.map((key) => { const entry = AUDIO_MANIFEST.find((candidate) => candidate.key === key); if (!entry) throw new Error(`Unknown audio key ${key}`); return entry; }); }
 export function manifestByKey(): Map<string, AudioEntry> { return new Map(AUDIO_MANIFEST.map((entry) => [entry.key, entry])); }

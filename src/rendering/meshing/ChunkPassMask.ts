@@ -10,6 +10,7 @@ export const enum ChunkPassMask {
   Fire = 1 << 4,
   Translucent = 1 << 5,
   Leaves = 1 << 6,
+  Portal = 1 << 7,
 }
 
 function isWater(blockId: BlockId): boolean {
@@ -33,6 +34,7 @@ export function classifyBlockPassMask(blockId: BlockId, registry: BlockRegistry)
   const renderType = registry.getById(blockId)?.renderType;
   if (renderType === 'opaque') return ChunkPassMask.Terrain;
   if (renderType === 'leaves') return ChunkPassMask.Leaves;
+  if (renderType === 'portal') return ChunkPassMask.Portal;
   if (
     renderType === 'cutout'
     || renderType === 'cross'
@@ -49,7 +51,7 @@ export function computeChunkPassMask(blocks: Uint8Array, registry: BlockRegistry
   let mask = ChunkPassMask.None;
   for (let i = 0; i < blocks.length; i++) {
     mask |= classifyBlockPassMask(blocks[i] as BlockId, registry);
-    if (mask === (ChunkPassMask.Terrain | ChunkPassMask.Water | ChunkPassMask.Lava | ChunkPassMask.Cutout | ChunkPassMask.Fire | ChunkPassMask.Translucent | ChunkPassMask.Leaves)) {
+    if (mask === (ChunkPassMask.Terrain | ChunkPassMask.Water | ChunkPassMask.Lava | ChunkPassMask.Cutout | ChunkPassMask.Fire | ChunkPassMask.Translucent | ChunkPassMask.Leaves | ChunkPassMask.Portal)) {
       break;
     }
   }

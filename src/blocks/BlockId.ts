@@ -136,6 +136,11 @@ export const BlockIds = {
   BrickBlock: 45,
   /** Beta 1.7.3 glowstone. Emits full light; drops dust. */
   Glowstone: 89,
+  /**
+   * Beta 1.7.3 Nether portal block. Non-solid, no collision, emits light 11,
+   * and is created by fire on an obsidian frame rather than being placeable.
+   */
+  Portal: 90,
   /** Beta 1.7.3 cobblestone stairs. Non-full block. */
   CobblestoneStairs: 67,
   /** Beta 1.7.3 soul sand ("hellsand"). Slows movement and is slightly short. */

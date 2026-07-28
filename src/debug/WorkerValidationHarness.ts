@@ -218,6 +218,11 @@ export class WorkerValidationHarness {
         chunkX,
         chunkZ,
         seed: this.worldSeed.toString(),
+        // Validation harness runs a standalone worker; identity only has to be
+        // self-consistent, and it validates the Overworld generator.
+        context: { worldId: 'validation', dimensionId: 0, contextGeneration: 1 },
+        generatorKind: 'overworld',
+        hasSkyLight: true,
       };
       worker.postMessage(job);
     });

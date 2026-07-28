@@ -1,3 +1,4 @@
+import type { DimensionId } from '../../world/dimension/DimensionId';
 import {
   chunkRecordKey,
   worldRecordKey,
@@ -114,35 +115,35 @@ export class IdbStorageBackend implements StorageBackend {
     return promise;
   }
 
-  public async readChunk(worldId: string, chunkX: number, chunkZ: number): Promise<Uint8Array | undefined> {
-    const id = chunkRecordKey(worldId, chunkX, chunkZ);
+  public async readChunk(worldId: string, chunkX: number, chunkZ: number, dimension?: DimensionId): Promise<Uint8Array | undefined> {
+    const id = chunkRecordKey(worldId, chunkX, chunkZ, dimension);
     const stored = await this.runRequest<StoredBlob | undefined>(CHUNKS_STORE, 'readonly', (store) => store.get(id));
     return stored === undefined ? undefined : toBytes(stored.bytes);
   }
 
-  public async writeChunk(worldId: string, chunkX: number, chunkZ: number, record: Uint8Array): Promise<void> {
-    const id = chunkRecordKey(worldId, chunkX, chunkZ);
+  public async writeChunk(worldId: string, chunkX: number, chunkZ: number, record: Uint8Array, dimension?: DimensionId): Promise<void> {
+    const id = chunkRecordKey(worldId, chunkX, chunkZ, dimension);
     await this.runRequest<IDBValidKey>(CHUNKS_STORE, 'readwrite', (store) => store.put({ id, bytes: toArrayBuffer(record) }));
   }
 
-  public async deleteChunk(worldId: string, chunkX: number, chunkZ: number): Promise<void> {
-    const id = chunkRecordKey(worldId, chunkX, chunkZ);
+  public async deleteChunk(worldId: string, chunkX: number, chunkZ: number, dimension?: DimensionId): Promise<void> {
+    const id = chunkRecordKey(worldId, chunkX, chunkZ, dimension);
     await this.runRequest<undefined>(CHUNKS_STORE, 'readwrite', (store) => store.delete(id));
   }
 
-  public async readRecord(worldId: string, key: string): Promise<Uint8Array | undefined> {
-    const id = worldRecordKey(worldId, key);
+  public async readRecord(worldId: string, key: string, dimension?: DimensionId): Promise<Uint8Array | undefined> {
+    const id = worldRecordKey(worldId, key, dimension);
     const stored = await this.runRequest<StoredBlob | undefined>(RECORDS_STORE, 'readonly', (store) => store.get(id));
     return stored === undefined ? undefined : toBytes(stored.bytes);
   }
 
-  public async writeRecord(worldId: string, key: string, value: Uint8Array): Promise<void> {
-    const id = worldRecordKey(worldId, key);
+  public async writeRecord(worldId: string, key: string, value: Uint8Array, dimension?: DimensionId): Promise<void> {
+    const id = worldRecordKey(worldId, key, dimension);
     await this.runRequest<IDBValidKey>(RECORDS_STORE, 'readwrite', (store) => store.put({ id, bytes: toArrayBuffer(value) }));
   }
 
-  public async deleteRecord(worldId: string, key: string): Promise<void> {
-    const id = worldRecordKey(worldId, key);
+  public async deleteRecord(worldId: string, key: string, dimension?: DimensionId): Promise<void> {
+    const id = worldRecordKey(worldId, key, dimension);
     await this.runRequest<undefined>(RECORDS_STORE, 'readwrite', (store) => store.delete(id));
   }
 

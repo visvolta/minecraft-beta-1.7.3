@@ -14,6 +14,7 @@ import { TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
 import type { FluidAnimationSystem } from './fluid/FluidAnimationSystem';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import type { FireAnimationSystem } from './fire/FireAnimationSystem';
+import type { PortalAnimationSystem } from './portal/PortalAnimationSystem';
 import { VegetationColorProvider } from '../world/generation/climate/VegetationColors';
 
 /** Max dirty chunk meshes rebuilt in a single frame. */
@@ -360,6 +361,37 @@ function attachLavaAnimationShader(material: THREE.MeshBasicMaterial, fluidAnima
   material.needsUpdate = true;
 }
 
+/**
+ * Samples the standalone 32-frame portal strip, selecting the current frame
+ * from a uniform. Mirrors the fluid/fire animation shaders: one shared
+ * material, one clock, zero geometry rebuilds.
+ */
+function attachPortalAnimationShader(material: THREE.MeshBasicMaterial, portalAnimation: PortalAnimationSystem): void {
+  const previous = material.onBeforeCompile;
+  const uniforms = {
+    uPortalTexture: { value: portalAnimation.portalTexture },
+    uPortalFrame: { value: 0 },
+    uPortalFrameCount: { value: portalAnimation.getFrameCount() },
+  };
+  material.userData.portalAnimationUniforms = uniforms;
+  material.onBeforeCompile = (shader, renderer): void => {
+    if (typeof previous === 'function') previous.call(material, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform sampler2D uPortalTexture;
+        uniform float uPortalFrame;
+        uniform float uPortalFrameCount;`)
+      .replace('#include <map_fragment>', `#ifdef USE_MAP
+          // Frames are stacked vertically; walk the strip by frame index.
+          float portalV = (floor(uPortalFrame) + fract(vMapUv.y)) / uPortalFrameCount;
+          vec4 sampledDiffuseColor = texture2D(uPortalTexture, vec2(vMapUv.x, portalV));
+          diffuseColor *= sampledDiffuseColor;
+        #endif`);
+  };
+  material.needsUpdate = true;
+}
+
 function attachFireAnimationShader(material: THREE.MeshBasicMaterial, fireAnimationSystem: FireAnimationSystem): void {
   const previous = material.onBeforeCompile;
   const uniforms = {
@@ -412,6 +444,7 @@ export class ChunkRenderer {
   private readonly lavaGroup: THREE.Group;
   private readonly translucentGroup: THREE.Group;
   private readonly fireGroup: THREE.Group;
+  private readonly portalGroup: THREE.Group;
 
   private readonly terrainMaterial: THREE.MeshBasicMaterial;
   private readonly waterMaterial: THREE.MeshBasicMaterial;
@@ -420,6 +453,7 @@ export class ChunkRenderer {
   private readonly cutoutMaterial: THREE.MeshBasicMaterial;
   private readonly leavesMaterial: THREE.MeshBasicMaterial;
   private readonly fireMaterial: THREE.MeshBasicMaterial;
+  private readonly portalMaterial: THREE.MeshBasicMaterial;
   private readonly waterDepthMaterial: THREE.MeshBasicMaterial;
   private readonly lavaDepthMaterial: THREE.MeshBasicMaterial;
   private readonly translucentDepthMaterial: THREE.MeshBasicMaterial;
@@ -433,12 +467,14 @@ export class ChunkRenderer {
   /** Geometries shared by color+depth meshes; disposed once via pass owner. */
   private readonly ownedPassGeometries = new Map<string, THREE.BufferGeometry>();
   private readonly fireMeshes = new Map<number, THREE.Mesh>();
+  private readonly portalMeshes = new Map<number, THREE.Mesh>();
   private readonly waterDepthMeshes = new Map<number, THREE.Mesh>();
   private readonly lavaDepthMeshes = new Map<number, THREE.Mesh>();
   private readonly translucentDepthMeshes = new Map<number, THREE.Mesh>();
 
   private readonly fluidAnimationSystem: FluidAnimationSystem;
   private readonly fireAnimationSystem: FireAnimationSystem;
+  private readonly portalAnimation: PortalAnimationSystem;
 
   private skylightSubtracted = 0;
   private sunBrightnessFactor = 1;
@@ -454,6 +490,7 @@ export class ChunkRenderer {
     atlas: TextureAtlas,
     fluidAnimationSystem: FluidAnimationSystem,
     fireAnimationSystem: FireAnimationSystem,
+    portalAnimation: PortalAnimationSystem,
     worldSeed: bigint,
   ) {
     this.chunkManager = chunkManager;
@@ -462,6 +499,7 @@ export class ChunkRenderer {
     this.meshQueue = new ChunkMeshingQueue(chunkManager, atlas, worldSeed);
     this.fluidAnimationSystem = fluidAnimationSystem;
     this.fireAnimationSystem = fireAnimationSystem;
+    this.portalAnimation = portalAnimation;
 
     this.terrainMaterial = new THREE.MeshBasicMaterial({
       map: atlas.texture,
@@ -606,6 +644,27 @@ export class ChunkRenderer {
     attachHeightAwareFog(this.fireMaterial);
     attachFireAnimationShader(this.fireMaterial, fireAnimationSystem);
 
+    // Nether portal: its own blended, double-sided, depth-testing pass.
+    // Kept separate from fire/translucent because Beta's portal has distinct
+    // blending and depth semantics, and the animation is driven by a frame
+    // uniform shared by every portal mesh (no per-portal material).
+    this.portalMaterial = new THREE.MeshBasicMaterial({
+      map: atlas.texture,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    attachHeightAwareFog(this.portalMaterial);
+    attachPortalAnimationShader(this.portalMaterial, portalAnimation);
+
+    this.portalGroup = new THREE.Group();
+    this.portalGroup.name = 'chunks-portal';
+    this.portalGroup.renderOrder = RENDER_ORDER.portal;
+    scene.add(this.portalGroup);
+
     this.fireGroup = new THREE.Group();
     this.fireGroup.name = 'chunks-fire';
     this.fireGroup.renderOrder = 25;
@@ -619,6 +678,7 @@ export class ChunkRenderer {
     this.updateFluidAnimationUniforms();
     this.updateLavaAnimationUniforms();
     this.updateFireAnimationUniforms();
+    this.updatePortalAnimationUniforms();
 
     if (this.meshQueue.isWorkerEnabled()) {
       const scanStart = performance.now();
@@ -693,6 +753,7 @@ export class ChunkRenderer {
       [this.cutoutMeshes, this.cutoutGroup, 'cutout'],
       [this.leavesMeshes, this.leavesGroup, 'leaves'],
       [this.fireMeshes, this.fireGroup, 'fire'],
+      [this.portalMeshes, this.portalGroup, 'portal'],
     ] as const) {
       const mesh = map.get(key);
       if (mesh !== undefined) {
@@ -712,6 +773,7 @@ export class ChunkRenderer {
       [this.cutoutMeshes, this.cutoutGroup],
       [this.leavesMeshes, this.leavesGroup],
       [this.fireMeshes, this.fireGroup],
+      [this.portalMeshes, this.portalGroup],
       [this.translucentMeshes, this.translucentGroup],
       [this.waterDepthMeshes, this.waterDepthGroup],
       [this.lavaDepthMeshes, this.lavaDepthGroup],
@@ -732,6 +794,7 @@ export class ChunkRenderer {
     this.cutoutMaterial.dispose();
     this.leavesMaterial.dispose();
     this.fireMaterial.dispose();
+    this.portalMaterial.dispose();
     this.waterDepthMaterial.dispose();
     this.lavaDepthMaterial.dispose();
     this.translucentDepthMaterial.dispose();
@@ -743,6 +806,7 @@ export class ChunkRenderer {
     this.cutoutGroup.removeFromParent();
     this.leavesGroup.removeFromParent();
     this.fireGroup.removeFromParent();
+    this.portalGroup.removeFromParent();
     this.waterDepthGroup.removeFromParent();
     this.lavaDepthGroup.removeFromParent();
     this.translucentDepthGroup.removeFromParent();
@@ -764,6 +828,7 @@ export class ChunkRenderer {
       this.cutoutMeshes.size +
       this.leavesMeshes.size +
       this.fireMeshes.size +
+      this.portalMeshes.size +
       this.translucentMeshes.size
     );
   }
@@ -839,6 +904,7 @@ export class ChunkRenderer {
     for (const mesh of this.cutoutMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.leavesMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.fireMeshes.values()) addGeometry(mesh.geometry);
+    for (const mesh of this.portalMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.translucentMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.waterDepthMeshes.values()) addGeometry(mesh.geometry);
     for (const mesh of this.lavaDepthMeshes.values()) addGeometry(mesh.geometry);
@@ -888,6 +954,8 @@ export class ChunkRenderer {
     this.upsertMesh(this.leavesMeshes, this.leavesGroup, this.leavesMaterial, chunk, key, result.leaves, 'leaves');
     this.applyColorModeToGeometry(result.fire);
     this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, result.fire, 'fire');
+    this.applyColorModeToGeometry(result.portal);
+    this.upsertMesh(this.portalMeshes, this.portalGroup, this.portalMaterial, chunk, key, result.portal, 'portal');
 
     this.meshQueue.markUploaded(result.chunkX, result.chunkZ, result.targetRevision);
     chunk.markClean();
@@ -969,6 +1037,10 @@ export class ChunkRenderer {
     this.applyColorModeToGeometry(fireGeometry);
     this.upsertMesh(this.fireMeshes, this.fireGroup, this.fireMaterial, chunk, key, fireGeometry, 'fire');
 
+    const portalGeometry = hasChunkPass(mask, ChunkPassMask.Portal) ? this.mesher.buildPortals(chunk) : createEmptyGeometry(false);
+    this.applyColorModeToGeometry(portalGeometry);
+    this.upsertMesh(this.portalMeshes, this.portalGroup, this.portalMaterial, chunk, key, portalGeometry, 'portal');
+
     chunk.markClean();
   }
 
@@ -1008,6 +1080,15 @@ export class ChunkRenderer {
     }
   }
 
+  private updatePortalAnimationUniforms(): void {
+    const uniforms = this.portalMaterial.userData.portalAnimationUniforms as {
+      uPortalTexture: { value: THREE.Texture };
+      uPortalFrame: { value: number };
+      uPortalFrameCount: { value: number };
+    } | undefined;
+    if (uniforms !== undefined) this.portalAnimation.applyUniforms(uniforms);
+  }
+
   private updateDynamicLightingUniforms(): void {
     for (const material of [
       this.terrainMaterial,
@@ -1016,6 +1097,7 @@ export class ChunkRenderer {
       this.cutoutMaterial,
       this.leavesMaterial,
       this.fireMaterial,
+      this.portalMaterial,
       this.translucentMaterial,
     ]) {
       const uniforms = material.userData.dynamicLightingUniforms as {

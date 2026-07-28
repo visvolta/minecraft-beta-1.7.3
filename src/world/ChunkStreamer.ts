@@ -6,6 +6,7 @@ import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from './chunkConstants';
 import { chunkKey } from './chunkKey';
 import type { LightEngine } from './generation/lighting/LightEngine';
 import { ChunkGenerationQueue, type ChunkGenerationStats } from './streaming/ChunkGenerationQueue';
+import type { WorldContextIdentity } from './streaming/ChunkJobTypes';
 import type { WorldPersistenceService } from '../persistence2/WorldPersistenceService';
 import { RecordCorruptionError } from '../persistence2/codec/PersistenceError';
 
@@ -114,6 +115,12 @@ export class ChunkStreamer {
     lightEngine: LightEngine,
     worldSeed: bigint,
     persistence: WorldPersistenceService,
+    /** Identity of the owning world context; tags every generation job. */
+    contextIdentity: WorldContextIdentity,
+    /** Generator selector forwarded to the generation worker. */
+    generatorKind: string,
+    /** Dimension skylight rule forwarded to the worker's initial-light pass. */
+    hasSkyLight: boolean,
     private readonly trustPersistedLighting = false,
     private readonly onChunkLoaded?: (chunk: Chunk) => void,
     private readonly onPersistenceError?: (error: RecordCorruptionError) => void,
@@ -122,7 +129,7 @@ export class ChunkStreamer {
     this.chunkRenderer = chunkRenderer;
     this.lightEngine = lightEngine;
     this.persistence = persistence;
-    this.generationQueue = new ChunkGenerationQueue(chunkManager, generator, worldSeed);
+    this.generationQueue = new ChunkGenerationQueue(chunkManager, generator, worldSeed, contextIdentity, generatorKind, hasSkyLight);
   }
 
   public dispatchCriticalLoad(chunkX: number, chunkZ: number): void {

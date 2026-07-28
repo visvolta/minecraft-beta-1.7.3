@@ -15,6 +15,7 @@
  */
 
 import { BlockIds } from '../../blocks/BlockId';
+import { tryToCreatePortal } from '../portal/PortalFrame';
 import type { BlockId } from '../../blocks/BlockId';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
 import type { BlockRegistry } from '../../blocks/BlockRegistry';
@@ -81,6 +82,26 @@ export class FireBehaviour implements BlockBehaviour {
    * Portal check deferred (no portal system).
    */
   public onPlaced(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
+    // Beta BlockFire.onBlockAdded: fire lit on obsidian first attempts to
+    // create a Nether portal. Keeping this here (rather than in the flint and
+    // steel item) means ANY ignition source can light a portal, matching Beta.
+    if (ctx.world.getBlock(x, y - 1, z) === BlockIds.Obsidian) {
+      const created = tryToCreatePortal(
+        {
+          getBlock: (bx, by, bz) => ctx.world.getBlock(bx, by, bz),
+          setBlock: (bx, by, bz, blockId) => {
+            ctx.world.setBlock(bx, by, bz, blockId as BlockId, {
+              reason: 'player', notifyNeighbours: true, updateLighting: true,
+            });
+          },
+          isLoaded: (bx, bz) => ctx.world.isLoaded(bx, bz),
+        },
+        x, y, z,
+      );
+      // The portal blocks replaced this cell; nothing further to schedule.
+      if (created) return;
+    }
+
     // Check support: solid normal cube below OR flammable neighbour
     if (!this.isBlockNormalCube(ctx, x, y - 1, z) && !this.canNeighborCatchFire(ctx, x, y, z)) {
       ctx.world.setBlock(x, y, z, BlockIds.Air, { reason: 'neighbour', notifyNeighbours: true, updateLighting: true });

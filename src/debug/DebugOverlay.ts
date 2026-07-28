@@ -70,6 +70,7 @@ export class DebugOverlay {
       `z: ${stats.playerZ.toFixed(2)}`,
       `f: ${stats.facingIndex} ${stats.facingName}`,
       `Chunk: ${stats.chunkX}, ${stats.chunkZ}`,
+      `Dimension: ${stats.dimensionLabel}`,
       `Chunks: ${stats.loadedChunks}`,
       `Entities: ${stats.entityCount}`,
       `Tris: ${stats.triangleCount}  Draws: ${stats.drawCalls}`,

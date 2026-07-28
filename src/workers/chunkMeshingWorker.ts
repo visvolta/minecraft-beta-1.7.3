@@ -78,7 +78,7 @@ function isPopulatedMesh(mesh: MeshAttributeBuffers): mesh is PopulatedMeshAttri
 
 function transferList(result: ChunkMeshResult): Transferable[] {
   const list: Transferable[] = [];
-  for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.leaves, result.fire, result.translucent]) {
+  for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.leaves, result.fire, result.translucent, result.portal]) {
     if (!isPopulatedMesh(mesh)) continue;
     list.push(
       mesh.positions,
@@ -165,6 +165,7 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
       leaves: extractGeometry(passes.leaves),
       fire: extractGeometry(passes.fire),
       translucent: extractGeometry(passes.translucent),
+      portal: extractGeometry(passes.portal),
       durationMs: performance.now() - start,
       voxelVisits: mesher.lastVoxelVisits,
     };
@@ -175,6 +176,7 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
     passes.leaves.dispose();
     passes.fire.dispose();
     passes.translucent.dispose();
+    passes.portal.dispose();
     workerSelf.postMessage(result, transferList(result));
   } catch (error) {
     workerSelf.postMessage({

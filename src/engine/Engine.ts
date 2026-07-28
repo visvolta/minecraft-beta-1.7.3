@@ -90,6 +90,7 @@ import { registerPlantBehaviours } from '../world/behaviours/PlantBehaviours';
 import { registerSupportBehaviours } from '../world/behaviours/SupportBehaviours';
 import { registerFireBehaviour } from '../world/behaviours/FireBehaviour';
 import { registerSnowIceBehaviours } from '../world/behaviours/registerSnowIceBehaviours';
+import { registerPortalBehaviour } from '../world/behaviours/PortalBehaviour';
 import { PrecipitationSimulator } from '../world/weather/PrecipitationSimulator';
 import { registerFallingBlockBehaviours } from '../world/behaviours/FallingBlockBehaviour';
 import { registerLeafBehaviour } from '../world/behaviours/LeafBehaviour';
@@ -112,9 +113,15 @@ import { registerShapedBlockBehaviours } from '../world/behaviours/ShapedBlockBe
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
+import { PortalAnimationSystem } from '../rendering/portal/PortalAnimationSystem';
 import { WorldEventQueue } from '../world/events/WorldEventQueue';
 import { ChunkStreamer } from '../world/ChunkStreamer';
-import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
+import type { WorldGenerator } from '../world/WorldGenerator';
+import { DimensionRegistry } from '../world/dimension/DimensionRegistry';
+import { OVERWORLD_DIMENSION } from '../world/dimension/overworldDimension';
+import { NETHER_DIMENSION } from '../world/dimension/netherDimension';
+import { DIMENSION_OVERWORLD, type DimensionId } from '../world/dimension/DimensionId';
+import type { DimensionDefinition } from '../world/dimension/DimensionDefinition';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
 import { ClimateSampler } from '../world/generation/climate/ClimateSampler';
 import { WeatherController } from '../world/weather/WeatherController';
@@ -289,10 +296,20 @@ export class Engine {
   private readonly itemHeldMaterial: THREE.MeshBasicMaterial;
   private readonly atlas: TextureAtlas;
   private readonly chunkManager: ChunkManager;
-  private readonly worldGenerator: BetaWorldGenerator;
+  /** Every dimension the engine knows about; extensible by future registrations. */
+  private readonly dimensions = new DimensionRegistry();
+  /** The dimension currently being simulated and rendered. */
+  private activeDimensionId: DimensionId = DIMENSION_OVERWORLD;
+  /**
+   * Bumped whenever a world context is (re)created, so an in-flight worker
+   * result from a previous visit to a dimension can be rejected.
+   */
+  private contextGeneration = 1;
+  private readonly worldGenerator: WorldGenerator;
   private readonly chunkRenderer: ChunkRenderer;
   private readonly fluidAnimationSystem: FluidAnimationSystem;
   private readonly fireAnimationSystem: FireAnimationSystem;
+  private readonly portalAnimation = new PortalAnimationSystem();
   private readonly worldEventQueue: WorldEventQueue;
   private readonly chunkStreamer: ChunkStreamer;
   private readonly lightEngine: LightEngine;
@@ -384,7 +401,14 @@ export class Engine {
     this.armourGeometryCache = new ArmourGeometryCache(skinManager);
     this.armourMaterialCache = new ArmourMaterialCache(armourTextures);
     this.chunkManager = new ChunkManager();
-    this.worldGenerator = new BetaWorldGenerator(worldSeed);
+    // Dimension behaviour is configuration consumed by generic systems, not
+    // `if (dimension === -1)` branches. The active dimension supplies the
+    // generator, lighting rules, sky/weather policy and music profile.
+    this.dimensions.register(OVERWORLD_DIMENSION);
+    this.dimensions.register(NETHER_DIMENSION);
+    this.activeDimensionId = metadata.playerDimension ?? DIMENSION_OVERWORLD;
+    if (!this.dimensions.has(this.activeDimensionId)) this.activeDimensionId = DIMENSION_OVERWORLD;
+    this.worldGenerator = this.activeDimension.createGenerator(worldSeed);
     this.worldTime = new WorldTime();
     this.worldTime.setTotalTicks(metadata.timeTicks);
 
@@ -539,6 +563,7 @@ export class Engine {
     this.precipitationSimulator = new PrecipitationSimulator(worldSeed);
     registerFireBehaviour(this.blockBehaviourRegistry, blockRegistry, this.weatherController, this.chunkManager);
     registerSnowIceBehaviours(this.blockBehaviourRegistry);
+    registerPortalBehaviour(this.blockBehaviourRegistry);
     registerGrassBehaviour(this.blockBehaviourRegistry, blockRegistry);
     registerFallingBlockBehaviours(this.blockBehaviourRegistry, blockRegistry, this.fallingBlockManager);
     registerLeafBehaviour(this.blockBehaviourRegistry);
@@ -901,9 +926,20 @@ export class Engine {
     this.fluidAnimationSystem = new FluidAnimationSystem();
     this.fireAnimationSystem = new FireAnimationSystem();
 
-    this.chunkRenderer = new ChunkRenderer(this.renderer.scene, this.chunkManager, blockRegistry, this.atlas, this.fluidAnimationSystem, this.fireAnimationSystem, worldSeed);
+    this.chunkRenderer = new ChunkRenderer(this.renderer.scene, this.chunkManager, blockRegistry, this.atlas, this.fluidAnimationSystem, this.fireAnimationSystem, this.portalAnimation, worldSeed);
     const trustPersistedLighting = metadata.saveVersion === SAVE_VERSION && metadata.generatorVersion === GENERATOR_VERSION;
-    this.chunkStreamer = new ChunkStreamer(this.chunkManager, this.worldGenerator, this.chunkRenderer, this.lightEngine, worldSeed, this.persistence, trustPersistedLighting, (chunk) => {
+    this.chunkStreamer = new ChunkStreamer(
+      this.chunkManager,
+      this.worldGenerator,
+      this.chunkRenderer,
+      this.lightEngine,
+      worldSeed,
+      this.persistence,
+      { worldId: metadata.worldId, dimensionId: this.activeDimensionId, contextGeneration: this.contextGeneration },
+      this.activeDimension.name,
+      this.activeDimension.lighting.hasSkyLight,
+      trustPersistedLighting,
+      (chunk: Chunk) => {
         this.chestManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
         applyDungeonFeaturesToRuntime(takeGeneratedFeatures(chunk.chunkX, chunk.chunkZ), this.chestManager, chunk);
         this.signManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
@@ -925,6 +961,7 @@ export class Engine {
       this.entityManager,
       this.renderer.renderer,
       () => this.cameraController.getYaw(),
+      () => `${this.activeDimension.displayName} (${this.activeDimensionId})`,
     );
 
     const validationHarness = new WorkerValidationHarness(worldSeed, this.atlas);
@@ -1003,6 +1040,17 @@ export class Engine {
   }
 
   public get isPaused(): boolean { return this.simulationPaused; }
+
+  /** Definition driving the currently simulated dimension. */
+  public get activeDimension(): DimensionDefinition {
+    return this.dimensions.require(this.activeDimensionId);
+  }
+
+  /** Id of the dimension currently being simulated and rendered. */
+  public getActiveDimensionId(): DimensionId { return this.activeDimensionId; }
+
+  /** Registry of all known dimensions (extension point for custom dimensions). */
+  public getDimensionRegistry(): DimensionRegistry { return this.dimensions; }
 
   // --- Save-and-Quit lifecycle operations (orchestrated by SaveExitController) ---
 
@@ -1317,6 +1365,7 @@ export class Engine {
     this.worldEventQueue.drainNoop();
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
+    this.portalAnimation.update(this.worldTime.getTotalTicks());
     this.updateSleepPresentation();
     this.updateUnderwaterOverlay();
     this.updateFishingLine();

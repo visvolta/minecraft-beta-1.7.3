@@ -70,6 +70,7 @@ export interface ChunkMeshGeometrySet {
   readonly leaves: THREE.BufferGeometry;
   readonly fire: THREE.BufferGeometry;
   readonly translucent: THREE.BufferGeometry;
+  readonly portal: THREE.BufferGeometry;
 }
 
 import { chunkKey } from '../../world/chunkKey';
@@ -295,6 +296,7 @@ export class ChunkMeshingQueue {
         leaves: geometryFromBuffers(result.leaves, false),
         fire: geometryFromBuffers(result.fire, true),
         translucent: geometryFromBuffers(result.translucent, false),
+        portal: geometryFromBuffers(result.portal, false),
       });
     }
     this.lastUploadTime = performance.now() - start;

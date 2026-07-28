@@ -1,3 +1,4 @@
+import type { DimensionId } from '../../world/dimension/DimensionId';
 import {
   chunkRecordKey,
   worldRecordKey,
@@ -69,40 +70,40 @@ export class MemoryStorageBackend implements StorageBackend {
     if (injected !== undefined) throw injected;
   }
 
-  public async readChunk(worldId: string, chunkX: number, chunkZ: number): Promise<Uint8Array | undefined> {
-    const key = chunkRecordKey(worldId, chunkX, chunkZ);
+  public async readChunk(worldId: string, chunkX: number, chunkZ: number, dimension?: DimensionId): Promise<Uint8Array | undefined> {
+    const key = chunkRecordKey(worldId, chunkX, chunkZ, dimension);
     await this.guard('readChunk', key);
     const value = this.chunks.get(key);
     return value === undefined ? undefined : value.slice();
   }
 
-  public async writeChunk(worldId: string, chunkX: number, chunkZ: number, record: Uint8Array): Promise<void> {
-    const key = chunkRecordKey(worldId, chunkX, chunkZ);
+  public async writeChunk(worldId: string, chunkX: number, chunkZ: number, record: Uint8Array, dimension?: DimensionId): Promise<void> {
+    const key = chunkRecordKey(worldId, chunkX, chunkZ, dimension);
     await this.guard('writeChunk', key);
     this.chunks.set(key, record.slice());
   }
 
-  public async deleteChunk(worldId: string, chunkX: number, chunkZ: number): Promise<void> {
-    const key = chunkRecordKey(worldId, chunkX, chunkZ);
+  public async deleteChunk(worldId: string, chunkX: number, chunkZ: number, dimension?: DimensionId): Promise<void> {
+    const key = chunkRecordKey(worldId, chunkX, chunkZ, dimension);
     await this.guard('deleteChunk', key);
     this.chunks.delete(key);
   }
 
-  public async readRecord(worldId: string, key: string): Promise<Uint8Array | undefined> {
-    const fullKey = worldRecordKey(worldId, key);
+  public async readRecord(worldId: string, key: string, dimension?: DimensionId): Promise<Uint8Array | undefined> {
+    const fullKey = worldRecordKey(worldId, key, dimension);
     await this.guard('readRecord', fullKey);
     const value = this.records.get(fullKey);
     return value === undefined ? undefined : value.slice();
   }
 
-  public async writeRecord(worldId: string, key: string, value: Uint8Array): Promise<void> {
-    const fullKey = worldRecordKey(worldId, key);
+  public async writeRecord(worldId: string, key: string, value: Uint8Array, dimension?: DimensionId): Promise<void> {
+    const fullKey = worldRecordKey(worldId, key, dimension);
     await this.guard('writeRecord', fullKey);
     this.records.set(fullKey, value.slice());
   }
 
-  public async deleteRecord(worldId: string, key: string): Promise<void> {
-    const fullKey = worldRecordKey(worldId, key);
+  public async deleteRecord(worldId: string, key: string, dimension?: DimensionId): Promise<void> {
+    const fullKey = worldRecordKey(worldId, key, dimension);
     await this.guard('deleteRecord', fullKey);
     this.records.delete(fullKey);
   }

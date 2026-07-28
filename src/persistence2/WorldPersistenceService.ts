@@ -1,6 +1,7 @@
 import type { Chunk } from '../world/Chunk.ts';
 import { ChunkSerializer } from '../nbt/ChunkSerializer.ts';
 import { encodeNbt, decodeNbt } from '../nbt/NbtCodec.ts';
+import { DIMENSION_OVERWORLD, type DimensionId } from '../world/dimension/DimensionId';
 import type { NbtTag, NbtCompound } from '../nbt/Nbt.ts';
 import { encodeWorldMetadata, decodeWorldMetadata, type WorldMetadata } from '../world/WorldMetadata.ts';
 import { compressDeflate, decompressDeflate } from './codec/Compression.ts';
@@ -127,6 +128,12 @@ export class WorldPersistenceService {
   private lastError: PersistenceErrorInfo | null = null;
   private changeListener: (() => void) | null = null;
   private worldId: string | null = null;
+  /**
+   * Dimension this service instance reads/writes for. Chunk and record keys
+   * are namespaced by it, so Nether (0,0) can never overwrite Overworld (0,0).
+   * Defaults to the Overworld, which keeps the historical key format.
+   */
+  private dimension: DimensionId = DIMENSION_OVERWORLD;
   private metadata: WorldMetadata | null = null;
   private opened = false;
   private closing = false;
@@ -185,6 +192,16 @@ export class WorldPersistenceService {
   public getWorldId(): string | null {
     return this.worldId;
   }
+
+  /** Dimension whose records this service reads and writes. */
+  public getDimension(): DimensionId { return this.dimension; }
+
+  /**
+   * Rebind this service to another dimension's namespace. Used when a
+   * dimension world context is created; callers must quiesce in-flight work
+   * first so no write lands in the wrong namespace.
+   */
+  public setDimension(dimension: DimensionId): void { this.dimension = dimension; }
 
   public get isClosing(): boolean {
     return this.closing;
@@ -299,7 +316,7 @@ export class WorldPersistenceService {
     const worldId = this.worldId!;
     return this.readExec.enqueue(async () => {
       const readStart = performance.now();
-      const bytes = await this.backend.readChunk(worldId, chunkX, chunkZ);
+      const bytes = await this.backend.readChunk(worldId, chunkX, chunkZ, this.dimension);
       this.performanceStats.lastChunkReadMs = performance.now() - readStart;
       if (bytes === undefined) return undefined;
       const decodeStart = performance.now();
@@ -333,7 +350,7 @@ export class WorldPersistenceService {
       const recordBytes = await this.encodeChunkRecord(chunk, snapshotRevision);
       this.performanceStats.lastChunkEncodeMs = performance.now() - encodeStart;
       const writeStart = performance.now();
-      await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes);
+      await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes, this.dimension);
       this.performanceStats.lastChunkWriteMs = performance.now() - writeStart;
       // Captured-revision invariant: clean only if still at the captured revision.
       if (chunk.getPersistenceRevision() === snapshotRevision) {
@@ -380,7 +397,7 @@ export class WorldPersistenceService {
     if (guardError !== undefined) return Promise.reject(guardError);
     const worldId = this.worldId!;
     return this.writeExec.enqueue(async () => {
-      await this.backend.deleteChunk(worldId, chunkX, chunkZ);
+      await this.backend.deleteChunk(worldId, chunkX, chunkZ, this.dimension);
     }, priority);
   }
 
@@ -437,7 +454,7 @@ export class WorldPersistenceService {
       this.performanceStats.lastChunkEncodeMs = performance.now() - encodeStart;
       if (state.canceled) return;
       const writeStart = performance.now();
-      await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes);
+      await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes, this.dimension);
       this.performanceStats.lastChunkWriteMs = performance.now() - writeStart;
       if (chunk.getPersistenceRevision() === snapshotRevision) {
         chunk.markPersistenceClean(snapshotRevision);
