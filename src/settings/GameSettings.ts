@@ -1,4 +1,5 @@
 import { Difficulty } from '../world/Difficulty';
+import { DEFAULT_RENDER_DISTANCE, normalizeRenderDistance, type RenderDistance } from './RenderDistance';
 import type { InputAction } from '../input/Input';
 import { normalizeGuiScale, type GuiScaleSetting } from '../ui/GuiScale';
 
@@ -6,7 +7,7 @@ export interface GameSettings {
   readonly version: 1;
   readonly audio: { readonly master: number; readonly music: number; readonly sound: number };
   readonly mouse: { readonly sensitivity: number; readonly invertY: boolean };
-  readonly video: { readonly viewBobbing: boolean; readonly guiScale: GuiScaleSetting; readonly aaMode: 'smaa' | 'fxaa' | 'off'; readonly renderScale: number };
+  readonly video: { readonly viewBobbing: boolean; readonly guiScale: GuiScaleSetting; readonly aaMode: 'smaa' | 'fxaa' | 'off'; readonly renderScale: number; readonly renderDistance: RenderDistance };
   readonly controls: { readonly bindings: Readonly<Record<InputAction, readonly string[]>> };
   readonly gameplay: { readonly difficulty: Difficulty };
 }
@@ -28,7 +29,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   version: 1,
   audio: { master: 1, music: 1, sound: 1 },
   mouse: { sensitivity: 0.5, invertY: false },
-  video: { viewBobbing: true, guiScale: 0, aaMode: 'smaa', renderScale: 1 },
+  video: { viewBobbing: true, guiScale: 0, aaMode: 'smaa', renderScale: 1, renderDistance: DEFAULT_RENDER_DISTANCE },
   controls: { bindings: DEFAULT_KEY_BINDINGS },
   gameplay: { difficulty: Difficulty.Normal },
 };
@@ -63,6 +64,9 @@ export function validateGameSettings(value: unknown): GameSettings {
       guiScale: normalizeGuiScale(video.guiScale),
       aaMode: video.aaMode === 'fxaa' || video.aaMode === 'off' || video.aaMode === 'smaa' ? video.aaMode : 'smaa',
       renderScale: typeof video.renderScale === 'number' ? Math.max(0.5, Math.min(1.5, video.renderScale)) : 1,
+      // Settings written before render distance existed have no value here;
+      // normalizeRenderDistance snaps anything unknown to a valid option.
+      renderDistance: normalizeRenderDistance(video.renderDistance),
     },
     controls: { bindings },
     gameplay: { difficulty: difficulty === Difficulty.Peaceful || difficulty === Difficulty.Easy || difficulty === Difficulty.Normal || difficulty === Difficulty.Hard ? difficulty : Difficulty.Normal },

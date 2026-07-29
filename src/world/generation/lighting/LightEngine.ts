@@ -1,5 +1,6 @@
 import type { ChunkManager } from '../../ChunkManager';
 import type { BlockRegistry } from '../../../blocks/BlockRegistry';
+import { resolveLightEmission } from '../../../blocks/BlockDefinition';
 import type { Chunk } from '../../Chunk';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z, CHUNK_SECTION_HEIGHT, CHUNK_SECTION_COUNT } from '../../chunkConstants';
 import { chunkKey } from '../../chunkKey';
@@ -193,6 +194,16 @@ export class LightEngine {
     }
   }
 
+  /** Coloured block light (0..15 per channel) at a world position. */
+  public getBlocklightRgb(x: number, y: number, z: number): { r: number; g: number; b: number } {
+    if (y < 0 || y >= CHUNK_SIZE_Y) return { r: 0, g: 0, b: 0 };
+    const chunkX = Math.floor(x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
+    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+    if (chunk === undefined) return { r: 0, g: 0, b: 0 };
+    return chunk.getBlocklightRgb(x - chunkX * CHUNK_SIZE_X, y, z - chunkZ * CHUNK_SIZE_Z);
+  }
+
   public getBlocklight(x: number, y: number, z: number): number {
     if (this.metricsEnabled) this.lightReads++;
     if (y < 0 || y >= CHUNK_SIZE_Y) return 0;
@@ -205,6 +216,17 @@ export class LightEngine {
     const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
     if (chunk === undefined) { if (this.metricsEnabled) this.missingChunkLookups++; return 0; }
     return chunk.getBlocklight(localX, y, localZ);
+  }
+
+  /** Writes coloured block light at a world position. */
+  public setBlocklightRgb(x: number, y: number, z: number, r: number, g: number, b: number): void {
+    if (y < 0 || y >= CHUNK_SIZE_Y) return;
+    const chunkX = Math.floor(x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
+    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+    if (chunk === undefined) return;
+    this.trackLightBatchChunk(chunk);
+    chunk.setBlocklightRgb(x - chunkX * CHUNK_SIZE_X, y, z - chunkZ * CHUNK_SIZE_Z, r, g, b);
   }
 
   public setBlocklight(x: number, y: number, z: number, val: number): void {
@@ -264,7 +286,26 @@ export class LightEngine {
     const def = this.blockRegistry.getById(blockId);
     if (def === undefined) return 0;
 
-    return def.lightEmission ?? 0;
+    return resolveLightEmission(def.lightEmission).level;
+  }
+
+  /**
+   * Per-channel emission seed (0..15 each) for a block.
+   *
+   * The colour comes from the block registry, never from a constant here, so
+   * a modded block with an arbitrary RGB tint works with no engine change.
+   */
+  public getEmissionRgb(x: number, y: number, z: number): { r: number; g: number; b: number } {
+    const blockId = this.getBlock(x, y, z);
+    if (blockId === 0) return { r: 0, g: 0, b: 0 };
+    const def = this.blockRegistry.getById(blockId);
+    if (def === undefined) return { r: 0, g: 0, b: 0 };
+    const { level, color } = resolveLightEmission(def.lightEmission);
+    return {
+      r: Math.round(level * color[0]),
+      g: Math.round(level * color[1]),
+      b: Math.round(level * color[2]),
+    };
   }
 
   // ==========================================
@@ -339,7 +380,9 @@ export class LightEngine {
         for (let y = 0; y < CHUNK_SIZE_Y; y++) {
           const emission = this.getEmission(wx, y, wz);
           if (emission > 0) {
-            chunk.setBlocklight(lx, y, lz, emission);
+            // Seed the registry's colour, not a white level.
+            const tint = this.getEmissionRgb(wx, y, wz);
+            chunk.setBlocklightRgb(lx, y, lz, tint.r, tint.g, tint.b);
             this.pushLightQueue(blockPropQueue, wx, y, wz);
           }
         }
@@ -409,7 +452,9 @@ export class LightEngine {
       const cy = queue[head++]!;
       const cz = queue[head++]!;
       if (this.metricsEnabled) this.nodesProcessed++;
-      const currentLight = this.getBlocklight(cx, cy, cz);
+      // All three channels travel together in ONE pass over the queue, so a
+      // coloured source costs one traversal rather than three.
+      const current = this.getBlocklightRgb(cx, cy, cz);
 
       for (const { dx, dy, dz } of NEIGHBORS) {
         const nx = cx + dx;
@@ -419,12 +464,16 @@ export class LightEngine {
         if (ny < 0 || ny >= CHUNK_SIZE_Y) continue;
         if ((dx !== 0 && Math.floor(nx / CHUNK_SIZE_X) !== Math.floor(cx / CHUNK_SIZE_X)) || (dz !== 0 && Math.floor(nz / CHUNK_SIZE_Z) !== Math.floor(cz / CHUNK_SIZE_Z))) if (this.metricsEnabled) this.boundaryTraversals++;
 
-        const opacity = this.getOpacity(nx, ny, nz);
-        const expected = currentLight - Math.max(1, opacity);
-        const target = this.getBlocklight(nx, ny, nz);
+        const attenuation = Math.max(1, this.getOpacity(nx, ny, nz));
+        const target = this.getBlocklightRgb(nx, ny, nz);
+        // Per-channel attenuation and per-channel max: a red source cannot
+        // dim a neighbouring yellow source's green channel, and vice versa.
+        const r = Math.max(target.r, current.r - attenuation);
+        const g = Math.max(target.g, current.g - attenuation);
+        const b = Math.max(target.b, current.b - attenuation);
 
-        if (expected > target) {
-          this.setBlocklight(nx, ny, nz, expected);
+        if (r > target.r || g > target.g || b > target.b) {
+          this.setBlocklightRgb(nx, ny, nz, r, g, b);
           this.pushLightQueue(queue, nx, ny, nz);
         }
       }
@@ -449,6 +498,16 @@ export class LightEngine {
   }
 
   private updateLocalLight(type: 'sky' | 'block', wx: number, wy: number, wz: number): void {
+    if (type === 'block') {
+      // Block light is coloured, so each channel is recomputed independently.
+      // Doing this per channel is what makes "remove the red torch, keep the
+      // yellow one" work: the red channel darkens and refills while green and
+      // blue are left entirely alone.
+      this.updateLocalBlockLightChannel('r', wx, wy, wz);
+      this.updateLocalBlockLightChannel('g', wx, wy, wz);
+      this.updateLocalBlockLightChannel('b', wx, wy, wz);
+      return;
+    }
     const isSky = type === 'sky';
     const oldLight = isSky ? this.getSkylight(wx, wy, wz) : this.getBlocklight(wx, wy, wz);
 
@@ -547,6 +606,83 @@ export class LightEngine {
       } else {
         this.propagateBlocklightQueue(propQueue);
       }
+    }
+  }
+
+  /**
+   * Recomputes ONE block-light channel around an edited cell.
+   *
+   * Mirrors the scalar remove-then-refill algorithm, but reads and writes a
+   * single channel so the other two are untouched. Without this, changing a
+   * red emitter would zero the whole packed value and erase a neighbouring
+   * yellow source's contribution.
+   */
+  private updateLocalBlockLightChannel(channel: 'r' | 'g' | 'b', wx: number, wy: number, wz: number): void {
+    const read = (x: number, y: number, z: number): number => {
+      const rgb = this.getBlocklightRgb(x, y, z);
+      return channel === 'r' ? rgb.r : channel === 'g' ? rgb.g : rgb.b;
+    };
+    const write = (x: number, y: number, z: number, value: number): void => {
+      const rgb = this.getBlocklightRgb(x, y, z);
+      this.setBlocklightRgb(
+        x, y, z,
+        channel === 'r' ? value : rgb.r,
+        channel === 'g' ? value : rgb.g,
+        channel === 'b' ? value : rgb.b,
+      );
+    };
+
+    const oldLight = read(wx, wy, wz);
+
+    const emission = this.getEmissionRgb(wx, wy, wz);
+    let newLight = channel === 'r' ? emission.r : channel === 'g' ? emission.g : emission.b;
+
+    if (newLight === 0) {
+      const opacity = this.getOpacity(wx, wy, wz);
+      for (const { dx, dy, dz } of NEIGHBORS) {
+        const value = read(wx + dx, wy + dy, wz + dz) - Math.max(1, opacity);
+        if (value > newLight) newLight = value;
+      }
+    }
+
+    write(wx, wy, wz, newLight);
+
+    if (newLight < oldLight) {
+      const removeQueue: number[] = [];
+      const propQueue: number[] = [];
+      this.pushRemoveQueue(removeQueue, wx, wy, wz, oldLight);
+
+      let head = 0;
+      while (head < removeQueue.length) {
+        const cx = removeQueue[head++]!;
+        const cy = removeQueue[head++]!;
+        const cz = removeQueue[head++]!;
+        const oldVal = removeQueue[head++]!;
+
+        for (const { dx, dy, dz } of NEIGHBORS) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          const nz = cz + dz;
+          if (ny < 0 || ny >= CHUNK_SIZE_Y) continue;
+
+          const expected = oldVal - Math.max(1, this.getOpacity(nx, ny, nz));
+          const neighbour = read(nx, ny, nz);
+
+          if (neighbour !== 0 && neighbour <= expected) {
+            write(nx, ny, nz, 0);
+            this.pushRemoveQueue(removeQueue, nx, ny, nz, neighbour);
+          } else if (neighbour > 0) {
+            // Survived the darkening front: it will refill the hole, which is
+            // how an unrelated same-channel source is preserved.
+            this.pushLightQueue(propQueue, nx, ny, nz);
+          }
+        }
+      }
+      this.propagateBlocklightQueue(propQueue);
+    } else if (newLight > oldLight) {
+      const propQueue: number[] = [];
+      this.pushLightQueue(propQueue, wx, wy, wz);
+      this.propagateBlocklightQueue(propQueue);
     }
   }
 

@@ -71,7 +71,7 @@ export class DebugOverlay {
       `f: ${stats.facingIndex} ${stats.facingName}`,
       `Chunk: ${stats.chunkX}, ${stats.chunkZ}`,
       `Dimension: ${stats.dimensionLabel}`,
-      `Chunks: ${stats.loadedChunks}`,
+      `Chunks: ${stats.loadedChunks}  Render: ${stats.renderDistance}`,
       `Entities: ${stats.entityCount}`,
       `Tris: ${stats.triangleCount}  Draws: ${stats.drawCalls}`,
       memory,

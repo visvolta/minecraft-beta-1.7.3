@@ -1,6 +1,16 @@
 import { Chunk } from '../world/Chunk.ts';
 import { nbt, type NbtCompound, type NbtTag } from './Nbt.ts';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../world/chunkConstants.ts';
+import { getSkyLight, getBlockLightLevel, getRed, getGreen, packLight } from '../world/generation/lighting/LightValue.ts';
+
+/**
+ * Project-specific tag carrying coloured block light.
+ *
+ * Deliberately NOT folded into Beta's SkyLight/BlockLight arrays: those keep
+ * their exact Beta shape and meaning, so a save written here stays readable as
+ * a plain Beta chunk and any reader that does not know this tag ignores it.
+ */
+const COLORED_LIGHT_TAG = 'BlockLightRGB';
 
 export class ChunkSerializer {
   public static encodeChunk(chunk: Chunk, lastUpdate: bigint, entityTags: readonly NbtTag[] = []): NbtCompound {
@@ -8,6 +18,9 @@ export class ChunkSerializer {
     const metadata = new Uint8Array(16384);
     const skyLight = new Uint8Array(16384);
     const blockLight = new Uint8Array(16384);
+    // Project extension: one byte per cell holding R (low nibble) and
+    // G (high nibble). Blue is reconstructed from the Beta grayscale level.
+    const blockLightRg = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
     const heightMap = new Uint8Array(256);
 
     const chunkBlocks = chunk.copyBlocks();
@@ -34,12 +47,18 @@ export class ChunkSerializer {
 
           metadata[halfIndex] = (metadata[halfIndex]! & ~(0x0F << shift)) | ((chunkMeta[tsIndex]! & 0x0F) << shift);
 
+          // Beta-compatible arrays stay exactly Beta-shaped: skylight, and a
+          // GRAYSCALE block light of max(R,G,B). Colour rides in a separate
+          // project-specific tag so nothing reading the Beta layout is affected.
           const l = chunkLight[tsIndex]!;
-          const sLight = l & 0x0F;
-          const bLight = (l >> 4) & 0x0F;
+          const sLight = getSkyLight(l);
+          const bLight = getBlockLightLevel(l);
 
           skyLight[halfIndex] = (skyLight[halfIndex]! & ~(0x0F << shift)) | (sLight << shift);
           blockLight[halfIndex] = (blockLight[halfIndex]! & ~(0x0F << shift)) | (bLight << shift);
+          // Two nibbles of tint per cell: R and G. Blue is recovered on load
+          // from the grayscale level, which already equals max(R,G,B).
+          blockLightRg[tsIndex] = (getRed(l) & 0x0F) | ((getGreen(l) & 0x0F) << 4);
         }
       }
     }
@@ -67,6 +86,9 @@ export class ChunkSerializer {
     levelMap.set('Data', nbt.bytes(metadata));
     levelMap.set('SkyLight', nbt.bytes(skyLight));
     levelMap.set('BlockLight', nbt.bytes(blockLight));
+    // Project extension (NOT Beta): coloured block light. Any reader that does
+    // not know this tag simply ignores it and sees a valid Beta chunk.
+    levelMap.set(COLORED_LIGHT_TAG, nbt.bytes(blockLightRg));
     levelMap.set('HeightMap', nbt.bytes(heightMap));
     levelMap.set('TerrainPopulated', nbt.byte(1));
     levelMap.set('Entities', nbt.list('compound', entityTags));
@@ -98,7 +120,7 @@ export class ChunkSerializer {
 
     const tsBlocks = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
     const tsMeta = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
-    const tsLight = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
+    const tsLight = new Uint16Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
     const tsHeight = new Int16Array(CHUNK_SIZE_X * CHUNK_SIZE_Z);
 
     const betaBlocks = blocksTag.value;
@@ -112,6 +134,11 @@ export class ChunkSerializer {
     const blockLightTag = level.get('BlockLight');
     const hasBlockLight = blockLightTag?.type === 'byteArray' && blockLightTag.value.length === 16384;
     const betaBlockLight = hasBlockLight ? blockLightTag.value : new Uint8Array(16384);
+
+    const coloredLightTag = level.get(COLORED_LIGHT_TAG);
+    const expectedColoredLength = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
+    const hasColoredLight = coloredLightTag?.type === 'byteArray' && coloredLightTag.value.length === expectedColoredLength;
+    const betaColoredLight = hasColoredLight ? coloredLightTag.value : new Uint8Array(0);
 
     const heightMapTag = level.get('HeightMap');
     const betaHeightMap = heightMapTag?.type === 'byteArray' ? heightMapTag.value : new Uint8Array(256);
@@ -134,7 +161,20 @@ export class ChunkSerializer {
           const sLight = (betaSkyLight[halfIndex]! >> shift) & 0x0F;
           const bLight = (betaBlockLight[halfIndex]! >> shift) & 0x0F;
 
-          tsLight[tsIndex] = sLight | (bLight << 4);
+          if (hasColoredLight) {
+            // Colour present: R and G are stored; B is whatever makes
+            // max(R,G,B) equal the persisted grayscale level.
+            const rg = betaColoredLight[tsIndex]!;
+            const r = rg & 0x0F;
+            const g = (rg >> 4) & 0x0F;
+            const b = Math.max(r, g) >= bLight ? Math.min(r, g) : bLight;
+            tsLight[tsIndex] = packLight(sLight, r, g, b);
+          } else {
+            // Legacy save (no colour tag): treat the grayscale level as white.
+            // The chunk is flagged for a light recompute on load so registry
+            // tints are applied without any destructive migration.
+            tsLight[tsIndex] = packLight(sLight, bLight, bLight, bLight);
+          }
         }
       }
     }
@@ -144,7 +184,9 @@ export class ChunkSerializer {
     chunk.loadLightData(tsLight);
     chunk.loadHeightmap(tsHeight);
     chunk.setTerrainPopulated(true);
-    chunk.setPersistedLightingDataLoaded(hasSkyLight && hasBlockLight);
+    // Only trust persisted lighting wholesale when the COLOUR is present too.
+    // A legacy grayscale chunk loads fine but is relit so tints appear.
+    chunk.setPersistedLightingDataLoaded(hasSkyLight && hasBlockLight && hasColoredLight);
 
     const tileTicksTag = level.get('TileTicks');
     const lastUpdateTag = level.get('LastUpdate');

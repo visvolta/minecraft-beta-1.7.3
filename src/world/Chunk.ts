@@ -10,6 +10,15 @@ import {
   CHUNK_SIZE_Z,
   CHUNK_VOLUME,
 } from './chunkConstants';
+import {
+  getSkyLight,
+  withSkyLight,
+  getBlockLightLevel,
+  getBlockLightRgb,
+  withBlockLightRgb,
+  withBlockLightLevel,
+  type BlockLightRgb,
+} from './generation/lighting/LightValue';
 
 /**
  * Blocks that do NOT count as "opaque" for heightmap purposes, matching
@@ -48,7 +57,7 @@ export class Chunk {
 
   private blocks: Uint8Array;
   private metadata: Uint8Array;
-  private light: Uint8Array;
+  private light: Uint16Array;
   private sectionNonAirCounts: Uint16Array;
   private dirty: boolean;
   /** When >0, setSkylight/setBlocklight skip markDirty (batched lighting). */
@@ -94,7 +103,7 @@ export class Chunk {
     this.chunkZ = chunkZ;
     this.blocks = new Uint8Array(CHUNK_VOLUME);
     this.metadata = new Uint8Array(CHUNK_VOLUME);
-    this.light = new Uint8Array(CHUNK_VOLUME);
+    this.light = new Uint16Array(CHUNK_VOLUME);
     this.sectionNonAirCounts = new Uint16Array(CHUNK_SECTION_COUNT);
     // Air is 0; Uint8Array is zero-filled by default.
     this.dirty = true;
@@ -290,7 +299,7 @@ export class Chunk {
     if (!this.isInBounds(localX, localY, localZ)) {
       return 0;
     }
-    return this.light[this.index(localX, localY, localZ)]! & 0x0F;
+    return getSkyLight(this.light[this.index(localX, localY, localZ)]!);
   }
 
   public setSkylight(localX: number, localY: number, localZ: number, value: number): void {
@@ -298,28 +307,61 @@ export class Chunk {
       return;
     }
     const idx = this.index(localX, localY, localZ);
-    if ((this.light[idx]! & 0x0F) === (value & 0x0F)) return;
-    this.light[idx] = (this.light[idx]! & 0xF0) | (value & 0x0F);
-    this.lightRevision += 1;
-    this.markPersistenceDirty();
-    if (this.lightBatchDepth > 0) this.lightBatchMeshDirty = true;
-    else this.markDirty();
+    const next = withSkyLight(this.light[idx]!, value);
+    if (next === this.light[idx]) return;
+    this.light[idx] = next;
+    this.onLightMutated();
   }
 
+  /**
+   * Scalar block light for gameplay: `max(R, G, B)`.
+   *
+   * Beta's 0..15 semantics are preserved exactly; see LightValue for why this
+   * is a channel maximum rather than a perceptual luminance.
+   */
   public getBlocklight(localX: number, localY: number, localZ: number): number {
     if (!this.isInBounds(localX, localY, localZ)) {
       return 0;
     }
-    return (this.light[this.index(localX, localY, localZ)]! >> 4) & 0x0F;
+    return getBlockLightLevel(this.light[this.index(localX, localY, localZ)]!);
   }
 
+  /** Sets an achromatic (white) block light of `value` on all three channels. */
   public setBlocklight(localX: number, localY: number, localZ: number, value: number): void {
     if (!this.isInBounds(localX, localY, localZ)) {
       return;
     }
     const idx = this.index(localX, localY, localZ);
-    if (((this.light[idx]! >> 4) & 0x0F) === (value & 0x0F)) return;
-    this.light[idx] = (this.light[idx]! & 0x0F) | ((value & 0x0F) << 4);
+    const next = withBlockLightLevel(this.light[idx]!, value);
+    if (next === this.light[idx]) return;
+    this.light[idx] = next;
+    this.onLightMutated();
+  }
+
+  /** Coloured block light at a cell. */
+  public getBlocklightRgb(localX: number, localY: number, localZ: number): BlockLightRgb {
+    if (!this.isInBounds(localX, localY, localZ)) return { r: 0, g: 0, b: 0 };
+    return getBlockLightRgb(this.light[this.index(localX, localY, localZ)]!);
+  }
+
+  /** Sets coloured block light at a cell. */
+  public setBlocklightRgb(localX: number, localY: number, localZ: number, r: number, g: number, b: number): void {
+    if (!this.isInBounds(localX, localY, localZ)) return;
+    const idx = this.index(localX, localY, localZ);
+    const next = withBlockLightRgb(this.light[idx]!, r, g, b);
+    if (next === this.light[idx]) return;
+    this.light[idx] = next;
+    this.onLightMutated();
+  }
+
+  /** Raw packed word. For meshing/serialisation hot paths only. */
+  public getPackedLight(localX: number, localY: number, localZ: number): number {
+    if (!this.isInBounds(localX, localY, localZ)) return 0;
+    return this.light[this.index(localX, localY, localZ)]!;
+  }
+
+  /** Shared bookkeeping for every light mutation. */
+  private onLightMutated(): void {
     this.lightRevision += 1;
     this.markPersistenceDirty();
     if (this.lightBatchDepth > 0) this.lightBatchMeshDirty = true;
@@ -528,7 +570,7 @@ export class Chunk {
     return this.metadata;
   }
 
-  public getLightDataView(): Uint8Array {
+  public getLightDataView(): Uint16Array {
     return this.light;
   }
 
@@ -570,8 +612,8 @@ export class Chunk {
     return new Uint8Array(this.metadata);
   }
 
-  public copyLight(): Uint8Array {
-    return new Uint8Array(this.light);
+  public copyLight(): Uint16Array {
+    return new Uint16Array(this.light);
   }
 
   public copyHeightmap(): Int16Array | undefined {
@@ -589,7 +631,7 @@ export class Chunk {
     this.markDirty();
   }
 
-  public loadLightData(data: Uint8Array): void {
+  public loadLightData(data: Uint16Array): void {
     if (data.length !== CHUNK_VOLUME) {
       throw new RangeError(`Light array length ${data.length} does not match chunk volume ${CHUNK_VOLUME}.`);
     }

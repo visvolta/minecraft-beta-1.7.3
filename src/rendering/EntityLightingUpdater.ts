@@ -19,7 +19,7 @@ interface EntityLightingUniforms {
   readonly uSkylightSubtracted?: { value: number };
   readonly uSunBrightnessFactor?: { value: number };
   readonly uStaticSkyLight?: { value: number };
-  readonly uStaticBlockLight?: { value: number };
+  readonly uStaticBlockLightRgb?: { value: { x: number; y: number; z: number } };
 }
 
 interface CacheEntry {
@@ -28,6 +28,9 @@ interface CacheEntry {
   blockZ: number;
   skyLight: number;
   blockLight: number;
+  blockR: number;
+  blockG: number;
+  blockB: number;
   /** Atmosphere generation this sample was written for. */
   generation: number;
 }
@@ -104,17 +107,29 @@ export class EntityLightingUpdater {
 
     let skyLight: number;
     let blockLight: number;
+    let blockR: number;
+    let blockG: number;
+    let blockB: number;
     if (stale) {
       skyLight = this.world.getSkylight(blockX, blockY, blockZ);
       blockLight = this.world.getBlocklight(blockX, blockY, blockZ);
-      this.cache.set(material, { blockX, blockY, blockZ, skyLight, blockLight, generation: this.generation });
+      const rgb = this.world.getBlocklightRgb(blockX, blockY, blockZ);
+      blockR = rgb.r; blockG = rgb.g; blockB = rgb.b;
+      // Same cache/dirty policy as before: sampled only when the entity's
+      // block cell or the light generation changes, never per frame.
+      this.cache.set(material, { blockX, blockY, blockZ, skyLight, blockLight, blockR, blockG, blockB, generation: this.generation });
     } else {
       skyLight = cached.skyLight;
       blockLight = cached.blockLight;
+      blockR = cached.blockR; blockG = cached.blockG; blockB = cached.blockB;
     }
 
     if (uniforms.uStaticSkyLight !== undefined) uniforms.uStaticSkyLight.value = skyLight;
-    if (uniforms.uStaticBlockLight !== undefined) uniforms.uStaticBlockLight.value = blockLight;
+    if (uniforms.uStaticBlockLightRgb !== undefined) {
+      const target = uniforms.uStaticBlockLightRgb.value;
+      target.x = blockR; target.y = blockG; target.z = blockB;
+    }
+    void blockLight;
     if (uniforms.uSkylightSubtracted !== undefined) uniforms.uSkylightSubtracted.value = this.skylightSubtracted;
     if (uniforms.uSunBrightnessFactor !== undefined) uniforms.uSunBrightnessFactor.value = this.sunBrightnessFactor;
   }

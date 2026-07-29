@@ -393,7 +393,7 @@ export class ChunkGenerationQueue {
       // integration, so cross-chunk seams remain the main thread's job.
       let lightingAdopted = false;
       if (result.light !== undefined && result.light.byteLength > 0) {
-        chunk.loadLightData(new Uint8Array(result.light));
+        chunk.loadLightData(new Uint16Array(result.light));
         lightingAdopted = true;
       }
       if (result.featuresJson) {

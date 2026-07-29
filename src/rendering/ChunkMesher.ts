@@ -10,6 +10,7 @@ import { vegetationTintKind, type VegetationColorProvider } from '../world/gener
 import type { TextureAtlas } from '../assets/TextureAtlas';
 import type { Chunk } from '../world/Chunk';
 import type { ChunkManager } from '../world/ChunkManager';
+import { getSkyLight, getBlockLightLevel, getBlockLightRgb } from '../world/generation/lighting/LightValue';
 import {
   AIR_BLOCK_ID,
   CHUNK_SECTION_COUNT,
@@ -58,12 +59,38 @@ interface FaceDef {
 
 interface LightSample {
   readonly sky: number;
+  /** Scalar block level = max(R,G,B); kept for AO/smoothing comparisons. */
   readonly block: number;
+  /** Coloured block light channels (0..15 each). */
+  readonly blockR: number;
+  readonly blockG: number;
+  readonly blockB: number;
+}
+
+/**
+ * Reads one cell's light as a single packed word and decodes it through the
+ * LightValue helpers, so meshing never open-codes the bit layout.
+ */
+function sampleFrom(chunk: Chunk, lx: number, ly: number, lz: number): LightSample {
+  const packed = chunk.getPackedLight(lx, ly, lz);
+  const rgb = getBlockLightRgb(packed);
+  return {
+    sky: getSkyLight(packed),
+    block: getBlockLightLevel(packed),
+    blockR: rgb.r,
+    blockG: rgb.g,
+    blockB: rgb.b,
+  };
 }
 
 interface VertexSmoothLighting {
   readonly skyLevels: Quad4;
+  /** Scalar block level per vertex, retained for comparisons/debug. */
   readonly blockLevels: Quad4;
+  /** Per-vertex coloured block light. */
+  readonly blockR: Quad4;
+  readonly blockG: Quad4;
+  readonly blockB: Quad4;
   readonly aoFactors: Quad4;
   readonly flipDiagonal: boolean;
 }
@@ -222,6 +249,15 @@ class MeshBuffers {
   public readonly tintColors = new FloatBuilder(4096);
   /** Normalized uint8x4: sky, block, ao, faceBrightness. */
   public readonly packedLight = new Uint8Builder(4096);
+  /**
+   * AO and face brightness, displaced from packedLight so the four light bytes
+   * can carry (sky, R, G, B).
+   *
+   * This is a SEPARATE Uint8 attribute of size 2. Three.js keeps attributes in
+   * their own arrays rather than one interleaved struct, so this costs exactly
+   * 2 bytes per vertex with no alignment padding.
+   */
+  public readonly surfaceShade = new Uint8Builder(2048);
   public readonly fluidTextureKinds = new FloatBuilder(1024);
   public readonly fluidFrameUvs = new FloatBuilder(2048);
   public readonly indices = new IndexBuilder(6144);
@@ -232,6 +268,7 @@ class MeshBuffers {
     this.uvs.clear();
     this.tintColors.clear();
     this.packedLight.clear();
+    this.surfaceShade.clear();
     this.fluidTextureKinds.clear();
     this.fluidFrameUvs.clear();
     this.indices.clear();
@@ -254,6 +291,9 @@ class MeshBuffers {
     tint: readonly [number, number, number],
     skyLevels: Quad4,
     blockLevels: Quad4,
+    blockRLevels: Quad4,
+    blockGLevels: Quad4,
+    blockBLevels: Quad4,
     aoByVertex: Quad4 = DEFAULT_VALUES,
     flipDiagonal = false,
   ): void {
@@ -264,7 +304,10 @@ class MeshBuffers {
       const corner = face.corners[i]!;
       const [cx, cy, cz] = corner;
       const sky = skyLevels[i]!;
-      const block = blockLevels[i]!;
+      void blockLevels;
+      const blockR = blockRLevels[i]!;
+      const blockG = blockGLevels[i]!;
+      const blockB = blockBLevels[i]!;
       const ao = aoByVertex[i]!;
 
       this.positions.push3(x + cx, y + cy, z + cz);
@@ -279,7 +322,8 @@ class MeshBuffers {
       }
 
       this.tintColors.push3(tintR, tintG, tintB);
-      this.packedLight.push4(packLightByte(sky), packLightByte(block), packUnitByte(ao), packUnitByte(1));
+      this.packedLight.push4(packLightByte(sky), packLightByte(blockR), packLightByte(blockG), packLightByte(blockB));
+      this.surfaceShade.push2(packUnitByte(ao), packUnitByte(1));
       this.pushFluidPlaceholder();
     }
 
@@ -311,7 +355,8 @@ class MeshBuffers {
     this.positions.push3(x, y + 1, z);
     for (let i = 0; i < 4; i++) {
       this.tintColors.push3(tintR, tintG, tintB);
-      this.packedLight.push4(packLightByte(light.sky), packLightByte(light.block), packUnitByte(1), packUnitByte(1));
+      this.packedLight.push4(packLightByte(light.sky), packLightByte(light.blockR), packLightByte(light.blockG), packLightByte(light.blockB));
+      this.surfaceShade.push2(packUnitByte(1), packUnitByte(1));
       this.pushFluidPlaceholder();
     }
     this.uvs.push2(u0, v1);
@@ -327,7 +372,8 @@ class MeshBuffers {
     this.positions.push3(x, y + 1, z + 1);
     for (let i = 0; i < 4; i++) {
       this.tintColors.push3(tintR, tintG, tintB);
-      this.packedLight.push4(packLightByte(light.sky), packLightByte(light.block), packUnitByte(1), packUnitByte(1));
+      this.packedLight.push4(packLightByte(light.sky), packLightByte(light.blockR), packLightByte(light.blockG), packLightByte(light.blockB));
+      this.surfaceShade.push2(packUnitByte(1), packUnitByte(1));
       this.pushFluidPlaceholder();
     }
     this.uvs.push2(u0, v1);
@@ -382,6 +428,9 @@ class MeshBuffers {
     tint: readonly [number, number, number],
     skyLevels: Quad4,
     blockLevels: Quad4,
+    blockRLevels: Quad4,
+    blockGLevels: Quad4,
+    blockBLevels: Quad4,
     aoByVertex: Quad4 = DEFAULT_VALUES,
     flipDiagonal = false,
   ): void {
@@ -441,12 +490,16 @@ class MeshBuffers {
     }
     for (let i = 0; i < 4; i++) {
       const sky = skyLevels[i]!;
-      const block = blockLevels[i]!;
+      void blockLevels;
+      const blockR = blockRLevels[i]!;
+      const blockG = blockGLevels[i]!;
+      const blockB = blockBLevels[i]!;
       const ao = aoByVertex[i]!;
       this.positions.push3(px[i]!, py[i]!, pz[i]!);
       this.uvs.push2(faceUvs[i * 2]!, faceUvs[i * 2 + 1]!);
       this.tintColors.push3(tintR, tintG, tintB);
-      this.packedLight.push4(packLightByte(sky), packLightByte(block), packUnitByte(ao), packUnitByte(1));
+      this.packedLight.push4(packLightByte(sky), packLightByte(blockR), packLightByte(blockG), packLightByte(blockB));
+      this.surfaceShade.push2(packUnitByte(ao), packUnitByte(1));
       this.pushFluidPlaceholder();
     }
     if (flipDiagonal) {
@@ -484,7 +537,8 @@ class MeshBuffers {
       this.positions.push3(vertex[0], vertex[1], vertex[2]);
       this.uvs.push2(uvs[i * 2]!, uvs[i * 2 + 1]!);
       this.tintColors.push3(tintR, tintG, tintB);
-      this.packedLight.push4(packLightByte(light.sky), packLightByte(light.block), packUnitByte(ao), packUnitByte(faceBrightness));
+      this.packedLight.push4(packLightByte(light.sky), packLightByte(light.blockR), packLightByte(light.blockG), packLightByte(light.blockB));
+      this.surfaceShade.push2(packUnitByte(ao), packUnitByte(faceBrightness));
       if (this.fluidLayout) {
         this.fluidTextureKinds.push(fluidTextureKind);
         this.fluidFrameUvs.push2(frameUv[i * 2]!, frameUv[i * 2 + 1]!);
@@ -514,7 +568,10 @@ class MeshBuffers {
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(tc, 3));
     // Normalized so the shader reads sky/block as 0..15 and ao/brightness as 0..1.
+    // xyzw = skylight, blockR, blockG, blockB (each normalized 0..15 -> 0..1).
     geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(pl, 4, true));
+    const ss = new Uint8Array(this.surfaceShade.view());
+    geometry.setAttribute('surfaceShade', new THREE.Uint8BufferAttribute(ss, 2, true));
     if (this.fluidLayout) {
       const fk = new Float32Array(this.fluidTextureKinds.view());
       const ff = new Float32Array(this.fluidFrameUvs.view());
@@ -633,28 +690,22 @@ export class ChunkMesher {
 
   private getLightComponentsAt(chunk: Chunk, lx: number, ly: number, lz: number): LightSample {
     if (ly < 0) {
-      return { sky: 0, block: 0 };
+      return { sky: 0, block: 0, blockR: 0, blockG: 0, blockB: 0 };
     }
     if (ly >= CHUNK_SIZE_Y) {
-      return { sky: 15, block: 0 };
+      return { sky: 15, block: 0, blockR: 0, blockG: 0, blockB: 0 };
     }
 
     if (chunk.isInBounds(lx, ly, lz)) {
-      return {
-        sky: chunk.getSkylight(lx, ly, lz),
-        block: chunk.getBlocklight(lx, ly, lz),
-      };
+      return sampleFrom(chunk, lx, ly, lz);
     }
 
     const neighbour = this.getChunkAndLocal(chunk, lx, lz);
     if (neighbour === undefined) {
-      return { sky: ly >= 64 ? 15 : 0, block: 0 };
+      return { sky: ly >= 64 ? 15 : 0, block: 0, blockR: 0, blockG: 0, blockB: 0 };
     }
 
-    return {
-      sky: neighbour.chunk.getSkylight(neighbour.localX, ly, neighbour.localZ),
-      block: neighbour.chunk.getBlocklight(neighbour.localX, ly, neighbour.localZ),
-    };
+    return sampleFrom(neighbour.chunk, neighbour.localX, ly, neighbour.localZ);
   }
 
   private getMaxNeighborLight(chunk: Chunk, x: number, y: number, z: number): LightSample {
@@ -665,9 +716,14 @@ export class ChunkMesher {
     const north = this.getLightComponentsAt(chunk, x, y, z - 1);
     const up = this.getLightComponentsAt(chunk, x, y + 1, z);
     
+    // Per-channel maxima: an adjacent red source and an adjacent warm source
+    // must both contribute rather than the brighter one erasing the other.
     return {
       sky: Math.max(selfLight.sky, east.sky, west.sky, south.sky, north.sky, up.sky),
       block: Math.max(selfLight.block, east.block, west.block, south.block, north.block, up.block),
+      blockR: Math.max(selfLight.blockR, east.blockR, west.blockR, south.blockR, north.blockR, up.blockR),
+      blockG: Math.max(selfLight.blockG, east.blockG, west.blockG, south.blockG, north.blockG, up.blockG),
+      blockB: Math.max(selfLight.blockB, east.blockB, west.blockB, south.blockB, north.blockB, up.blockB),
     };
   }
 
@@ -796,6 +852,9 @@ export class ChunkMesher {
       return {
         skyLevels: [light.sky, light.sky, light.sky, light.sky],
         blockLevels: [light.block, light.block, light.block, light.block],
+        blockR: [light.blockR, light.blockR, light.blockR, light.blockR],
+        blockG: [light.blockG, light.blockG, light.blockG, light.blockG],
+        blockB: [light.blockB, light.blockB, light.blockB, light.blockB],
         aoFactors: DEFAULT_VALUES,
         flipDiagonal: false,
       };
@@ -840,6 +899,9 @@ export class ChunkMesher {
       return {
         sky: (a.sky + b.sky + c.sky + d.sky) / 4,
         block: (a.block + b.block + c.block + d.block) / 4,
+        blockR: (a.blockR + b.blockR + c.blockR + d.blockR) / 4,
+        blockG: (a.blockG + b.blockG + c.blockG + d.blockG) / 4,
+        blockB: (a.blockB + b.blockB + c.blockB + d.blockB) / 4,
       };
     };
 
@@ -871,6 +933,9 @@ export class ChunkMesher {
     return {
       skyLevels: [lights[0]!.sky, lights[1]!.sky, lights[2]!.sky, lights[3]!.sky],
       blockLevels: [lights[0]!.block, lights[1]!.block, lights[2]!.block, lights[3]!.block],
+      blockR: [lights[0]!.blockR, lights[1]!.blockR, lights[2]!.blockR, lights[3]!.blockR],
+      blockG: [lights[0]!.blockG, lights[1]!.blockG, lights[2]!.blockG, lights[3]!.blockG],
+      blockB: [lights[0]!.blockB, lights[1]!.blockB, lights[2]!.blockB, lights[3]!.blockB],
       aoFactors: [ao0, ao1, ao2, ao3],
       flipDiagonal: ao0 + ao2 > ao1 + ao3,
     };
@@ -921,7 +986,7 @@ export class ChunkMesher {
       const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
       buffers.pushFace(
         face, x, y, z, uvRect, tint,
-        smoothLighting.skyLevels, smoothLighting.blockLevels,
+        smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.blockR, smoothLighting.blockG, smoothLighting.blockB,
         smoothLighting.aoFactors, smoothLighting.flipDiagonal,
       );
     }
@@ -954,7 +1019,7 @@ export class ChunkMesher {
       const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
       buffers.pushFace(
         face, x, y, z, uvRect, tint,
-        smoothLighting.skyLevels, smoothLighting.blockLevels,
+        smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.blockR, smoothLighting.blockG, smoothLighting.blockB,
         smoothLighting.aoFactors, smoothLighting.flipDiagonal,
       );
     }
@@ -1010,7 +1075,7 @@ export class ChunkMesher {
         const uvRect = this.getSafeUvRect(textureName);
         const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
         const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-        buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
+        buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block], [light.blockR, light.blockR, light.blockR, light.blockR], [light.blockG, light.blockG, light.blockG, light.blockG], [light.blockB, light.blockB, light.blockB, light.blockB]);
       }
       return;
     }
@@ -1039,7 +1104,7 @@ export class ChunkMesher {
         const uvRect = this.getSafeUvRect(textureName);
         const tint = resolveBlockTint(definition, slot);
         const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
-        buffers.pushCactusFace(i, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
+        buffers.pushCactusFace(i, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.blockR, smoothLighting.blockG, smoothLighting.blockB, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
       }
       return;
     }
@@ -1066,7 +1131,7 @@ export class ChunkMesher {
     // call existing multi-block path via building only this fire: use buildFires logic inline by scanning one block.
     // Simplest parity: run buildFires on chunk is wrong. Port ground/wall fire for one cell:
     const light = this.getLightComponentsAt(chunk, x, y, z);
-    const lightSample: LightSample = { sky: light.sky, block: light.block };
+    const lightSample: LightSample = light;
     const below = this.getBlockAt(chunk, x, y - 1, z);
     const isGroundFire = this.isBlockNormalCube(below) || this.canBlockCatchFire(below);
     const flipUvs = ((Math.floor(x / 2) + Math.floor(y / 2) + Math.floor(z / 2)) & 1) === 1;
@@ -1115,7 +1180,7 @@ export class ChunkMesher {
       const uvRect = this.getSafeUvRect(textureName);
       const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
       const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-      buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
+      buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block], [light.blockR, light.blockR, light.blockR, light.blockR], [light.blockG, light.blockG, light.blockG, light.blockG], [light.blockB, light.blockB, light.blockB, light.blockB]);
     }
   }
 
@@ -1315,6 +1380,9 @@ export class ChunkMesher {
               tint,
               smoothLighting.skyLevels,
               smoothLighting.blockLevels,
+              smoothLighting.blockR,
+              smoothLighting.blockG,
+              smoothLighting.blockB,
               smoothLighting.aoFactors,
               smoothLighting.flipDiagonal,
             );
@@ -1438,7 +1506,7 @@ export class ChunkMesher {
               const uvRect = this.getSafeUvRect(textureName);
               const tint = this.resolveVegetationTint(blockId, face.slot!, resolveBlockTint(definition, face.slot!), chunk.chunkX * CHUNK_SIZE_X + x, chunk.chunkZ * CHUNK_SIZE_Z + z);
               const light = this.getLightComponentsAt(chunk, x + face.dx, y + face.dy, z + face.dz);
-              buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
+              buffers.pushFace(face, x, y, z, uvRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block], [light.blockR, light.blockR, light.blockR, light.blockR], [light.blockG, light.blockG, light.blockG, light.blockG], [light.blockB, light.blockB, light.blockB, light.blockB]);
             }
           } else if (renderType === 'redstone_wire') {
             this.buildRedstoneWire(buffers, chunk, x, y, z, blockId, definition);
@@ -1466,7 +1534,7 @@ export class ChunkMesher {
               const uvRect = this.getSafeUvRect(textureName);
               const tint = resolveBlockTint(definition, slot);
               const smoothLighting = this.getSmoothLighting(chunk, x, y, z, blockId, face);
-              buffers.pushCactusFace(i, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
+              buffers.pushCactusFace(i, x, y, z, uvRect, tint, smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.blockR, smoothLighting.blockG, smoothLighting.blockB, smoothLighting.aoFactors, smoothLighting.flipDiagonal);
             }
           } else if (renderType === 'snow') {
             // Beta BlockSnow: flat layer at height 1/8
@@ -1521,7 +1589,7 @@ export class ChunkMesher {
           if (blockId !== BlockIds.Fire) continue;
 
           const light = this.getLightComponentsAt(chunk, x, y, z);
-          const lightSample: LightSample = { sky: light.sky, block: light.block };
+          const lightSample: LightSample = light;
 
           const below = this.getBlockAt(chunk, x, y - 1, z);
           const isGroundFire = this.isBlockNormalCube(below) || this.canBlockCatchFire(below);
@@ -1714,6 +1782,9 @@ export class ChunkMesher {
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
       [light.block, light.block, light.block, light.block],
+      [light.blockR, light.blockR, light.blockR, light.blockR],
+      [light.blockG, light.blockG, light.blockG, light.blockG],
+      [light.blockB, light.blockB, light.blockB, light.blockB],
     );
 
     // +X side
@@ -1723,6 +1794,9 @@ export class ChunkMesher {
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
       [light.block, light.block, light.block, light.block],
+      [light.blockR, light.blockR, light.blockR, light.blockR],
+      [light.blockG, light.blockG, light.blockG, light.blockG],
+      [light.blockB, light.blockB, light.blockB, light.blockB],
     );
 
     // -X side
@@ -1732,6 +1806,9 @@ export class ChunkMesher {
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
       [light.block, light.block, light.block, light.block],
+      [light.blockR, light.blockR, light.blockR, light.blockR],
+      [light.blockG, light.blockG, light.blockG, light.blockG],
+      [light.blockB, light.blockB, light.blockB, light.blockB],
     );
 
     // +Z side
@@ -1741,6 +1818,9 @@ export class ChunkMesher {
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
       [light.block, light.block, light.block, light.block],
+      [light.blockR, light.blockR, light.blockR, light.blockR],
+      [light.blockG, light.blockG, light.blockG, light.blockG],
+      [light.blockB, light.blockB, light.blockB, light.blockB],
     );
 
     // -Z side
@@ -1750,6 +1830,9 @@ export class ChunkMesher {
       x, y, z, uvRect, tint,
       [light.sky, light.sky, light.sky, light.sky],
       [light.block, light.block, light.block, light.block],
+      [light.blockR, light.blockR, light.blockR, light.blockR],
+      [light.blockG, light.blockG, light.blockG, light.blockG],
+      [light.blockB, light.blockB, light.blockB, light.blockB],
     );
   }
 
@@ -1826,7 +1909,7 @@ export class ChunkMesher {
 
             buffers.pushFace(
               face, x, y, z, uvRect, tint,
-              smoothLighting.skyLevels, smoothLighting.blockLevels,
+              smoothLighting.skyLevels, smoothLighting.blockLevels, smoothLighting.blockR, smoothLighting.blockG, smoothLighting.blockB,
               smoothLighting.aoFactors, smoothLighting.flipDiagonal,
             );
           }
@@ -1882,6 +1965,9 @@ export class ChunkMesher {
                 tint,
                 smoothLighting.skyLevels,
                 smoothLighting.blockLevels,
+                smoothLighting.blockR,
+                smoothLighting.blockG,
+                smoothLighting.blockB,
                 smoothLighting.aoFactors,
                 smoothLighting.flipDiagonal,
               );
@@ -2548,6 +2634,9 @@ export class ChunkMesher {
     const light = this.getLightComponentsAt(chunk, x, y, z);
     const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
     const b = [light.block, light.block, light.block, light.block] as Quad4;
+    const br = [light.blockR, light.blockR, light.blockR, light.blockR] as Quad4;
+    const bg = [light.blockG, light.blockG, light.blockG, light.blockG] as Quad4;
+    const bb = [light.blockB, light.blockB, light.blockB, light.blockB] as Quad4;
 
     const resolveTex = (slot: 'top' | 'bottom' | 'side') => {
       return resolveSlabTexture(slot, metadata);
@@ -2562,7 +2651,7 @@ export class ChunkMesher {
       const uvRect = this.getSafeUvRect(texName);
       buffers.pushFace(
         { nx, ny, nz, dx, dy, dz, slot, corners },
-        x, y, z, uvRect, tint, l, b
+        x, y, z, uvRect, tint, l, b, br, bg, bb
       );
     };
 
@@ -2628,6 +2717,9 @@ export class ChunkMesher {
     const light = this.getMaxNeighborLight(chunk, x, y, z);
     const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
     const b = [light.block, light.block, light.block, light.block] as Quad4;
+    const br = [light.blockR, light.blockR, light.blockR, light.blockR] as Quad4;
+    const bg = [light.blockG, light.blockG, light.blockG, light.blockG] as Quad4;
+    const bb = [light.blockB, light.blockB, light.blockB, light.blockB] as Quad4;
 
     const pushQuadFromBounds = (
       dir: FaceDirection,
@@ -2635,7 +2727,7 @@ export class ChunkMesher {
       normal: [number, number, number]
     ) => {
       if (!uvRect) return;
-      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b, br, bg, bb);
     };
 
     pushQuadFromBounds(FaceDirection.EAST, [maxX, 0, minZ], [maxX, 1, minZ], [maxX, 1, maxZ], [maxX, 0, maxZ], [1, 0, 0]);
@@ -2662,9 +2754,12 @@ export class ChunkMesher {
     const light = this.getMaxNeighborLight(chunk, x, y, z);
     const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
     const b = [light.block, light.block, light.block, light.block] as Quad4;
+    const br = [light.blockR, light.blockR, light.blockR, light.blockR] as Quad4;
+    const bg = [light.blockG, light.blockG, light.blockG, light.blockG] as Quad4;
+    const bb = [light.blockB, light.blockB, light.blockB, light.blockB] as Quad4;
 
     const pushQuadFromBounds = (dir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
-      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b, br, bg, bb);
     };
 
     pushQuadFromBounds(FaceDirection.EAST, [maxX, minY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [maxX, minY, maxZ], [1, 0, 0]);
@@ -2689,9 +2784,12 @@ export class ChunkMesher {
     const light = this.getMaxNeighborLight(chunk, x, y, z);
     const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
     const b = [light.block, light.block, light.block, light.block] as Quad4;
+    const br = [light.blockR, light.blockR, light.blockR, light.blockR] as Quad4;
+    const bg = [light.blockG, light.blockG, light.blockG, light.blockG] as Quad4;
+    const bb = [light.blockB, light.blockB, light.blockB, light.blockB] as Quad4;
 
     const pushQuadFromBounds = (dir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
-      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: dir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b, br, bg, bb);
     };
 
     pushQuadFromBounds(FaceDirection.EAST, [maxX, minY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [maxX, minY, maxZ], [1, 0, 0]);
@@ -2726,9 +2824,12 @@ export class ChunkMesher {
     const light = this.getMaxNeighborLight(chunk, x, y, z);
     const l = [light.sky, light.sky, light.sky, light.sky] as Quad4;
     const b = [light.block, light.block, light.block, light.block] as Quad4;
+    const br = [light.blockR, light.blockR, light.blockR, light.blockR] as Quad4;
+    const bg = [light.blockG, light.blockG, light.blockG, light.blockG] as Quad4;
+    const bb = [light.blockB, light.blockB, light.blockB, light.blockB] as Quad4;
 
     const pushQuadFromBounds = (faceDir: FaceDirection, p0: any, p1: any, p2: any, p3: any, normal: any) => {
-      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: faceDir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b);
+      buffers.pushFace({ nx: normal[0], ny: normal[1], nz: normal[2], dx: normal[0], dy: normal[1], dz: normal[2], dir: faceDir, corners: [p0, p1, p2, p3] as any }, x, y, z, uvRect, tint, l, b, br, bg, bb);
     };
 
     pushQuadFromBounds(FaceDirection.EAST, [maxX, minY, minZ], [maxX, maxY, minZ], [maxX, maxY, maxZ], [maxX, minY, maxZ], [1, 0, 0]);
@@ -2762,7 +2863,7 @@ export class ChunkMesher {
     const light = this.getMaxNeighborLight(chunk, x, y, z);
 
     const pushBaseFace = (nx: number, ny: number, nz: number, dx: number, dy: number, dz: number, corners: [Corner, Corner, Corner, Corner], _faceDir: FaceDirection) => {
-      buffers.pushFace({ nx, ny, nz, dx, dy, dz, slot: 'side', corners }, x, y, z, cobbleRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block]);
+      buffers.pushFace({ nx, ny, nz, dx, dy, dz, slot: 'side', corners }, x, y, z, cobbleRect, tint, [light.sky, light.sky, light.sky, light.sky], [light.block, light.block, light.block, light.block], [light.blockR, light.blockR, light.blockR, light.blockR], [light.blockG, light.blockG, light.blockG, light.blockG], [light.blockB, light.blockB, light.blockB, light.blockB]);
     };
 
     // 1. Render Base Plate (Cobblestone)

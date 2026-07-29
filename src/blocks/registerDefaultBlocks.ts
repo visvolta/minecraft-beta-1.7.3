@@ -1,6 +1,6 @@
 import type { BlockRegistry } from './BlockRegistry';
 import { BlockIds } from './BlockId';
-import type { BlockDefinition, TintColor } from './BlockDefinition';
+import type { BlockDefinition, BlockLightEmission, TintColor } from './BlockDefinition';
 import { DEFAULT_BLOCK_SOUND, type BlockSoundDefinition } from '../audio/BlockSoundMaterial';
 import { BETA_BLOCK_SOUNDS } from '../audio/betaBlockSounds';
 
@@ -56,6 +56,22 @@ const LEAF_TINT: TintColor = [0x4e / 255, 0xe0 / 255, 0x31 / 255];
 /**
  * Registers the initial Beta 1.7.3 blocks required for this stage.
  */
+/**
+ * Visual light colours (project extension, NOT Beta).
+ *
+ * Beta has a single grayscale block-light channel; these tints are additive
+ * presentation only and never change a block's gameplay light LEVEL. The
+ * registry is the sole authority, so a mod can register any RGB it likes with
+ * no engine change. Channels are 0..1 and are multiplied by the Beta level.
+ */
+const LIGHT_COLOR_TORCH = [1.0, 0.82, 0.55] as const;
+const LIGHT_COLOR_REDSTONE = [1.0, 0.15, 0.10] as const;
+const LIGHT_COLOR_GLOWSTONE = [1.0, 0.90, 0.62] as const;
+const LIGHT_COLOR_LAVA = [1.0, 0.55, 0.20] as const;
+const LIGHT_COLOR_FIRE = [1.0, 0.65, 0.30] as const;
+const LIGHT_COLOR_PORTAL = [0.65, 0.30, 1.0] as const;
+const LIGHT_COLOR_FURNACE = [1.0, 0.78, 0.45] as const;
+
 export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerBlock(registry, {
     id: BlockIds.Air,
@@ -249,7 +265,8 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     textures: { all: 'lava' },
     renderType: 'fluid',
     lightOpacity: 3,
-    lightEmission: 15,
+    // Beta level 15; the tint is the project's colour extension.
+    lightEmission: { level: 15, color: LIGHT_COLOR_LAVA },
   });
 
   registerBlock(registry, {
@@ -590,15 +607,16 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     textures: { all: 'lava' },
     renderType: 'fluid',
     lightOpacity: 3,
-    lightEmission: 15,
+    // Beta level 15; the tint is the project's colour extension.
+    lightEmission: { level: 15, color: LIGHT_COLOR_LAVA },
   });
 
-  const registerSimple = (id: number, name: string, displayName: string, textures: { all?: string; top?: string; bottom?: string; side?: string; front?: string }, options: { solid: boolean; transparent: boolean; replaceable: boolean; renderType: 'opaque' | 'cutout' | 'cross' | 'cactus' | 'snow' | 'ice'; blocksWeather?: boolean; lightOpacity?: number; lightEmission?: number }): void => {
+  const registerSimple = (id: number, name: string, displayName: string, textures: { all?: string; top?: string; bottom?: string; side?: string; front?: string }, options: { solid: boolean; transparent: boolean; replaceable: boolean; renderType: 'opaque' | 'cutout' | 'cross' | 'cactus' | 'snow' | 'ice'; blocksWeather?: boolean; lightOpacity?: number; lightEmission?: number | BlockLightEmission }): void => {
     registerBlock(registry, { id, name, displayName, textures, ...options });
   };
 
   registerSimple(BlockIds.Sapling, 'sapling', 'Sapling', { all: 'sapling_oak' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross' });
-  registerSimple(BlockIds.Fire, 'fire', 'Fire', { all: 'fire_layer_0' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', blocksWeather: false, lightEmission: 15 });
+  registerSimple(BlockIds.Fire, 'fire', 'Fire', { all: 'fire_layer_0' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross', blocksWeather: false, lightEmission: { level: 15, color: LIGHT_COLOR_FIRE } });
   registerSimple(BlockIds.Farmland, 'farmland', 'Farmland', { top: 'farmland_dry', bottom: 'dirt', side: 'dirt' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Crops, 'wheat', 'Wheat', { all: 'wheat_stage_0' }, { solid: false, transparent: true, replaceable: true, renderType: 'cross' });
   // Snow layer: non-solid, non-full block, cutout render with custom height
@@ -655,7 +673,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   // Torches use the dedicated 3D `buildTorch` mesher path (post + top face,
   // tilted for wall mounts). That path is only reached from the 'cutout'
   // branch; 'cross' would fall through to the generic crossed-planes model.
-  registerSimple(BlockIds.Torch, 'torch', 'Torch', { all: 'torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout', lightEmission: 14 });
+  registerSimple(BlockIds.Torch, 'torch', 'Torch', { all: 'torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout', lightEmission: { level: 14, color: LIGHT_COLOR_TORCH } });
   registerSimple(BlockIds.Ladder, 'ladder', 'Ladder', { all: 'ladder' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.SignPost, 'sign_post', 'Sign', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
   registerSimple(BlockIds.WallSign, 'wall_sign', 'Wall Sign', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
@@ -673,7 +691,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.Rail, 'rail', 'Rail', { all: 'rail_normal' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.PoweredRail, 'powered_rail', 'Powered Rail', { all: 'rail_golden' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.DetectorRail, 'detector_rail', 'Detector Rail', { all: 'rail_detector' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
-  registerSimple(BlockIds.RedstoneTorchOn, 'redstone_torch_on', 'Redstone Torch', { all: 'redstone_torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout', lightEmission: 7 });
+  registerSimple(BlockIds.RedstoneTorchOn, 'redstone_torch_on', 'Redstone Torch', { all: 'redstone_torch_on' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout', lightEmission: { level: 7, color: LIGHT_COLOR_REDSTONE } });
   registerSimple(BlockIds.RedstoneTorchOff, 'redstone_torch_off', 'Redstone Torch (Off)', { all: 'redstone_torch_off' }, { solid: false, transparent: true, replaceable: true, renderType: 'cutout' });
 
   registerBlock(registry, {
@@ -697,7 +715,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.BirchPlanks, 'birch_planks', 'Birch Wood Planks', { all: 'planks_birch' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.CraftingTable, 'crafting_table', 'Crafting Table', { top: 'crafting_table_top', bottom: 'planks_oak', side: 'crafting_table_side', front: 'crafting_table_front' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Furnace, 'furnace', 'Furnace', { top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front_off' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
-  registerSimple(BlockIds.FurnaceBurning, 'lit_furnace', 'Furnace', { top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front_on' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: 13 });
+  registerSimple(BlockIds.FurnaceBurning, 'lit_furnace', 'Furnace', { top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_side', front: 'furnace_front_on' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: { level: 13, color: LIGHT_COLOR_FURNACE } });
   registerSimple(BlockIds.Bookshelf, 'bookshelf', 'Bookshelf', { top: 'planks_oak', bottom: 'planks_oak', side: 'bookshelf' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.Wool, 'wool', 'White Wool', { all: 'wool_colored_white' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.TNT, 'tnt', 'TNT', { top: 'tnt_top', bottom: 'tnt_bottom', side: 'tnt_side' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
@@ -712,7 +730,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.DiamondBlock, 'diamond_block', 'Block of Diamond', { all: 'diamond_block' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   registerSimple(BlockIds.BrickBlock, 'brick_block', 'Bricks', { all: 'brick' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
   // Glowstone emits Beta's full light value (setLightValue(1.0F) -> 15).
-  registerSimple(BlockIds.Glowstone, 'glowstone', 'Glowstone', { all: 'glowstone' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: 15 });
+  registerSimple(BlockIds.Glowstone, 'glowstone', 'Glowstone', { all: 'glowstone' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: { level: 15, color: LIGHT_COLOR_GLOWSTONE } });
 
   // Beta `Block.portal`: new BlockPortal(90, 14).setHardness(-1.0F)
   //   .setStepSound(soundGlassFootstep).setLightValue(0.75F)
@@ -730,7 +748,7 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     unbreakable: true,
     textures: { all: 'portal' },
     renderType: 'portal',
-    lightEmission: 11,
+    lightEmission: { level: 11, color: LIGHT_COLOR_PORTAL },
     lightOpacity: 0,
     creativeVisible: false,
   });

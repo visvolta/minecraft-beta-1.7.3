@@ -12,6 +12,7 @@ import { Player } from '../player/Player';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 import { GameMode } from '../player/GameMode';
 import type { GameSettings } from '../settings/GameSettings';
+import { normalizeRenderDistance } from '../settings/RenderDistance';
 import type { AudioManager } from '../audio/AudioManager';
 import { PlayerController } from '../player/PlayerController';
 import { InteractionController } from '../player/InteractionController';
@@ -242,6 +243,16 @@ const GEOMETRY_MEMORY_SAMPLE_MS = 250;
 
 /** Radius (blocks) around the camera scanned for portal ambience/particles. */
 const PORTAL_AMBIENCE_RADIUS = 8;
+
+/**
+ * Gain for the looping portal ambience.
+ *
+ * The raw asset is mixed loud enough to dominate everything else near a
+ * portal, so it is attenuated here in the sound EVENT rather than by editing
+ * portal.ogg. Only the ambience is reduced: portal.trigger and portal.travel
+ * are one-shots tied to a deliberate player action and stay at full volume.
+ */
+const PORTAL_AMBIENCE_VOLUME = 0.15;
 
 /**
  * Maps a dimension definition's Beta entity id to an implemented spawner kind.
@@ -1035,6 +1046,9 @@ export class Engine {
         // them later without rescanning 128 blocks of unloaded world.
         this.portalIndex.reconcileChunk(chunk.chunkX, chunk.chunkZ, scanChunkForPortals(chunk));
     }, (error) => this.onPersistenceError?.(error));
+    // Seed the streamer with the persisted render-distance setting before any
+    // streaming happens, so a saved value of 2 or 8 is honoured from frame one.
+    this.chunkStreamer.setRenderDistance(settings.video.renderDistance);
     this.deathScreen=new DeathScreen(()=>this.respawnController.request());
     this.playerDeathController=new PlayerDeathController(this.player,this.inventory,this.itemEntityManager,worldRng,this.deathScreen,()=>{this.deathSavePending=true;});
     this.respawnController=new RespawnController(this.player,this.chunkManager,this.chunkStreamer,this.blockUpdateWorld,blockRegistry,metadata.spawn,this.deathScreen,this.playerDeathController,()=>{this.cameraHurtController.reset(this.renderer.camera);this.sprintFovController.reset(this.renderer.camera);this.foodUseController.cancel();void this.saveMetadata(true);});
@@ -1068,6 +1082,17 @@ export class Engine {
       precipitationSimulator: this.precipitationSimulator,
       blockUpdateWorld: this.blockUpdateWorld,
       chunkRenderer: this.chunkRenderer,
+      renderDistance: {
+        getState: () => ({
+          renderDistance: this.chunkStreamer.getRenderDistance(),
+          unloadRadius: this.chunkStreamer.getUnloadRadius(),
+        }),
+        // Routed through applySettings so the debug path exercises exactly the
+        // same flow the settings screen uses (settings -> engine -> streamer).
+        set: (value: number) => {
+          this.applySettings({ ...this.settings, video: { ...this.settings.video, renderDistance: normalizeRenderDistance(value) } });
+        },
+      },
       environment: {
         getState: () => {
           const dimension = this.activeDimension;
@@ -1173,6 +1198,9 @@ export class Engine {
     this.player.viewBobbingEnabled = settings.video.viewBobbing;
     this.renderer.setAaMode(settings.video.aaMode);
     this.renderer.setRenderScale(settings.video.renderScale);
+    // Render distance is applied to the streamer, the single runtime owner.
+    // Takes effect immediately; no world reload.
+    this.chunkStreamer.setRenderDistance(settings.video.renderDistance);
   }
 
   public setPaused(paused: boolean): void {
@@ -1780,6 +1808,7 @@ export class Engine {
       overworldDensityMultiplier: atmos.fogDensityMultiplier,
       // Beta WorldProviderHell.func_4096_a — constant (0.2, 0.03, 0.03).
       dimensionFogColor: dimension.sky.constantFogColor,
+      renderDistance: this.chunkStreamer.getRenderDistance(),
     });
     this.renderer.setFogState(fogState);
     this.blockHighlight.setTarget(this.interactionController.getCurrentHit());
@@ -2360,7 +2389,7 @@ export class Engine {
               id: 'portal.portal',
               kind: 'ambient',
               x: x + 0.5, y: y + 0.5, z: z + 0.5,
-              volume: 1,
+              volume: PORTAL_AMBIENCE_VOLUME,
               pitch: Math.random() * 0.4 + 0.8,
               attenuationDistance: 16,
             });

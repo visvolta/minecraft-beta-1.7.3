@@ -1,7 +1,7 @@
 import { BlockIds } from '../blocks/BlockId';
 import type { LightEngine } from '../world/generation/lighting/LightEngine';
 import { CHUNK_SIZE_X } from '../world/chunkConstants';
-import { CHUNK_LOAD_RADIUS } from '../world/ChunkStreamer';
+import { DEFAULT_RENDER_DISTANCE } from '../settings/RenderDistance';
 
 /**
  * Fog integration.
@@ -100,14 +100,14 @@ const LAVA_FOG_FAR = 4;
  * radius. Public helper so tests can assert render-distance scaling
  * without duplicating the formula.
  */
-export function overworldFogFarDistance(): number {
-  const baseDistance = Math.max(CHUNK_SIZE_X, (CHUNK_LOAD_RADIUS - VISIBLE_DISTANCE_CHUNK_BUFFER) * CHUNK_SIZE_X);
+export function overworldFogFarDistance(renderDistance: number = DEFAULT_RENDER_DISTANCE): number {
+  const baseDistance = Math.max(CHUNK_SIZE_X, (renderDistance - VISIBLE_DISTANCE_CHUNK_BUFFER) * CHUNK_SIZE_X);
   return baseDistance * CLEAR_WEATHER_FOG_DISTANCE_SCALE;
 }
 
 /** Compute the exp2 density from the current fog far distance. */
-export function overworldFogDensity(): number {
-  return FOG_DENSITY_FACTOR / overworldFogFarDistance();
+export function overworldFogDensity(renderDistance: number = DEFAULT_RENDER_DISTANCE): number {
+  return FOG_DENSITY_FACTOR / overworldFogFarDistance(renderDistance);
 }
 
 export interface FogControllerInputs {
@@ -144,6 +144,12 @@ export interface FogControllerInputs {
    * the camera is submerged in rather than the dimension it is in.
    */
   readonly dimensionFogColor?: { readonly r: number; readonly g: number; readonly b: number } | undefined;
+  /**
+   * Live render distance in chunks. Fog far-distance derives from it, so
+   * lowering render distance automatically tightens the horizon instead of
+   * fogging terrain that is no longer drawn (or leaving a hard edge).
+   */
+  readonly renderDistance?: number;
 }
 
 /** Packs a 0..1 RGB triple into 0xRRGGBB. */
@@ -165,6 +171,7 @@ export class FogController {
   }
 
   public compute(inputs: FogControllerInputs): FogState {
+    const renderDistance = inputs.renderDistance ?? DEFAULT_RENDER_DISTANCE;
     const eyeBlockX = Math.floor(inputs.eyeX);
     const eyeBlockY = Math.floor(inputs.eyeY);
     const eyeBlockZ = Math.floor(inputs.eyeZ);
@@ -206,8 +213,8 @@ export class FogController {
         enabled: true,
         colorHex: packFogColor(inputs.dimensionFogColor),
         near: 0,
-        far: overworldFogFarDistance(),
-        density: overworldFogDensity(),
+        far: overworldFogFarDistance(renderDistance),
+        density: overworldFogDensity(renderDistance),
       };
     }
 
@@ -215,9 +222,9 @@ export class FogController {
     // reported so the F3 overlay can print a useful "range" value even
     // though `THREE.FogExp2` itself only reads `density`.
     // Stage 18: weather may scale density via `overworldDensityMultiplier`.
-    const far = overworldFogFarDistance();
+    const far = overworldFogFarDistance(renderDistance);
     const densityMult = inputs.overworldDensityMultiplier ?? 1;
-    const density = overworldFogDensity() * densityMult;
+    const density = overworldFogDensity(renderDistance) * densityMult;
     return {
       mode: 'overworld',
       kind: 'exp2',

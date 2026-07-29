@@ -80,6 +80,12 @@ export class Uint8Builder {
     this.length = 0;
   }
 
+  public push2(a: number, b: number): void {
+    this.ensure(2);
+    this.data[this.length++] = a;
+    this.data[this.length++] = b;
+  }
+
   public push4(a: number, b: number, c: number, d: number): void {
     this.ensure(4);
     this.data[this.length++] = a;

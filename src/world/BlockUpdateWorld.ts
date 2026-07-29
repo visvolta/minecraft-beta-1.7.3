@@ -135,6 +135,11 @@ export class BlockUpdateWorld {
     return this.lightEngine.getBlocklight(worldX, worldY, worldZ);
   }
 
+  /** Coloured block light (0..15 per channel) at a world position. */
+  public getBlocklightRgb(worldX: number, worldY: number, worldZ: number): { r: number; g: number; b: number } {
+    return this.lightEngine.getBlocklightRgb(worldX, worldY, worldZ);
+  }
+
   public getSkylight(worldX: number, worldY: number, worldZ: number): number {
     return this.lightEngine.getSkylight(worldX, worldY, worldZ);
   }

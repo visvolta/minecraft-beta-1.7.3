@@ -2,10 +2,10 @@ import { ClimateSampler } from './climate/ClimateSampler';
 import { selectBiome } from './climate/BiomeSelector';
 import type { BiomeId } from './climate/biomes';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from '../chunkConstants';
-import { CHUNK_LOAD_RADIUS } from '../ChunkStreamer';
+import { DEFAULT_RENDER_DISTANCE } from '../../settings/RenderDistance';
 
 /** Matches the game's actual chunk streaming radius around the player (see ChunkStreamer). */
-const DEFAULT_HEALTH_CHECK_RADIUS_CHUNKS = CHUNK_LOAD_RADIUS;
+const DEFAULT_HEALTH_CHECK_RADIUS_CHUNKS = DEFAULT_RENDER_DISTANCE;
 
 /**
  * Guards against picking a pathological world seed (one that's
@@ -47,7 +47,7 @@ export const MIN_DISTINCT_BIOMES = 3;
  * healthy (no single biome dominating, reasonable variety).
  *
  * Defaults to a radius matching the game's actual chunk streaming radius
- * around spawn (see world/ChunkStreamer's CHUNK_LOAD_RADIUS). This
+ * around spawn (default render distance). This
  * matters: biome distribution for a pathological seed can look fine when
  * averaged over a very large area far from spawn, while still being
  * badly monotonous in the region the player actually starts in and can

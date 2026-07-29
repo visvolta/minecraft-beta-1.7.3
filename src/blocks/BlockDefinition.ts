@@ -36,6 +36,23 @@ export type BlockRenderType = 'opaque' | 'cutout' | 'leaves' | 'cross' | 'cactus
 /**
  * Immutable block data. Behaviour lives in other systems, not here.
  */
+/** Coloured emission: Beta gameplay level plus a visual RGB tint. */
+export interface BlockLightEmission {
+  /** Beta light level 0..15; drives gameplay and propagation distance. */
+  readonly level: number;
+  /** Visual tint, each channel 0..1. Defaults to white when omitted. */
+  readonly color?: readonly [number, number, number];
+}
+
+/** Normalises either emission form to a level plus a 0..1 RGB tint. */
+export function resolveLightEmission(
+  emission: number | BlockLightEmission | undefined,
+): { level: number; color: readonly [number, number, number] } {
+  if (emission === undefined) return { level: 0, color: [1, 1, 1] };
+  if (typeof emission === 'number') return { level: emission, color: [1, 1, 1] };
+  return { level: emission.level, color: emission.color ?? [1, 1, 1] };
+}
+
 export interface BlockDefinition {
   readonly id: BlockId;
   /** Internal name, e.g. "stone". */
@@ -52,7 +69,16 @@ export interface BlockDefinition {
   /** How much light this block blocks, from 0 to 15. Defaults to 15 if solid, or 0 if transparent. */
   readonly lightOpacity?: number;
   /** How much light this block emits, from 0 to 15. Defaults to 0. */
-  readonly lightEmission?: number;
+  /**
+   * Light this block emits.
+   *
+   * A bare number is Beta's achromatic 0..15 level. The object form keeps that
+   * same gameplay LEVEL and adds a visual RGB tint (each component 0..1),
+   * which is a documented project deviation from Beta -- Beta has only one
+   * grayscale channel. The registry is the single authority for both; no
+   * colour constants live in the light engine.
+   */
+  readonly lightEmission?: number | BlockLightEmission;
   /**
    * Beta Material-style precipitation blocker. True for materials that
    * stop rain/snow when Chunk.precipitationHeightMap scans downward:

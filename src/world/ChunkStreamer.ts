@@ -4,6 +4,7 @@ import type { Chunk } from './Chunk';
 import type { WorldGenerator } from './WorldGenerator';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Z } from './chunkConstants';
 import { chunkKey } from './chunkKey';
+import { DEFAULT_RENDER_DISTANCE, unloadRadiusFor } from '../settings/RenderDistance';
 import type { LightEngine } from './generation/lighting/LightEngine';
 import { ChunkGenerationQueue, type ChunkGenerationStats } from './streaming/ChunkGenerationQueue';
 import type { WorldContextIdentity } from './streaming/ChunkJobTypes';
@@ -33,11 +34,16 @@ export interface ChunkIntegrationStats {
   readonly lastIntegrationLatencyMs: number;
 }
 
-/** Chebyshev radius (square) for loading chunks around the camera. */
-export const CHUNK_LOAD_RADIUS = 6;
-
-/** Unload when farther than this (hysteresis vs load radius). */
-export const CHUNK_UNLOAD_RADIUS = CHUNK_LOAD_RADIUS + 1;
+/**
+ * Render distance is RUNTIME STATE owned by the ChunkStreamer instance, not a
+ * module constant.
+ *
+ * It used to be `export const CHUNK_LOAD_RADIUS = 6`, which several unrelated
+ * modules imported directly. Keeping a mutable export with that name would
+ * have been a global masquerading as a constant and a second source of truth,
+ * so consumers now receive the live value explicitly (see
+ * `getRenderDistance()` / `getUnloadRadius()`).
+ */
 
 /**
  * Frame budget for adopting completed chunk results (generated or persisted).
@@ -79,6 +85,11 @@ export class ChunkStreamer {
   private readonly persistence: WorldPersistenceService;
   private readonly desiredChunks = new Set<number>();
   private readonly loadingChunks = new Set<number>();
+
+  /** Live Chebyshev load radius, driven by GameSettings.video.renderDistance. */
+  private renderDistance: number = DEFAULT_RENDER_DISTANCE;
+  /** Load radius + hysteresis; chunks past this are unloaded. */
+  private unloadRadius: number = unloadRadiusFor(DEFAULT_RENDER_DISTANCE);
 
   private lastChunkX: number | null = null;
   private lastChunkZ: number | null = null;
@@ -201,6 +212,64 @@ export class ChunkStreamer {
     }
 
     this.drainPendingIntegrations(centerChunkX, centerChunkZ);
+  }
+
+  /** Live Chebyshev load radius in chunks. The one runtime source of truth. */
+  public getRenderDistance(): number {
+    return this.renderDistance;
+  }
+
+  /** Live unload radius (load radius + hysteresis). */
+  public getUnloadRadius(): number {
+    return this.unloadRadius;
+  }
+
+  /**
+   * Applies a new render distance without a world reload.
+   *
+   * Shrinking: the desired set is recomputed on the next update, pending
+   * generation outside it is cancelled immediately, and queued integrations
+   * for chunks nobody wants any more are dropped. Chunks between the NEW load
+   * radius and the NEW unload radius are deliberately left resident — that
+   * hysteresis band is what stops a reduction (or a player hovering on a
+   * boundary) from thrashing load/unload.
+   *
+   * Growing: clearing the cached camera chunk forces the next update to
+   * re-stream, so the new outer rings are requested straight away.
+   *
+   * Dirty chunks are never dropped here; they leave through the normal
+   * save-then-remove unload path.
+   */
+  public setRenderDistance(renderDistance: number): void {
+    if (renderDistance === this.renderDistance) return;
+    const shrinking = renderDistance < this.renderDistance;
+    this.renderDistance = renderDistance;
+    this.unloadRadius = unloadRadiusFor(renderDistance);
+
+    if (shrinking && this.lastChunkX !== null && this.lastChunkZ !== null) {
+      // Recompute what is still wanted so obsolete work can be cancelled now
+      // rather than after the player next crosses a chunk boundary.
+      const centerX = this.lastChunkX;
+      const centerZ = this.lastChunkZ;
+      this.desiredChunks.clear();
+      for (let dz = -renderDistance; dz <= renderDistance; dz++) {
+        for (let dx = -renderDistance; dx <= renderDistance; dx++) {
+          this.desiredChunks.add(chunkKey(centerX + dx, centerZ + dz));
+        }
+      }
+      this.generationQueue.cancelUndesired(this.desiredChunks);
+      for (const key of [...this.pendingIntegrations.keys()]) {
+        if (!this.desiredChunks.has(key)) this.pendingIntegrations.delete(key);
+      }
+    }
+
+    // Force a full re-stream on the next update (new rings when growing,
+    // unload sweep when shrinking).
+    this.started = false;
+    this.lastChunkX = null;
+    this.lastChunkZ = null;
+    this.lastPriorityHeadingX = Number.NaN;
+    this.lastPriorityHeadingZ = Number.NaN;
   }
 
   public dispatchCriticalLoad(chunkX: number, chunkZ: number): void {
@@ -435,8 +504,9 @@ export class ChunkStreamer {
     this.desiredChunks.clear();
     const toRequest: Array<{ x: number; z: number; priority: number; critical: boolean }> = [];
 
-    for (let dz = -CHUNK_LOAD_RADIUS; dz <= CHUNK_LOAD_RADIUS; dz++) {
-      for (let dx = -CHUNK_LOAD_RADIUS; dx <= CHUNK_LOAD_RADIUS; dx++) {
+    const loadRadius = this.renderDistance;
+    for (let dz = -loadRadius; dz <= loadRadius; dz++) {
+      for (let dx = -loadRadius; dx <= loadRadius; dx++) {
         const x = centerX + dx;
         const z = centerZ + dz;
         const distanceSq = dx * dx + dz * dz;
@@ -470,7 +540,7 @@ export class ChunkStreamer {
         Math.abs(chunk.chunkZ - centerZ),
       );
 
-      if (dist > CHUNK_UNLOAD_RADIUS) {
+      if (dist > this.unloadRadius) {
         toUnload.push({ x: chunk.chunkX, z: chunk.chunkZ });
       } else {
         this.persistence.cancelUnload(chunk);

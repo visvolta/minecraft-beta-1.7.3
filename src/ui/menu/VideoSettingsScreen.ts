@@ -1,6 +1,7 @@
 import { applyDirtBackground, guiHeight, guiWidth, GuiButton, Screen } from './MenuWidgets';
 import type { GameSettings } from '../../settings/GameSettings';
 import { guiScaleLabel, nextGuiScale } from '../GuiScale';
+import { nextRenderDistance, renderDistanceLabel } from '../../settings/RenderDistance';
 
 export class VideoSettingsScreen extends Screen {
   private settings: GameSettings;
@@ -8,6 +9,7 @@ export class VideoSettingsScreen extends Screen {
   private readonly guiScaleButton: GuiButton;
   private readonly aaButton: GuiButton;
   private readonly scaleButton: GuiButton;
+  private readonly renderDistanceButton: GuiButton;
   private readonly back: GuiButton;
   public constructor(settings: GameSettings, private readonly setSettings: (settings: GameSettings) => void, done: () => void) {
     super(); applyDirtBackground(this.root); this.settings = settings;
@@ -16,8 +18,9 @@ export class VideoSettingsScreen extends Screen {
     this.guiScaleButton=new GuiButton('',()=>this.update({...this.settings,video:{...this.settings.video,guiScale:nextGuiScale(this.settings.video.guiScale)}}),150,20);
     this.aaButton=new GuiButton('',()=>this.update({...this.settings,video:{...this.settings.video,aaMode:nextAa(this.settings.video.aaMode)}}),150,20);
     this.scaleButton=new GuiButton('',()=>this.update({...this.settings,video:{...this.settings.video,renderScale:nextScale(this.settings.video.renderScale)}}),150,20);
+    this.renderDistanceButton=new GuiButton('',()=>this.update({...this.settings,video:{...this.settings.video,renderDistance:nextRenderDistance(this.settings.video.renderDistance)}}),150,20);
     this.back=new GuiButton('Done',done,200,20);
-    this.root.append(title,this.viewBob.element,this.guiScaleButton.element,this.aaButton.element,this.scaleButton.element,this.back.element); this.refreshLabels(); this.layout();
+    this.root.append(title,this.viewBob.element,this.guiScaleButton.element,this.aaButton.element,this.scaleButton.element,this.renderDistanceButton.element,this.back.element); this.refreshLabels(); this.layout();
   }
   protected override onResize(): void { this.layout(); }
   private update(settings: GameSettings): void { this.settings = settings; this.setSettings(settings); this.refreshLabels(); }
@@ -26,11 +29,13 @@ export class VideoSettingsScreen extends Screen {
     this.guiScaleButton.element.textContent=`GUI Scale: ${guiScaleLabel(this.settings.video.guiScale)}`;
     this.aaButton.element.textContent=`AA: ${this.settings.video.aaMode.toUpperCase()}`;
     this.scaleButton.element.textContent=`Render Scale: ${this.settings.video.renderScale.toFixed(2)}`;
+    this.renderDistanceButton.element.textContent=`Render Distance: ${renderDistanceLabel(this.settings.video.renderDistance)}`;
   }
   private layout(): void {
     const w=guiWidth(),h=guiHeight();
     this.viewBob.setPosition(w/2-155,70); this.guiScaleButton.setPosition(w/2+5,70);
     this.aaButton.setPosition(w/2-155,96); this.scaleButton.setPosition(w/2+5,96);
+    this.renderDistanceButton.setPosition(w/2-155,122);
     this.back.setPosition(w/2-100,h-40);
   }
 }

@@ -75,6 +75,7 @@ export class DebugStatsCollector {
 
       dimensionLabel: this.getDimensionLabel(),
       loadedChunks: this.chunkManager.size,
+      renderDistance: this.chunkStreamer.getRenderDistance(),
       entityCount: this.entityManager.activeCount,
 
       triangleCount: info.render.triangles,

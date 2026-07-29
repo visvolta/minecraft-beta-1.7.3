@@ -67,6 +67,7 @@ function createEmptyGeometry(fluidLayout: boolean): THREE.BufferGeometry {
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
   geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
   geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(new Uint8Array(), 4, true));
+  geometry.setAttribute('surfaceShade', new THREE.Uint8BufferAttribute(new Uint8Array(), 2, true));
   if (fluidLayout) {
     geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(), 1));
     geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
@@ -107,7 +108,10 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
         // Normalized uint8x4: x=sky*17, y=block*17, z=ao, w=faceBrightness.
         // Reading .xy back through *15.0 recovers the exact Beta light level
         // because 255/17 == 15 for every one of the 16 discrete levels.
+        // xyzw = skylight, blockR, blockG, blockB (normalized 0..15 -> 0..1).
         attribute vec4 packedLight;
+        // xy = ambient occlusion, face brightness.
+        attribute vec2 surfaceShade;
         uniform float uSkylightSubtracted;
         uniform float uSunBrightnessFactor;
         uniform float uTextureMinBrightness;
@@ -131,17 +135,28 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
         `#include <color_vertex>
         if (uDynamicLightingEnabled > 0.5) {
           float skyLightLevel = packedLight.x * 15.0;
-          float blockLightLevel = packedLight.y * 15.0;
-          float aoFactorScalar = packedLight.z;
-          float faceBrightness = packedLight.w;
+          // Coloured block light: one Beta brightness curve per channel.
+          vec3 blockLevels = packedLight.yzw * 15.0;
+          float aoFactorScalar = surfaceShade.x;
+          float faceBrightness = surfaceShade.y;
+
           float effectiveSky = max(0.0, skyLightLevel - uSkylightSubtracted);
+          // Skylight stays NEUTRAL so daylight is never tinted.
           float skyBrightness = betaLightBrightness(effectiveSky) * uSunBrightnessFactor;
-          float blockBrightness = betaLightBrightness(blockLightLevel);
-          float brightness = max(skyBrightness, blockBrightness);
-          float visibility = max(brightness, uTextureMinBrightness) * aoFactorScalar * faceBrightness;
+          vec3 blockBrightness = vec3(
+            betaLightBrightness(blockLevels.r),
+            betaLightBrightness(blockLevels.g),
+            betaLightBrightness(blockLevels.b)
+          );
+          // Per-channel max against the neutral skylight: a lit daytime face is
+          // white, a torch-lit cave face keeps its warm tint.
+          vec3 brightness = max(vec3(skyBrightness), blockBrightness);
+          vec3 visibility = max(brightness, vec3(uTextureMinBrightness)) * aoFactorScalar * faceBrightness;
           vColor.xyz = tintColor * visibility;
         }`,
       );
+    material.userData.lastVertexShader = shader.vertexShader;
+    material.userData.dynamicLightingShaderSource = shader.vertexShader;
   };
   material.needsUpdate = true;
 }
@@ -213,7 +228,8 @@ export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
     // the Nether while the blocks around them do not.
     uAmbientLightFloor: { value: OVERWORLD_AMBIENT_LIGHT_FLOOR },
     uStaticSkyLight: { value: 15.0 },
-    uStaticBlockLight: { value: 0.0 },
+    /** Coloured block light at the entity: (R,G,B) each 0..15. */
+    uStaticBlockLightRgb: { value: new THREE.Vector3(0, 0, 0) },
     uStaticAoFactor: { value: 1.0 },
     uStaticFaceBrightness: { value: 1.0 },
   };
@@ -225,7 +241,7 @@ export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
     shader.uniforms.uDynamicLightingEnabled = uniforms.uDynamicLightingEnabled;
     shader.uniforms.uAmbientLightFloor = uniforms.uAmbientLightFloor;
     shader.uniforms.uStaticSkyLight = uniforms.uStaticSkyLight;
-    shader.uniforms.uStaticBlockLight = uniforms.uStaticBlockLight;
+    shader.uniforms.uStaticBlockLightRgb = uniforms.uStaticBlockLightRgb;
     shader.uniforms.uStaticAoFactor = uniforms.uStaticAoFactor;
     shader.uniforms.uStaticFaceBrightness = uniforms.uStaticFaceBrightness;
 
@@ -240,7 +256,7 @@ export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
         uniform float uAmbientLightFloor;
 
         uniform float uStaticSkyLight;
-        uniform float uStaticBlockLight;
+        uniform vec3 uStaticBlockLightRgb;
         uniform float uStaticAoFactor;
         uniform float uStaticFaceBrightness;
 
@@ -266,10 +282,15 @@ export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
         if (uDynamicLightingEnabled > 0.5) {
           float effectiveSky = max(0.0, uStaticSkyLight - uSkylightSubtracted);
           float skyBrightness = betaLightBrightness(effectiveSky) * uSunBrightnessFactor;
-          float blockBrightness = betaLightBrightness(uStaticBlockLight);
-          float brightness = max(skyBrightness, blockBrightness);
-          float visibility = max(brightness, uTextureMinBrightness) * uStaticAoFactor * uStaticFaceBrightness;
-          vEntityLightingFactor = vec3(visibility);
+          // Entities take the same coloured environment as terrain: one Beta
+          // brightness curve per channel, maxed against neutral skylight.
+          vec3 blockBrightness = vec3(
+            betaLightBrightness(uStaticBlockLightRgb.r),
+            betaLightBrightness(uStaticBlockLightRgb.g),
+            betaLightBrightness(uStaticBlockLightRgb.b)
+          );
+          vec3 brightness = max(vec3(skyBrightness), blockBrightness);
+          vEntityLightingFactor = max(brightness, vec3(uTextureMinBrightness)) * uStaticAoFactor * uStaticFaceBrightness;
         }`,
       );
 
@@ -945,6 +966,51 @@ export class ChunkRenderer {
     return out;
   }
 
+  /**
+   * Diagnostic snapshot of the coloured-lighting vertex path: which attributes
+   * exist, their real byte sizes, and whether the shader treats block light as
+   * three channels. Used to prove the layout claims rather than assume them.
+   */
+  public getTerrainShaderInfo(): {
+    hasSurfaceShade: boolean;
+    hasVec3BlockLight: boolean;
+    geometryHasSurfaceShade: boolean;
+    packedLightItemSize: number;
+    surfaceShadeItemSize: number;
+    bytesPerVertex: number;
+  } {
+    // Prefer the actually-compiled shader; fall back to the material's
+    // recorded source so the probe works before the first compile.
+    const source = (this.terrainMaterial.userData.lastVertexShader as string | undefined)
+      ?? (this.terrainMaterial.userData.dynamicLightingShaderSource as string | undefined)
+      ?? '';
+    let geometryHasSurfaceShade = false;
+    let packedLightItemSize = 0;
+    let surfaceShadeItemSize = 0;
+    let bytesPerVertex = 0;
+    for (const mesh of this.terrainMeshes.values()) {
+      const geometry = mesh.geometry;
+      const packed = geometry.getAttribute('packedLight');
+      const shade = geometry.getAttribute('surfaceShade');
+      if (packed !== undefined) packedLightItemSize = packed.itemSize;
+      if (shade !== undefined) { geometryHasSurfaceShade = true; surfaceShadeItemSize = shade.itemSize; }
+      bytesPerVertex = 0;
+      for (const name of Object.keys(geometry.attributes)) {
+        const attribute = geometry.getAttribute(name);
+        bytesPerVertex += attribute.itemSize * ((attribute.array as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT ?? 4);
+      }
+      break;
+    }
+    return {
+      hasSurfaceShade: source.includes('attribute vec2 surfaceShade'),
+      hasVec3BlockLight: source.includes('vec3 blockLevels'),
+      geometryHasSurfaceShade,
+      packedLightItemSize,
+      surfaceShadeItemSize,
+      bytesPerVertex,
+    };
+  }
+
   public getPassMeshCounts(): {
     terrain: number;
     cutout: number;
@@ -1077,6 +1143,7 @@ export class ChunkRenderer {
       ['uv', 2],
       ['tintColor', 3],
       ['packedLight', 4],
+      ['surfaceShade', 2],
     ];
     for (const [name] of required) {
       const attr = geometry.getAttribute(name) as THREE.BufferAttribute | undefined;

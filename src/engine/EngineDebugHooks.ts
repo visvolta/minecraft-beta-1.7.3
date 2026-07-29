@@ -46,7 +46,11 @@ export interface EngineDebugHookDependencies {
   readonly weatherController: WeatherController;
   readonly precipitationSimulator: PrecipitationSimulator;
   readonly blockUpdateWorld: BlockUpdateWorld;
-  readonly chunkRenderer: { getPassMeshCounts(): unknown; probeChunkMesh(x: number, z: number): unknown };
+  readonly chunkRenderer: { getPassMeshCounts(): unknown; probeChunkMesh(x: number, z: number): unknown; getTerrainShaderInfo(): unknown };
+  readonly renderDistance: {
+    getState(): { renderDistance: number; unloadRadius: number };
+    set(value: number): void;
+  };
   /** Portal/dimension state, exposed for manual and automated portal testing. */
   readonly environment: {
     getState(): unknown;
@@ -125,6 +129,14 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
      */
     placePlayer: (x: number, y: number, z: number) => { deps.portal.placePlayer(x, y, z); },
     getPassMeshCounts: () => deps.chunkRenderer.getPassMeshCounts(),
+    /** Coloured block light at a world position, for colour verification. */
+    getBlocklightRgb: (x: number, y: number, z: number) => deps.blockUpdateWorld.getBlocklightRgb(x, y, z),
+    /** Reports how the terrain shader/geometry consume coloured light. */
+    getTerrainShaderInfo: () => deps.chunkRenderer.getTerrainShaderInfo(),
+    /** Live render-distance state, for verifying runtime resizing. */
+    getRenderDistanceState: () => deps.renderDistance.getState(),
+    /** Applies a render distance the same way the settings screen does. */
+    setRenderDistance: (value: number) => { deps.renderDistance.set(value); },
     /** Diagnostic: mesh one chunk synchronously and report per-pass vertex counts. */
     probeChunkMesh: (chunkX: number, chunkZ: number) => deps.chunkRenderer.probeChunkMesh(chunkX, chunkZ),
     getTickMetrics: () => deps.worldTickScheduler.getMetrics(),

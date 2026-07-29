@@ -1,5 +1,7 @@
 import type { BlockId } from '../../../blocks/BlockId';
 import type { BlockRegistry } from '../../../blocks/BlockRegistry';
+import { resolveLightEmission } from '../../../blocks/BlockDefinition';
+import { packLight } from './LightValue';
 import {
   AIR_BLOCK_ID,
   CHUNK_SIZE_X,
@@ -46,14 +48,21 @@ export const MAX_LIGHT = 15;
 export interface LightLookupTables {
   /** Light absorbed when passing through this block (0..15). */
   readonly opacity: Uint8Array;
-  /** Light emitted by this block (0..15). */
+  /** Beta gameplay emission level (0..15), i.e. max(R,G,B) of the seed. */
   readonly emission: Uint8Array;
+  /** Per-channel emission seeds (0..15), derived from the registry tint. */
+  readonly emissionR: Uint8Array;
+  readonly emissionG: Uint8Array;
+  readonly emissionB: Uint8Array;
 }
 
 /** Builds the opacity/emission LUTs from a block registry. */
 export function buildLightLookupTables(registry: BlockRegistry): LightLookupTables {
   const opacity = new Uint8Array(256);
   const emission = new Uint8Array(256);
+  const emissionR = new Uint8Array(256);
+  const emissionG = new Uint8Array(256);
+  const emissionB = new Uint8Array(256);
 
   for (let id = 0; id < 256; id++) {
     if (id === AIR_BLOCK_ID) continue;
@@ -64,10 +73,16 @@ export function buildLightLookupTables(registry: BlockRegistry): LightLookupTabl
       continue;
     }
     opacity[id] = definition.lightOpacity ?? (definition.solid ? MAX_LIGHT : 0);
-    emission[id] = definition.lightEmission ?? 0;
+    // The registry is authoritative for BOTH the Beta level and the tint; no
+    // per-block colour constants exist in the light engine.
+    const resolved = resolveLightEmission(definition.lightEmission);
+    emission[id] = resolved.level;
+    emissionR[id] = Math.round(resolved.level * resolved.color[0]);
+    emissionG[id] = Math.round(resolved.level * resolved.color[1]);
+    emissionB[id] = Math.round(resolved.level * resolved.color[2]);
   }
 
-  return { opacity, emission };
+  return { opacity, emission, emissionR, emissionG, emissionB };
 }
 
 /**
@@ -129,15 +144,19 @@ export function computeInitialChunkLight(
   blocks: Uint8Array,
   tables: LightLookupTables,
   options: InitialLightOptions = {},
-  out?: Uint8Array,
-): Uint8Array {
+  out?: Uint16Array,
+): Uint16Array {
   const hasSkyLight = options.hasSkyLight ?? true;
-  const light = out ?? new Uint8Array(CHUNK_VOLUME);
+  const light = out ?? new Uint16Array(CHUNK_VOLUME);
   light.fill(0);
 
-  const { opacity, emission } = tables;
+  const { opacity, emission, emissionR, emissionG, emissionB } = tables;
   const sky = new Uint8Array(CHUNK_VOLUME);
-  const block = new Uint8Array(CHUNK_VOLUME);
+  // One buffer per block-light channel. They share a single queue pass below,
+  // and any channel with no sources at all is skipped entirely.
+  const red = new Uint8Array(CHUNK_VOLUME);
+  const green = new Uint8Array(CHUNK_VOLUME);
+  const blue = new Uint8Array(CHUNK_VOLUME);
 
   // Packed chunk-local indices; a single Int32Array queue with a read head
   // avoids both per-node object allocation and world-coordinate triples.
@@ -191,24 +210,40 @@ export function computeInitialChunkLight(
     propagate(sky, blocks, opacity, queue, queueHead, queueTail);
   }
 
-  // ---- 2. Block-light sources ---------------------------------------------
-  queueHead = 0;
-  queueTail = 0;
+  // ---- 2. Block-light sources (per channel) -------------------------------
+  // Seed all three channels in one sweep, tracking which ones actually have
+  // any source so an unused channel costs nothing (a red torch, for example,
+  // seeds essentially only red).
+  let anyRed = false;
+  let anyGreen = false;
+  let anyBlue = false;
   for (let index = 0; index < CHUNK_VOLUME; index++) {
-    const emitted = emission[blocks[index]!]!;
-    if (emitted > 0) {
-      block[index] = emitted;
-      queue[queueTail++] = index;
-    }
+    const id = blocks[index]!;
+    if (emission[id]! === 0) continue;
+    const r = emissionR[id]!;
+    const g = emissionG[id]!;
+    const b = emissionB[id]!;
+    if (r > 0) { red[index] = r; anyRed = true; }
+    if (g > 0) { green[index] = g; anyGreen = true; }
+    if (b > 0) { blue[index] = b; anyBlue = true; }
   }
-  propagate(block, blocks, opacity, queue, queueHead, queueTail);
 
-  // ---- 3. Pack into Chunk's nibble layout ---------------------------------
-  // MUST match Chunk.getSkylight/getBlocklight exactly:
-  //   skylight   -> low  nibble (light & 0x0F)
-  //   blocklight -> high nibble (light >> 4)
+  const propagateChannel = (levels: Uint8Array): void => {
+    let tail = 0;
+    for (let index = 0; index < CHUNK_VOLUME; index++) {
+      if (levels[index]! > 0) queue[tail++] = index;
+    }
+    propagate(levels, blocks, opacity, queue, 0, tail);
+  };
+  if (anyRed) propagateChannel(red);
+  if (anyGreen) propagateChannel(green);
+  if (anyBlue) propagateChannel(blue);
+
+  // ---- 3. Pack ------------------------------------------------------------
+  // Layout is owned by LightValue; this uses packLight rather than open-coding
+  // shifts so the format lives in exactly one place.
   for (let index = 0; index < CHUNK_VOLUME; index++) {
-    light[index] = (sky[index]! & 0xf) | ((block[index]! & 0xf) << 4);
+    light[index] = packLight(sky[index]!, red[index]!, green[index]!, blue[index]!);
   }
 
   return light;

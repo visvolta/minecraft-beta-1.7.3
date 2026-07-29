@@ -31,6 +31,8 @@ export interface DebugStats {
   /** Active dimension, e.g. "Nether (-1)". */
   readonly dimensionLabel: string;
   readonly loadedChunks: number;
+  /** Live render distance in chunks (GameSettings.video.renderDistance). */
+  readonly renderDistance: number;
   readonly entityCount: number;
 
   readonly triangleCount: number;
