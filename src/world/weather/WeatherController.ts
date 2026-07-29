@@ -60,8 +60,21 @@ export class WeatherController {
     return this.state;
   }
 
+  /**
+   * Restores saved weather, EXCEPT for the fresh-world sentinel
+   * (clear + all-zero timers) which means "no real weather state yet" — in
+   * that case the constructor's seeded clear-weather timers are kept so the
+   * first tick does not immediately transition to storm. A real save always
+   * has at least one non-zero timer or an active storm flag.
+   */
   public restore(state: { readonly raining: boolean; readonly thundering: boolean; readonly rainTime: number; readonly thunderTime: number }): void {
-    this.state.raining = state.raining; this.state.thundering = state.thundering; this.state.rainTime = state.rainTime; this.state.thunderTime = state.thunderTime;
+    this.state.raining = state.raining;
+    this.state.thundering = state.thundering;
+    const isFresh = !state.raining && !state.thundering && state.rainTime === 0 && state.thunderTime === 0;
+    if (!isFresh) {
+      this.state.rainTime = state.rainTime;
+      this.state.thunderTime = state.thunderTime;
+    }
   }
 
   private tickOnce(): void {

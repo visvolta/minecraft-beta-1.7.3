@@ -1765,7 +1765,11 @@ export class Engine {
     const splashStart = performance.now();
     this.rainSplashRenderer.update(camera, deltaSeconds, atmos, this.precipitationRenderer);
     const splashEnd = performance.now();
-    this.lightningManager.setAudioHook((x, y, z, distance) => this.audioManager.play({ type: 'weather.thunder', x, y, z, distance }));
+    if (dimensionHasWeather) {
+      this.lightningManager.setAudioHook((x, y, z, distance) => this.audioManager.play({ type: 'weather.thunder', x, y, z, distance }));
+    } else {
+      this.lightningManager.setAudioHook(null);
+    }
     // Beta drives its rain sound from raindrop impacts, not a loop: the
     // splash renderer already knows where drops land, so it is the correct
     // trigger point. `aboveListener` reproduces Beta's quieter, lower-pitched
@@ -1774,7 +1778,9 @@ export class Engine {
       const aboveListener = y > this.player.position.y + 1;
       this.audioManager.playRainImpact(x, y, z, aboveListener);
     });
-    this.lightningManager.update(deltaSeconds, weatherState, camera.position.x, camera.position.y, camera.position.z);
+    if (dimensionHasWeather) {
+      this.lightningManager.update(deltaSeconds, weatherState, camera.position.x, camera.position.y, camera.position.z);
+    }
     this.lightningRenderer.update(this.lightningManager.getState());
     this.performanceProfiler.recordWeatherTimings({
       simulationMs: weatherSimEnd - weatherSimStart,
@@ -2491,6 +2497,8 @@ export class Engine {
     this.chunkManager.clear();
     this.entityManager.dispose();
     this.portalParticles?.clear();
+    // Stale Overworld lightning must not fire thunder in the destination.
+    this.lightningManager.clear();
 
     // 3. Activate the destination context. The generation counter is bumped so
     //    any worker result still in flight for the old dimension is rejected

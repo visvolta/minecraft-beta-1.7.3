@@ -20,7 +20,11 @@ export class WorldGenFlowers {
       if (this.blockId === BlockIds.Dandelion || this.blockId === BlockIds.Rose) {
         canPlace = below === BlockIds.Grass || below === BlockIds.Dirt || below === BlockIds.Podzol;
       } else if (this.blockId === BlockIds.BrownMushroom || this.blockId === BlockIds.RedMushroom) {
-        // Beta mushrooms: can stay on opaque solids (simplified: any non-air non-liquid)
+        // Beta BlockMushroom.canThisPlantGrowOnThisBlockID = opaqueCubeLookup.
+        // Exclude non-opaque solids that should not support mushrooms (ice,
+        // glass, leaves, snow). Netherrack, stone, dirt, cobblestone etc. are
+        // valid because they are opaque cubes. The light < 13 requirement is
+        // enforced at runtime by MushroomBehaviour.canSurvive.
         canPlace =
           below !== 0 &&
           below !== BlockIds.Water &&
@@ -28,7 +32,13 @@ export class WorldGenFlowers {
           below !== BlockIds.WaterFlowing &&
           below !== BlockIds.Lava &&
           below !== BlockIds.LavaStill &&
-          below !== BlockIds.LavaFlowing;
+          below !== BlockIds.LavaFlowing &&
+          below !== BlockIds.Ice &&
+          below !== 20 && // Glass
+          below !== BlockIds.Leaves &&
+          below !== BlockIds.BirchLeaves &&
+          below !== BlockIds.SpruceLeaves &&
+          below !== BlockIds.Snow;
       }
 
       if (canPlace) {

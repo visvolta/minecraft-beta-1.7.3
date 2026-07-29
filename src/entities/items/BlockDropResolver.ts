@@ -47,6 +47,8 @@ export function resolveBlockDrops(blockId:number,blockMetadata=0,canHarvest=true
 
     case BlockIds.DiamondOre:
       return [{ type: 'item', id: 'diamond', count: 1, metadata: 0 }];
+    case BlockIds.NetherQuartzOre:
+      return [{ type: 'item', id: 'quartz', count: 1, metadata: 0 }];
 
     case BlockIds.RedstoneOre:
       // drops 4 to 5 redstone dust items

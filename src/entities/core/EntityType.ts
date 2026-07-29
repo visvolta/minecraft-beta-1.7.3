@@ -29,6 +29,9 @@ export const EntityTypeIds = {
   Painting: 16,
   Snowball: 17,
   ThrownEgg: 18,
+  PigZombie: 19,
+  Ghast: 20,
+  Fireball: 21,
 } as const;
 
 export type EntityTypeId = (typeof EntityTypeIds)[keyof typeof EntityTypeIds];

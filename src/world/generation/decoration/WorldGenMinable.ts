@@ -7,6 +7,7 @@ export class WorldGenMinable {
   public constructor(
     private readonly blockId: number,
     private readonly numberOfBlocks: number,
+    private readonly replaceTarget: number = BlockIds.Stone,
   ) {}
 
   public generate(world: TreeWorldAccessor, random: JavaRandom, x: number, y: number, z: number): boolean {
@@ -41,7 +42,7 @@ export class WorldGenMinable {
           for (let bz = minZ; bz <= maxZ; bz++) {
             const d15 = ((bz + 0.5 - d9) / (d11 / 2)) ** 2;
             if (d13 + d14 + d15 >= 1) continue;
-            if (world.getBlock(bx, by, bz) === BlockIds.Stone) {
+            if (world.getBlock(bx, by, bz) === this.replaceTarget) {
               world.setBlock(bx, by, bz, this.blockId);
             }
           }

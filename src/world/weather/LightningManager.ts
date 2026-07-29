@@ -67,6 +67,11 @@ export class LightningManager {
     return this.state;
   }
 
+  /** Clears all active bolts (used on dimension switch to prevent stale thunder). */
+  public clear(): void {
+    this.bolts.length = 0;
+  }
+
   private tickOnce(weather: WeatherState, cameraX: number, cameraY: number, cameraZ: number): void {
     if (this.flashTicks > 0) {
       this.flashTicks -= 1;

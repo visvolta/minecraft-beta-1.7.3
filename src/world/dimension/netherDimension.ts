@@ -43,12 +43,9 @@ export const NETHER_DIMENSION: DimensionDefinition = {
 
   spawn: {
     // BiomeGenHell clears every list and adds exactly these two at weight 10.
-    // `available: false` records the authentic Beta roster while telling the
-    // spawner these entity types are not implemented yet, so it skips them
-    // deliberately instead of failing to construct an unregistered entity.
     monsters: [
-      { entityId: 'Ghast', weight: 10, available: false },
-      { entityId: 'PigZombie', weight: 10, available: false },
+      { entityId: 'Ghast', weight: 10, available: true },
+      { entityId: 'PigZombie', weight: 10, available: true },
     ],
     creatures: [],
   },

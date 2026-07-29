@@ -732,6 +732,16 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   // Glowstone emits Beta's full light value (setLightValue(1.0F) -> 15).
   registerSimple(BlockIds.Glowstone, 'glowstone', 'Glowstone', { all: 'glowstone' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true, lightEmission: { level: 15, color: LIGHT_COLOR_GLOWSTONE } });
 
+  // ---- Non-Beta extension: Nether Quartz (1.5+) ----
+  // Ore generates in the Nether, drops the quartz item (not the block).
+  registerSimple(BlockIds.NetherQuartzOre, 'quartz_ore', 'Nether Quartz Ore', { all: 'quartz_ore' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  // Quartz Block: crafted from 4 Nether Quartz.
+  registerSimple(BlockIds.QuartzBlock, 'quartz_block', 'Block of Quartz', { top: 'quartz_block_top', side: 'quartz_block_side', bottom: 'quartz_block_bottom' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  // Chiseled Quartz Block.
+  registerSimple(BlockIds.ChiseledQuartz, 'quartz_block_chiseled', 'Chiseled Quartz Block', { top: 'quartz_block_chiseled_top', side: 'quartz_block_chiseled', bottom: 'quartz_block_chiseled_top' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  // Quartz Pillar (metadata 0 = vertical; texture axis follows the log convention).
+  registerSimple(BlockIds.PillarQuartz, 'quartz_block_lines', 'Quartz Pillar', { top: 'quartz_block_lines_top', side: 'quartz_block_lines', bottom: 'quartz_block_lines_top' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+
   // Beta `Block.portal`: new BlockPortal(90, 14).setHardness(-1.0F)
   //   .setStepSound(soundGlassFootstep).setLightValue(0.75F)
   // 0.75 * 15 = light level 11. Hardness -1 makes it unbreakable by hand, and
@@ -805,6 +815,10 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.RedstoneOre]: 3.0,
     [BlockIds.DiamondOre]: 3.0,
     [BlockIds.LapisOre]: 3.0,
+    [BlockIds.NetherQuartzOre]: 3.0,
+    [BlockIds.QuartzBlock]: 0.8,
+    [BlockIds.ChiseledQuartz]: 0.8,
+    [BlockIds.PillarQuartz]: 0.8,
     [BlockIds.Chest]: 2.5,
     [BlockIds.Spawner]: 5.0,
     [BlockIds.Dandelion]: 0.0,
@@ -889,9 +903,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Netherrack]: false,
   };
 
-  const pickaxePreferred=new Set<number>([BlockIds.SandStone,BlockIds.LapisBlock,BlockIds.GoldBlock,BlockIds.IronBlock,BlockIds.DiamondBlock,BlockIds.BrickBlock,BlockIds.CobblestoneStairs,BlockIds.Glowstone,BlockIds.Cobblestone,BlockIds.DoubleSlab,BlockIds.Slab,BlockIds.Stone,BlockIds.MossyCobblestone,BlockIds.IronOre,BlockIds.CoalOre,BlockIds.GoldOre,BlockIds.DiamondOre,BlockIds.Ice,BlockIds.Netherrack,BlockIds.LapisOre]);
+  const pickaxePreferred=new Set<number>([BlockIds.SandStone,BlockIds.LapisBlock,BlockIds.GoldBlock,BlockIds.IronBlock,BlockIds.DiamondBlock,BlockIds.BrickBlock,BlockIds.CobblestoneStairs,BlockIds.Glowstone,BlockIds.Cobblestone,BlockIds.DoubleSlab,BlockIds.Slab,BlockIds.Stone,BlockIds.MossyCobblestone,BlockIds.IronOre,BlockIds.CoalOre,BlockIds.GoldOre,BlockIds.DiamondOre,BlockIds.Ice,BlockIds.Netherrack,BlockIds.LapisOre,BlockIds.NetherQuartzOre,BlockIds.QuartzBlock,BlockIds.ChiseledQuartz,BlockIds.PillarQuartz]);
   const axePreferred=new Set<number>([BlockIds.Planks,BlockIds.Bookshelf,BlockIds.Log,BlockIds.SpruceLog,251,BlockIds.Chest]);
   const shovelPreferred=new Set<number>([BlockIds.SoulSand,BlockIds.Grass,BlockIds.Dirt,BlockIds.Sand,BlockIds.Gravel,BlockIds.Snow,BlockIds.SnowBlock,BlockIds.Clay,BlockIds.Farmland]);
-  const pickRequirements=new Map<number,number>([[BlockIds.Stone,0],[BlockIds.Cobblestone,0],[BlockIds.MossyCobblestone,0],[BlockIds.CoalOre,0],[BlockIds.Furnace,0],[BlockIds.FurnaceBurning,0],[BlockIds.Netherrack,0],[BlockIds.Spawner,0],[BlockIds.IronDoor,0],[BlockIds.IronOre,1],[BlockIds.LapisOre,1],[BlockIds.GoldOre,2],[BlockIds.RedstoneOre,2],[BlockIds.DiamondOre,2],[BlockIds.LapisBlock,1],[BlockIds.IronBlock,1],[BlockIds.GoldBlock,2],[BlockIds.DiamondBlock,2],[BlockIds.SandStone,0],[BlockIds.BrickBlock,0],[BlockIds.CobblestoneStairs,0],[BlockIds.Obsidian,3]]);
+  const pickRequirements=new Map<number,number>([[BlockIds.Stone,0],[BlockIds.Cobblestone,0],[BlockIds.MossyCobblestone,0],[BlockIds.CoalOre,0],[BlockIds.Furnace,0],[BlockIds.FurnaceBurning,0],[BlockIds.Netherrack,0],[BlockIds.Spawner,0],[BlockIds.IronDoor,0],[BlockIds.IronOre,1],[BlockIds.LapisOre,1],[BlockIds.GoldOre,2],[BlockIds.RedstoneOre,2],[BlockIds.DiamondOre,2],[BlockIds.LapisBlock,1],[BlockIds.IronBlock,1],[BlockIds.GoldBlock,2],[BlockIds.DiamondBlock,2],[BlockIds.SandStone,0],[BlockIds.BrickBlock,0],[BlockIds.CobblestoneStairs,0],[BlockIds.Obsidian,3],[BlockIds.NetherQuartzOre,0],[BlockIds.QuartzBlock,0],[BlockIds.ChiseledQuartz,0],[BlockIds.PillarQuartz,0]]);
   for(const def of registry.values()){const hardness=hardnessMap[def.id]??1,preferredToolClass=pickaxePreferred.has(def.id)?'pickaxe':axePreferred.has(def.id)?'axe':shovelPreferred.has(def.id)?'shovel':undefined,pickLevel=pickRequirements.get(def.id),snowTool=def.id===BlockIds.Snow||def.id===BlockIds.SnowBlock;registry.updateDefinition(def.id,{hardness,harvestableByHand:handHarvestableMap[def.id]??true,instantBreak:hardness===0,unbreakable:hardness<0,...(preferredToolClass?{preferredToolClass}:{}),...(pickLevel!==undefined?{requiresCorrectToolForDrops:true,minimumHarvestLevel:pickLevel,harvestToolClass:'pickaxe' as const}:snowTool?{requiresCorrectToolForDrops:true,minimumHarvestLevel:0,harvestToolClass:'shovel' as const}:{})});}
 }

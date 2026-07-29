@@ -167,6 +167,14 @@ export const BlockIds = {
   SpruceDoor: 242,
   /** Project extension: birch door. */
   BirchDoor: 243,
+  /** Non-Beta extension (1.5+): Nether Quartz Ore — generates in the Nether. */
+  NetherQuartzOre: 244,
+  /** Non-Beta extension (1.5+): Quartz Block — crafted from 4 Nether Quartz. */
+  QuartzBlock: 245,
+  /** Non-Beta extension (1.5+): Chiseled Quartz Block. */
+  ChiseledQuartz: 246,
+  /** Non-Beta extension (1.5+): Quartz Pillar — metadata controls orientation. */
+  PillarQuartz: 247,
 } as const;
 
 /** Numeric block ID (Beta 1.7.3 compatible). */

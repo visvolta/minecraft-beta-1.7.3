@@ -526,6 +526,20 @@ export function registerDefaultRecipes(
     { id: BlockIds.Sand }, { id: BlockIds.Sand },
   ], new ItemStack(BlockIds.SandStone, 'block', 1, 0), false);
 
+  // ---- Non-Beta extension: Nether Quartz crafting (1.5-era recipes) ----
+  tryRegisterShaped('quartz_block', 2, 2, [
+    { id: 'quartz' }, { id: 'quartz' },
+    { id: 'quartz' }, { id: 'quartz' },
+  ], new ItemStack(BlockIds.QuartzBlock, 'block', 1, 0), false);
+  // Chiseled Quartz: 2 quartz blocks (horizontal) → 1.
+  tryRegisterShaped('chiseled_quartz', 2, 1, [
+    { id: BlockIds.QuartzBlock }, { id: BlockIds.QuartzBlock },
+  ], new ItemStack(BlockIds.ChiseledQuartz, 'block', 1, 0), false);
+  // Quartz Pillar: 2 quartz blocks (vertical) → 2.
+  tryRegisterShaped('quartz_pillar', 1, 2, [
+    { id: BlockIds.QuartzBlock }, { id: BlockIds.QuartzBlock },
+  ], new ItemStack(BlockIds.PillarQuartz, 'block', 2, 0), false);
+
   tryRegisterShaped('brick_block', 2, 2, [
     { id: 'brick' }, { id: 'brick' },
     { id: 'brick' }, { id: 'brick' },

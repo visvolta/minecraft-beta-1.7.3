@@ -2,8 +2,10 @@ import { BlockIds } from '../../../blocks/BlockId';
 import { AIR_BLOCK_ID, CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../../chunkConstants';
 import type { Chunk } from '../../Chunk';
 import type { WorldGenerator } from '../../WorldGenerator';
+import type { TreeWorldAccessor } from '../trees/TreeWorldAccessor';
 import { JavaRandom } from '../random/JavaRandom';
 import { NetherTerrainGenerator } from './NetherTerrainGenerator';
+import { WorldGenMinable } from '../decoration/WorldGenMinable';
 
 /**
  * Beta 1.7.3 Nether world generator (`ChunkProviderHell`).
@@ -24,6 +26,8 @@ export class NetherWorldGenerator implements WorldGenerator {
   private readonly worldSeed: bigint;
   /** Monotonic tiebreaker for scheduled lava-spring ticks within a chunk. */
   private nextTickSequence = 0;
+  /** Non-Beta extension: quartz ore vein generator (replaces Netherrack). */
+  private readonly quartzGen = new WorldGenMinable(BlockIds.NetherQuartzOre, 14, BlockIds.Netherrack);
 
   public constructor(worldSeed: bigint) {
     this.worldSeed = worldSeed;
@@ -68,6 +72,36 @@ export class NetherWorldGenerator implements WorldGenerator {
     // Brown and red mushrooms (Beta guards both with `nextInt(1) == 0`, i.e. always).
     this.generateMushroom(chunk, random, BlockIds.BrownMushroom);
     this.generateMushroom(chunk, random, BlockIds.RedMushroom);
+
+    // ---- Non-Beta extension: Nether Quartz Ore generation (1.5-era) ----
+    // Uses a SEPARATE RNG stream so the authentic Beta Nether RNG is untouched.
+    this.generateQuartz(chunk);
+  }
+
+  /**
+   * Non-Beta extension: Nether Quartz Ore generation.
+   *
+   * Historical params (1.5): ~70 attempts/chunk, vein size 14, Y 10–117,
+   * replaces Netherrack only. Runs on a dedicated RNG seeded from worldSeed
+   * XOR a constant + the chunk coordinate hash — completely independent of the
+   * Beta `chunkRandom` stream so Nether determinism is preserved.
+   */
+  private generateQuartz(chunk: Chunk): void {
+    const quartzSeed = this.worldSeed ^ 0x517A5274n; // 'QzRz'
+    const quartzRng = new JavaRandom(
+      quartzSeed + BigInt(chunk.chunkX) * 341873128712n + BigInt(chunk.chunkZ) * 132897987541n,
+    );
+    const accessor: TreeWorldAccessor = {
+      getBlock: (wx, wy, wz) => chunk.getBlock(wx, wy, wz),
+      setBlock: (wx, wy, wz, id) => { chunk.setBlock(wx, wy, wz, id); },
+      getHeight: () => CHUNK_SIZE_Y,
+    };
+    for (let i = 0; i < 70; i++) {
+      const qx = quartzRng.nextInt(16);
+      const qy = quartzRng.nextInt(108) + 10; // Y 10–117
+      const qz = quartzRng.nextInt(16);
+      this.quartzGen.generate(accessor, quartzRng, qx - 8, qy, qz - 8);
+    }
   }
 
   /**

@@ -122,6 +122,12 @@ export abstract class LivingEntity extends Entity {
   public isJumping = false;
   /** Ground speed in blocks/tick (Beta `moveSpeed`). */
   public moveSpeed = 0.7;
+  /**
+   * Fire/lava immunity (Beta `isImmuneToFire`). When true, the entity takes no
+   * fire-contact, burning, or lava damage and is not ignited by either.
+   * Pigman/Ghast set this; all other mobs retain their current behavior.
+   */
+  public isImmuneToFire = false;
 
   // ---- Transient combat state (not persisted) ----
   /** The source of the most recent damage (cleared on load). */
@@ -437,11 +443,11 @@ export abstract class LivingEntity extends Entity {
     // Lava ignites immediately (contact damage is applied in applyEnvironmentDamage).
     if (this.inLava) {
       this.onEnterLava();
-      this.setOnFire(LAVA_FIRE_TICKS);
+      if (!this.isImmuneToFire) this.setOnFire(LAVA_FIRE_TICKS);
     } else if (isFireInAABB(world, aabb)) {
       // Standing in a fire block ignites (shorter duration than lava).
       this.onEnterFire();
-      this.setOnFire(FIRE_CONTACT_TICKS);
+      if (!this.isImmuneToFire) this.setOnFire(FIRE_CONTACT_TICKS);
     }
 
     // Rain extinguishes burning when exposed to the sky.
@@ -464,13 +470,13 @@ export abstract class LivingEntity extends Entity {
     const world = ctx.world.blockUpdateWorld;
 
     // Lava: immediate contact damage (in addition to ignition).
-    if (this.inLava) {
+    if (this.inLava && !this.isImmuneToFire) {
       this.attackEntityFrom(DamageSource.lava(), LAVA_DAMAGE);
     }
 
     // Burning: periodic fire damage while the timer runs.
     if (this.fire > 0) {
-      if (this.fire % FIRE_DAMAGE_INTERVAL === 0) {
+      if (!this.isImmuneToFire && this.fire % FIRE_DAMAGE_INTERVAL === 0) {
         this.attackEntityFrom(DamageSource.fire(), FIRE_DAMAGE);
       }
       this.fire -= 1;

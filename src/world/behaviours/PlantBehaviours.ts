@@ -22,6 +22,17 @@ function isSolid(registry: BlockRegistry, id: BlockId): boolean {
   return registry.getById(id)?.solid === true;
 }
 
+/** Beta BlockFlower.canThisPlantGrowOnThisBlockID: grass or dirt (podzol added). */
+function isFlowerSupport(id: BlockId): boolean {
+  return id === BlockIds.Grass || id === BlockIds.Dirt || id === BlockIds.Podzol;
+}
+
+/** Beta BlockMushroom.canThisPlantGrowOnThisBlockID: opaqueCubeLookup[id]. */
+function isOpaqueCube(registry: BlockRegistry, id: BlockId): boolean {
+  const def = registry.getById(id);
+  return def !== undefined && def.solid === true && def.renderType === 'opaque';
+}
+
 abstract class SupportedPlant implements BlockBehaviour {
   public readonly randomTicks = true;
 
@@ -47,14 +58,15 @@ abstract class SupportedPlant implements BlockBehaviour {
 class FlowerBehaviour extends SupportedPlant {
   public canSurvive(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): boolean {
     const below = ctx.world.getBlock(x, y - 1, z);
-    return isSoil(below) && ctx.world.getBlock(x, y, z) !== BlockIds.WaterFlowing && ctx.world.getBlock(x, y, z) !== BlockIds.WaterStill;
+    return isFlowerSupport(below) && ctx.world.getBlock(x, y, z) !== BlockIds.WaterFlowing && ctx.world.getBlock(x, y, z) !== BlockIds.WaterStill;
   }
 }
 
 class MushroomBehaviour extends SupportedPlant {
   public canSurvive(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): boolean {
     const below = ctx.world.getBlock(x, y - 1, z);
-    return isSolid(this.registry, below) && !isSoil(below) || isSoil(below);
+    // Beta: opaqueCubeLookup[below] (excludes ice, glass, leaves, fluids).
+    return isOpaqueCube(this.registry, below);
   }
 
   public randomTick(ctx: BlockBehaviourContext | any, x: number, y: number, z: number): void {

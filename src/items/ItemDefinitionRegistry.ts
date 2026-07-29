@@ -100,6 +100,9 @@ const GENERIC_ITEMS: readonly ItemDefinition[] = [
   { id: 'string', numericId: 287, stackSize: 64, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 287 },
   { id: 'feather', numericId: 288, stackSize: 64, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 288 },
   { id: 'gunpowder', numericId: 289, stackSize: 64, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 289 },
+  // ---- Non-Beta extensions (intentional) ----
+  { id: 'ghast_tear', numericId: 370, stackSize: 64, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 370 },
+  { id: 'quartz', numericId: 406, stackSize: 64, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 406 },
   { id: 'seeds_wheat', numericId: 295, stackSize: 64, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 295 },
   { id: 'wheat', numericId: 296, stackSize: 64, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 296 },
   { id: 'flint', numericId: 318, stackSize: 64, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 318 },
