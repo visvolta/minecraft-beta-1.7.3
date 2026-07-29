@@ -241,7 +241,14 @@ export class AudioManager implements MobSoundSink {
   private playLegacy(event: MobSoundEvent): void {
     const keys = this.mapLegacy(event.id, event.kind);
     if (keys.length === 0) return;
-    const priority: PlaybackPriority = event.kind === 'death' || event.kind === 'hurt' || event.kind === 'attack' ? 'important' : event.kind === 'pickup' || event.kind === 'eat' ? 'player' : event.kind === 'ambient' || event.kind === 'step' ? 'ambient' : 'normal';
+    // Portal travel/trigger are one-shot feedback for an action the player just
+    // took, so they must not sit at the lowest ('ambient') rank where a busy
+    // soundscape can evict them. The looping portal ambience stays ambient.
+    const portalPriority: PlaybackPriority | undefined =
+      event.id === 'portal.trigger' || event.id === 'portal.travel' ? 'important'
+      : event.id === 'portal.portal' ? 'ambient'
+      : undefined;
+    const priority: PlaybackPriority = portalPriority ?? (event.kind === 'death' || event.kind === 'hurt' || event.kind === 'attack' ? 'important' : event.kind === 'pickup' || event.kind === 'eat' ? 'player' : event.kind === 'ambient' || event.kind === 'step' ? 'ambient' : 'normal');
     this.playPositional(this.randomKey(keys), event.x, event.y, event.z, event.volume, event.pitch, event.attenuationDistance, priority, event.id, priority === 'ambient' ? WORLD_AUDIO_LIMITS.ambientDedupeMs : WORLD_AUDIO_LIMITS.shortDedupeMs);
   }
 
@@ -251,6 +258,12 @@ export class AudioManager implements MobSoundSink {
     if (id === 'random.hurt') return ['damage.hit1','damage.hit2','damage.hit3'];
     if (id === 'fire.fire') return ['fire.fire'];
     if (id === 'fire.ignite') return ['fire.ignite'];
+    // Beta Nether portal sounds. Without these the ids fall through to the
+    // empty-key early return in playLegacy and are silently dropped, which is
+    // why portal ambience/trigger/travel never produced any audio.
+    if (id === 'portal.portal') return ['portal.portal'];
+    if (id === 'portal.trigger') return ['portal.trigger'];
+    if (id === 'portal.travel') return ['portal.travel'];
     // Beta BlockFluid.randomDisplayTick ambience.
     if (id === 'liquid.water') return ['liquid.water'];
     if (id === 'liquid.lava') return ['liquid.lava'];

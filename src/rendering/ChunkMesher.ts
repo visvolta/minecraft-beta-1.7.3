@@ -597,7 +597,12 @@ export class ChunkMesher {
     }
     const masks = new Uint8Array(CHUNK_SECTION_COUNT);
     const blocks = chunk.getBlockDataView();
-    const fullMask = ChunkPassMask.Terrain | ChunkPassMask.Water | ChunkPassMask.Lava | ChunkPassMask.Cutout | ChunkPassMask.Fire | ChunkPassMask.Translucent;
+    // MUST include every pass bit: this is an early-exit sentinel, and any
+    // omitted pass can be missed entirely when the loop breaks before
+    // reaching one of its blocks (portals were skipped this way).
+    const fullMask = ChunkPassMask.Terrain | ChunkPassMask.Water | ChunkPassMask.Lava
+      | ChunkPassMask.Cutout | ChunkPassMask.Fire | ChunkPassMask.Translucent
+      | ChunkPassMask.Leaves | ChunkPassMask.Portal;
     for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
       if (chunk.isSectionEmpty(sectionIndex)) continue;
       const startY = sectionIndex * CHUNK_SECTION_HEIGHT;
@@ -1224,10 +1229,16 @@ export class ChunkMesher {
    * both produce identical geometry.
    */
   private emitPortalBlock(chunk: Chunk, buffers: MeshBuffers, x: number, y: number, z: number): void {
-    const uvRect = this.getSafeUvRect('portal');
     const light = this.getLightComponentsAt(chunk, x, y, z);
     const tint: readonly [number, number, number] = [1, 1, 1];
     const inset = 0.125;
+
+    // The portal is NOT sampled from the block atlas: the atlas keeps only the
+    // top 16x16 tile of each texture, and portal.png is a 16x512 strip of 32
+    // frames. The portal material samples the standalone strip instead, so the
+    // geometry must emit plain 0..1 UVs covering one whole frame. The shader
+    // then maps v into the current frame's slice of the strip.
+    const uvRect = { u0: 0, v0: 0, u1: 1, v1: 1 };
 
     // Canonical axis: along X when an X neighbour is also a portal block.
     const hasXNeighbour =
@@ -1898,7 +1909,6 @@ export class ChunkMesher {
   public buildPortals(chunk: Chunk): THREE.BufferGeometry {
     const buffers = new MeshBuffers();
     const sectionPassMasks = this.getSectionPassMasks(chunk);
-    const uvRect = this.getSafeUvRect('portal');
 
     for (let sectionIndex = 0; sectionIndex < CHUNK_SECTION_COUNT; sectionIndex++) {
       if (!hasChunkPass(sectionPassMasks[sectionIndex]!, ChunkPassMask.Portal)) continue;
@@ -1907,54 +1917,9 @@ export class ChunkMesher {
         for (let z = 0; z < CHUNK_SIZE_Z; z++) {
           for (let x = 0; x < CHUNK_SIZE_X; x++) {
             if (chunk.getBlock(x, y, z) !== BlockIds.Portal) continue;
-
-            // Canonical axis: plane runs along X when an X neighbour is also
-            // a portal block, otherwise along Z.
-            const hasXNeighbour =
-              this.getBlockAt(chunk, x - 1, y, z) === BlockIds.Portal ||
-              this.getBlockAt(chunk, x + 1, y, z) === BlockIds.Portal;
-
-            const light = this.getLightComponentsAt(chunk, x, y, z);
-            const tint: readonly [number, number, number] = [1, 1, 1];
-            const inset = 0.125;
-
-            if (hasXNeighbour) {
-              // Plane spans X, thin in Z: two quads at z = 0.5 -/+ inset.
-              for (const zOffset of [0.5 - inset, 0.5 + inset]) {
-                buffers.pushQuad(
-                  [
-                    [x, y, z + zOffset],
-                    [x + 1, y, z + zOffset],
-                    [x + 1, y + 1, z + zOffset],
-                    [x, y + 1, z + zOffset],
-                  ],
-                  [0, 0, 1],
-                  uvRect,
-                  tint,
-                  light,
-                  1,
-                  FluidTextureKind.WaterStill,
-                );
-              }
-            } else {
-              // Plane spans Z, thin in X.
-              for (const xOffset of [0.5 - inset, 0.5 + inset]) {
-                buffers.pushQuad(
-                  [
-                    [x + xOffset, y, z],
-                    [x + xOffset, y, z + 1],
-                    [x + xOffset, y + 1, z + 1],
-                    [x + xOffset, y + 1, z],
-                  ],
-                  [1, 0, 0],
-                  uvRect,
-                  tint,
-                  light,
-                  1,
-                  FluidTextureKind.WaterStill,
-                );
-              }
-            }
+            // Delegates to the shared emitter so the standalone and
+            // single-pass worker paths can never diverge.
+            this.emitPortalBlock(chunk, buffers, x, y, z);
           }
         }
       }

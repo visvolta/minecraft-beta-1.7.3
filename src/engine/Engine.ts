@@ -68,7 +68,7 @@ import { registerDefaultSmeltingAndFuels } from '../furnace/registerDefaultSmelt
 import { FurnaceUi } from '../furnace/FurnaceUi';
 import { FurnaceController } from '../furnace/FurnaceController';
 import { FurnaceInputController } from '../furnace/FurnaceInputController';
-import { BlockIds } from '../blocks/BlockId';
+import { BlockIds, type BlockId } from '../blocks/BlockId';
 import { classifyItemRender } from '../inventory/ItemRenderClassifier';
 import { BlockItemModelBuilder } from '../inventory/BlockItemModelBuilder';
 import { ChunkRenderer, attachEntityLighting } from '../rendering/ChunkRenderer';
@@ -114,13 +114,24 @@ import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
 import { PortalAnimationSystem } from '../rendering/portal/PortalAnimationSystem';
+import { PortalParticleSystem } from '../rendering/portal/PortalParticleSystem';
+import { PortalTravelState } from '../world/portal/PortalTravelState';
+import { isInsidePortal } from '../world/portal/PortalContact';
+import { portalAxisAt } from '../world/portal/PortalFrame';
+import {
+  DimensionTransition,
+  TRANSITION_CRITICAL_RADIUS,
+  criticalChunkCount,
+} from '../world/dimension/DimensionTransition';
+import { Teleporter, PORTAL_BUILD_MIN_Y, PORTAL_BUILD_MAX_Y } from '../world/portal/Teleporter';
 import { WorldEventQueue } from '../world/events/WorldEventQueue';
 import { ChunkStreamer } from '../world/ChunkStreamer';
 import type { WorldGenerator } from '../world/WorldGenerator';
-import { DimensionRegistry } from '../world/dimension/DimensionRegistry';
+import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../world/chunkConstants';
+import { DimensionRegistry, convertCoordinate } from '../world/dimension/DimensionRegistry';
 import { OVERWORLD_DIMENSION } from '../world/dimension/overworldDimension';
 import { NETHER_DIMENSION } from '../world/dimension/netherDimension';
-import { DIMENSION_OVERWORLD, type DimensionId } from '../world/dimension/DimensionId';
+import { DIMENSION_NETHER, DIMENSION_OVERWORLD, type DimensionId } from '../world/dimension/DimensionId';
 import type { DimensionDefinition } from '../world/dimension/DimensionDefinition';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
 import { ClimateSampler } from '../world/generation/climate/ClimateSampler';
@@ -227,6 +238,20 @@ function readProfilerEnabledSetting(): boolean {
 
 const GEOMETRY_MEMORY_SAMPLE_MS = 250;
 
+/** Radius (blocks) around the camera scanned for portal ambience/particles. */
+const PORTAL_AMBIENCE_RADIUS = 8;
+
+/**
+ * Budget for the destination half of a dimension switch.
+ *
+ * Each stage is bounded separately so one slow stage cannot consume the whole
+ * allowance and starve the ones after it. Exceeding a budget aborts the
+ * transition rather than leaving the player frozen behind the loading screen.
+ */
+const DIMENSION_CHUNK_LOAD_TIMEOUT_MS = 20_000;
+const DIMENSION_MESH_SETTLE_TIMEOUT_MS = 8_000;
+const DIMENSION_TRANSITION_POLL_MS = 16;
+
 export class Engine {
   private readonly renderer: Renderer;
   private readonly input: Input;
@@ -305,11 +330,18 @@ export class Engine {
    * result from a previous visit to a dimension can be rejected.
    */
   private contextGeneration = 1;
-  private readonly worldGenerator: WorldGenerator;
+  private worldGenerator: WorldGenerator;
+  /** World seed, retained so a dimension switch can build the new generator. */
+  private readonly worldSeed: bigint;
   private readonly chunkRenderer: ChunkRenderer;
   private readonly fluidAnimationSystem: FluidAnimationSystem;
   private readonly fireAnimationSystem: FireAnimationSystem;
   private readonly portalAnimation = new PortalAnimationSystem();
+  private portalParticles: PortalParticleSystem | undefined;
+  /** Beta portal charge/cooldown state, ticked at the fixed 20 Hz rate. */
+  private readonly portalTravel = new PortalTravelState();
+  /** Single owner of any in-flight dimension switch. */
+  private readonly dimensionTransition = new DimensionTransition();
   private readonly worldEventQueue: WorldEventQueue;
   private readonly chunkStreamer: ChunkStreamer;
   private readonly lightEngine: LightEngine;
@@ -388,6 +420,12 @@ export class Engine {
     private readonly audioManager: AudioManager,
     private readonly onPauseRequested: (() => void) | undefined = undefined,
     private readonly onPersistenceError: ((error: RecordCorruptionError) => void) | undefined = undefined,
+    /**
+     * Requested dimension switch. The application owns the loading screen and
+     * world-context swap; the engine only detects and freezes.
+     */
+    private readonly onDimensionTransitionRequested:
+      ((dimensionId: DimensionId, x: number, y: number, z: number) => void) | undefined = undefined,
   ) {
     const loadedMetadata = this.persistence.getMetadata();
     if (loadedMetadata === null) throw new Error('Engine requires the world metadata to be loaded before construction');
@@ -408,6 +446,7 @@ export class Engine {
     this.dimensions.register(NETHER_DIMENSION);
     this.activeDimensionId = metadata.playerDimension ?? DIMENSION_OVERWORLD;
     if (!this.dimensions.has(this.activeDimensionId)) this.activeDimensionId = DIMENSION_OVERWORLD;
+    this.worldSeed = worldSeed;
     this.worldGenerator = this.activeDimension.createGenerator(worldSeed);
     this.worldTime = new WorldTime();
     this.worldTime.setTotalTicks(metadata.timeTicks);
@@ -926,6 +965,7 @@ export class Engine {
     this.fluidAnimationSystem = new FluidAnimationSystem();
     this.fireAnimationSystem = new FireAnimationSystem();
 
+    this.portalParticles = new PortalParticleSystem(this.renderer.scene);
     this.chunkRenderer = new ChunkRenderer(this.renderer.scene, this.chunkManager, blockRegistry, this.atlas, this.fluidAnimationSystem, this.fireAnimationSystem, this.portalAnimation, worldSeed);
     const trustPersistedLighting = metadata.saveVersion === SAVE_VERSION && metadata.generatorVersion === GENERATOR_VERSION;
     this.chunkStreamer = new ChunkStreamer(
@@ -978,6 +1018,32 @@ export class Engine {
       weatherController: this.weatherController,
       precipitationSimulator: this.precipitationSimulator,
       blockUpdateWorld: this.blockUpdateWorld,
+      chunkRenderer: this.chunkRenderer,
+      portal: {
+        getState: () => ({
+          dimension: this.activeDimensionId,
+          dimensionName: this.activeDimension.name,
+          phase: this.portalTravel.getPhase(),
+          overlay: this.portalTravel.getOverlayStrength(),
+          cooldownTicks: this.portalTravel.getCooldownTicks(),
+          transitionActive: this.dimensionTransition.isActive(),
+          transitionPhase: this.dimensionTransition.getPhase(),
+          readiness: this.dimensionTransition.getReadiness(),
+          inPortal: this.player.isAlive() && isInsidePortal(
+            {
+              getBlock: (x: number, y: number, z: number) => this.blockUpdateWorld.getBlock(x, y, z),
+              isLoaded: (x: number, z: number) => this.blockUpdateWorld.isLoaded(x, z),
+            },
+            this.player.getAABB(),
+          ),
+          particles: this.portalParticles?.getActiveCount() ?? 0,
+          simulationTick: this.simulationTick,
+          position: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z },
+        }),
+        placePlayer: (x: number, y: number, z: number) => {
+          this.player.resetForPortalArrival(x, y, z);
+        },
+      },
       chunkManager: this.chunkManager,
       fluidAnimationSystem: this.fluidAnimationSystem,
       fireAnimationSystem: this.fireAnimationSystem,
@@ -1048,6 +1114,15 @@ export class Engine {
 
   /** Id of the dimension currently being simulated and rendered. */
   public getActiveDimensionId(): DimensionId { return this.activeDimensionId; }
+
+  /** True while a dimension switch is in flight (input/simulation frozen). */
+  public isDimensionTransitionActive(): boolean { return this.dimensionTransition.isActive(); }
+
+  /** The in-flight transition, for readiness reporting during loading. */
+  public getDimensionTransition(): DimensionTransition { return this.dimensionTransition; }
+
+  /** Portal charge 0..1, for the screen overlay. */
+  public getPortalOverlayStrength(): number { return this.portalTravel.getOverlayStrength(); }
 
   /** Registry of all known dimensions (extension point for custom dimensions). */
   public getDimensionRegistry(): DimensionRegistry { return this.dimensions; }
@@ -1347,6 +1422,7 @@ export class Engine {
       // (which made their cost scale with monitor refresh rate).
       this.updateAnimatedItemIcons();
       this.updateAmbientBlockAudio();
+      this.tickPortalTravel();
       this.worldTickScheduler.endTick();
       this.simulationAccumulatorTicks--;
     }
@@ -1366,6 +1442,7 @@ export class Engine {
     this.fluidAnimationSystem.update(this.worldTime.getTotalTicks());
     this.fireAnimationSystem.update(this.worldTime.getTotalTicks());
     this.portalAnimation.update(this.worldTime.getTotalTicks());
+    this.portalParticles?.update(deltaSeconds);
     this.updateSleepPresentation();
     this.updateUnderwaterOverlay();
     this.updateFishingLine();
@@ -2092,6 +2169,378 @@ export class Engine {
    * one-shots rolled per nearby block, never a permanent global loop, so they
    * fade out naturally as the source is removed or falls out of range.
    */
+  /**
+   * Beta portal contact, charge and travel — run on the fixed 20 Hz tick, not
+   * per rendered frame, so the timer is frame-rate independent.
+   *
+   * Portals are deliberately non-solid (Beta returns null from
+   * `getCollisionBoundingBoxFromPool`), so contact CANNOT come from the
+   * collision system. An explicit AABB overlap against the portal's visible
+   * plane is used instead.
+   */
+  private tickPortalTravel(): void {
+    // A transition owns the world; never evaluate contact while one runs.
+    if (this.dimensionTransition.isActive()) return;
+
+    const world = {
+      getBlock: (x: number, y: number, z: number) => this.blockUpdateWorld.getBlock(x, y, z),
+      isLoaded: (x: number, z: number) => this.blockUpdateWorld.isLoaded(x, z),
+    };
+
+    if (this.player.isAlive() && isInsidePortal(world, this.player.getAABB())) {
+      this.portalTravel.setInPortal();
+    }
+
+    const result = this.portalTravel.tick();
+
+    if (result.startedContact) {
+      // Beta plays portal.trigger exactly once, as the charge begins.
+      this.audioManager.emit({
+        id: 'portal.trigger',
+        kind: 'ambient',
+        x: this.player.position.x, y: this.player.position.y, z: this.player.position.z,
+        volume: 1,
+        pitch: Math.random() * 0.4 + 0.8,
+        attenuationDistance: 16,
+      });
+    }
+
+    if (result.shouldTravel) {
+      this.beginPortalTransition();
+    }
+
+    this.emitPortalAmbience();
+  }
+
+  /**
+   * Beta `BlockPortal.randomDisplayTick`: a 1-in-100 ambient hum per portal
+   * block and four particles per tick, both positional and distance-culled.
+   */
+  private emitPortalAmbience(): void {
+    const particles = this.portalParticles;
+    if (particles === undefined) return;
+
+    const camera = this.renderer.camera;
+    const cx = Math.floor(camera.position.x);
+    const cy = Math.floor(camera.position.y);
+    const cz = Math.floor(camera.position.z);
+    const radius = PORTAL_AMBIENCE_RADIUS;
+
+    const world = {
+      getBlock: (x: number, y: number, z: number) => this.blockUpdateWorld.getBlock(x, y, z),
+      setBlock: () => undefined,
+      isLoaded: (x: number, z: number) => this.blockUpdateWorld.isLoaded(x, z),
+    };
+
+    for (let y = cy - radius; y <= cy + radius; y++) {
+      if (y < 0 || y >= CHUNK_SIZE_Y) continue;
+      for (let z = cz - radius; z <= cz + radius; z++) {
+        for (let x = cx - radius; x <= cx + radius; x++) {
+          if (!this.blockUpdateWorld.isLoaded(x, z)) continue;
+          if (this.blockUpdateWorld.getBlock(x, y, z) !== BlockIds.Portal) continue;
+
+          const axis = portalAxisAt(world, x, y, z);
+          particles.emit(x, y, z, axis, camera.position.x, camera.position.y, camera.position.z);
+
+          // Beta: nextInt(100) == 0 per portal block per random display tick.
+          if (Math.random() < 0.01) {
+            this.audioManager.emit({
+              id: 'portal.portal',
+              kind: 'ambient',
+              x: x + 0.5, y: y + 0.5, z: z + 0.5,
+              volume: 1,
+              pitch: Math.random() * 0.4 + 0.8,
+              attenuationDistance: 16,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Starts an asynchronous dimension switch: play the travel sound once, show
+   * the loading screen, and freeze the source world. The destination is only
+   * revealed once the critical area is renderable.
+   */
+  private beginPortalTransition(): void {
+    const source = this.activeDimension;
+    const destinationId = this.activeDimensionId === DIMENSION_OVERWORLD ? DIMENSION_NETHER : DIMENSION_OVERWORLD;
+    const destination = this.dimensions.get(destinationId);
+    if (destination === undefined) {
+      this.portalTravel.abortTransition();
+      return;
+    }
+
+    // Beta scales X/Z by the ratio of the two dimensions' scales and keeps Y.
+    const targetX = convertCoordinate(this.player.position.x, source.coordinateScale, destination.coordinateScale);
+    const targetZ = convertCoordinate(this.player.position.z, source.coordinateScale, destination.coordinateScale);
+
+    const started = this.dimensionTransition.begin({
+      dimensionId: destinationId,
+      x: targetX,
+      y: this.player.position.y,
+      z: targetZ,
+    });
+    // A second trigger while one is running must be ignored entirely.
+    if (!started) return;
+
+    // Beta plays portal.travel exactly once, as the switch fires.
+    this.audioManager.emit({
+      id: 'portal.travel',
+      kind: 'ambient',
+      x: this.player.position.x, y: this.player.position.y, z: this.player.position.z,
+      volume: 1,
+      pitch: Math.random() * 0.4 + 0.8,
+      attenuationDistance: 16,
+    });
+
+    // Freeze the source world before anything is torn down, and clear live
+    // particles so none survive into the destination.
+    this.setPaused(true);
+    this.portalParticles?.clear();
+    this.onDimensionTransitionRequested?.(destinationId, targetX, this.player.position.y, targetZ);
+  }
+
+  /**
+   * Performs the destination half of a dimension switch, driving the
+   * transition's readiness flags as each stage completes.
+   *
+   * The order is load-bearing and mirrors the requirement:
+   *   save source -> activate destination context -> load critical chunks ->
+   *   establish lighting -> find/create the destination portal -> position the
+   *   player -> report ready.
+   *
+   * Only the CRITICAL ring is awaited, never the full render distance: the
+   * player must not stare at a loading screen while chunks 6 rings out
+   * generate, but must also never be revealed into an empty void.
+   *
+   * Called by the application layer, which owns the loading screen. The engine
+   * stays paused throughout, so nothing here races the simulation tick.
+   */
+  public async activateDimension(
+    dimensionId: DimensionId,
+    targetX: number,
+    targetY: number,
+    targetZ: number,
+  ): Promise<boolean> {
+    const destination = this.dimensions.get(dimensionId);
+    if (destination === undefined) return false;
+    const transition = this.dimensionTransition;
+
+    // 1. Persist the dimension we are leaving. Chunk records are namespaced by
+    //    dimension, so this must happen BEFORE persistence is re-pointed or
+    //    Nether chunks would be written into Overworld keys.
+    await this.saveActiveDimensionState();
+
+    // 2. Tear down the source world's residency. Meshes must go with the
+    //    chunks or the old dimension would still be drawn behind the new one.
+    for (const chunk of [...this.chunkManager]) {
+      this.chunkRenderer.removeChunkMesh(chunk.chunkX, chunk.chunkZ);
+    }
+    this.chunkManager.clear();
+    this.entityManager.dispose();
+    this.portalParticles?.clear();
+
+    // 3. Activate the destination context. The generation counter is bumped so
+    //    any worker result still in flight for the old dimension is rejected
+    //    on arrival rather than integrated into the wrong world.
+    this.contextGeneration += 1;
+    this.activeDimensionId = dimensionId;
+    this.worldGenerator = destination.createGenerator(this.worldSeed);
+    this.persistence.setDimension(dimensionId);
+
+    const metadata = this.persistence.getMetadata();
+    const trustPersistedLighting =
+      metadata !== null &&
+      metadata.saveVersion === SAVE_VERSION &&
+      metadata.generatorVersion === GENERATOR_VERSION;
+
+    this.chunkStreamer.rebindContext(
+      { worldId: metadata?.worldId ?? '', dimensionId, contextGeneration: this.contextGeneration },
+      this.worldGenerator,
+      destination.name,
+      destination.lighting.hasSkyLight,
+      trustPersistedLighting,
+    );
+    transition.updateReadiness({ contextReady: true });
+
+    // 4. Load the critical ring around the (pre-portal) target. The teleporter
+    //    needs resident columns to search, so chunks come before the portal.
+    const targetChunkX = Math.floor(targetX / CHUNK_SIZE_X);
+    const targetChunkZ = Math.floor(targetZ / CHUNK_SIZE_Z);
+    const ready = await this.loadCriticalChunks(targetChunkX, targetChunkZ);
+    if (!ready) return false;
+
+    // 5. Lighting for the critical ring. Worker-generated chunks arrive with
+    //    initial light already computed; borders are reconciled on adoption.
+    //    Verify rather than assume, so a missed chunk cannot reveal unlit.
+    this.establishCriticalLighting(targetChunkX, targetChunkZ);
+    transition.updateReadiness({ lightingReady: true });
+
+    // 6. Find an existing portal or build one (Beta Teleporter).
+    const placement = this.resolveDestinationPortal(targetX, targetY, targetZ);
+    transition.updateReadiness({ portalReady: true });
+
+    // 7. Position the player and settle the camera on the new location.
+    this.player.resetForPortalArrival(placement.x, placement.y, placement.z);
+    this.portalTravel.completeTransition();
+    transition.updateReadiness({ playerPlaced: true });
+
+    // 8. Mesh the critical ring so the reveal shows geometry, not holes.
+    await this.settleCriticalMeshes(targetChunkX, targetChunkZ);
+    transition.updateReadiness({ meshesReady: true });
+
+    return transition.isReadyToReveal();
+  }
+
+  /**
+   * Persists the dimension being left.
+   *
+   * Chunk writes are ENQUEUED but deliberately not awaited. Each write
+   * captures its dimension at enqueue time, so a queued Overworld chunk still
+   * lands in Overworld keys even after persistence is re-pointed at the
+   * Nether; there is therefore no correctness reason to block travel on them,
+   * and awaiting a full working set (50+ chunks, one storage round-trip each)
+   * routinely exceeded the entire transition budget.
+   *
+   * Only the metadata write is awaited, because `playerDimension` must be
+   * durable before the switch: a crash mid-transition should reopen the world
+   * in the dimension the player actually ended up in.
+   */
+  private async saveActiveDimensionState(): Promise<void> {
+    try {
+      // Metadata is enqueued FIRST. The write lane is serial and ties on
+      // priority are broken by acceptance order, so enqueueing it after the
+      // chunk batch would make it wait for every chunk write to drain — which
+      // is what the transition budget is spent on.
+      const metadataSaved = this.persistence.saveMetadata(
+        { ...this.snapshotMetadata(), playerDimension: this.activeDimensionId },
+        WRITE_PRIORITY_FORCED,
+      );
+
+      for (const chunk of this.chunkManager) {
+        if (!chunk.isPersistenceDirty()) continue;
+        this.persistence.saveChunk(chunk, WRITE_PRIORITY_FORCED).catch((error: unknown) => {
+          console.warn('[Dimension] chunk save failed while leaving a dimension:', error);
+        });
+      }
+
+      await metadataSaved;
+    } catch (error) {
+      // A failed source save must not strand the player mid-transition; the
+      // previously written records on disk are still intact.
+      console.warn('[Dimension] saving the source dimension failed:', error);
+    }
+  }
+
+  /**
+   * Pumps the streamer until the critical ring around the target is resident.
+   *
+   * Chunk loading is asynchronous and normally driven from the render loop,
+   * which is frozen during a transition, so it is driven explicitly here.
+   */
+  private async loadCriticalChunks(centerChunkX: number, centerChunkZ: number): Promise<boolean> {
+    const transition = this.dimensionTransition;
+    const required = criticalChunkCount();
+    const deadline = performance.now() + DIMENSION_CHUNK_LOAD_TIMEOUT_MS;
+
+    while (performance.now() < deadline) {
+      let loaded = 0;
+      for (let dz = -TRANSITION_CRITICAL_RADIUS; dz <= TRANSITION_CRITICAL_RADIUS; dz++) {
+        for (let dx = -TRANSITION_CRITICAL_RADIUS; dx <= TRANSITION_CRITICAL_RADIUS; dx++) {
+          const cx = centerChunkX + dx;
+          const cz = centerChunkZ + dz;
+          if (this.chunkManager.hasChunk(cx, cz)) loaded += 1;
+          else this.chunkStreamer.dispatchCriticalLoad(cx, cz);
+        }
+      }
+
+      transition.updateReadiness({
+        criticalChunksLoaded: loaded,
+        targetChunkLoaded: this.chunkManager.hasChunk(centerChunkX, centerChunkZ),
+      });
+
+      if (loaded >= required) return true;
+
+      // Advance ONLY the chunks requested above. Calling the streamer's normal
+      // update() here would re-stream the full render radius and queue ~160
+      // chunks nobody is waiting for ahead of the 9 that gate the reveal.
+      this.chunkStreamer.pumpCriticalLoads(centerChunkX, centerChunkZ);
+      await new Promise((resolve) => setTimeout(resolve, DIMENSION_TRANSITION_POLL_MS));
+    }
+
+    return false;
+  }
+
+  /**
+   * Guarantees the critical ring carries valid light before the reveal.
+   *
+   * Chunks adopted from the generation worker already hold initial light, but
+   * a chunk read from persistence in an older format (or one whose neighbours
+   * arrived after it) can still have unreconciled borders.
+   */
+  private establishCriticalLighting(centerChunkX: number, centerChunkZ: number): void {
+    for (let dz = -TRANSITION_CRITICAL_RADIUS; dz <= TRANSITION_CRITICAL_RADIUS; dz++) {
+      for (let dx = -TRANSITION_CRITICAL_RADIUS; dx <= TRANSITION_CRITICAL_RADIUS; dx++) {
+        const chunk = this.chunkManager.getChunk(centerChunkX + dx, centerChunkZ + dz);
+        if (chunk === undefined) continue;
+        this.lightEngine.reconcileChunkBorders(chunk);
+      }
+    }
+  }
+
+  /** Beta `Teleporter`: nearest existing portal, else build one. */
+  private resolveDestinationPortal(x: number, y: number, z: number): { x: number; y: number; z: number } {
+    const teleporter = new Teleporter(this.worldSeed + BigInt(this.activeDimensionId));
+    const world = {
+      getBlock: (bx: number, by: number, bz: number) => this.blockUpdateWorld.getBlock(bx, by, bz),
+      setBlock: (bx: number, by: number, bz: number, id: number) => {
+        this.blockUpdateWorld.setBlock(bx, by, bz, id as BlockId);
+      },
+      isLoaded: (bx: number, bz: number) => this.blockUpdateWorld.isLoaded(bx, bz),
+      // Beta's 128-block search would otherwise read air out of unloaded
+      // space and "find" nothing; restrict it to resident columns.
+      isColumnAvailable: (bx: number, bz: number) => this.blockUpdateWorld.isLoaded(bx, bz),
+    };
+
+    const clampedY = Math.max(PORTAL_BUILD_MIN_Y, Math.min(PORTAL_BUILD_MAX_Y, y));
+    return teleporter.findOrCreate(world, x, clampedY, z);
+  }
+
+  /**
+   * Waits for the critical ring's meshes to be built and uploaded.
+   *
+   * Readiness must be judged on what is actually renderable, not on chunk
+   * residency: a resident but unmeshed chunk still reveals as a hole.
+   */
+  private async settleCriticalMeshes(centerChunkX: number, centerChunkZ: number): Promise<void> {
+    const deadline = performance.now() + DIMENSION_MESH_SETTLE_TIMEOUT_MS;
+    while (performance.now() < deadline) {
+      this.chunkRenderer.update(0, centerChunkX * CHUNK_SIZE_X + 8, centerChunkZ * CHUNK_SIZE_Z + 8);
+      const stats = this.chunkRenderer.getMeshingStats();
+      if (stats.queued === 0 && stats.pendingUploads === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, DIMENSION_TRANSITION_POLL_MS));
+    }
+  }
+
+  /**
+   * Resumes play after a successful transition, or recovers after a failed
+   * one. Either way the player ends up unfrozen: a transition failure must
+   * never leave the game stuck behind a loading screen.
+   */
+  public finishDimensionTransition(succeeded: boolean): void {
+    if (succeeded) {
+      this.dimensionTransition.complete();
+      this.portalTravel.resumeNormal();
+    } else {
+      this.dimensionTransition.abort();
+      this.portalTravel.abortTransition();
+    }
+    this.setPaused(false);
+    void this.saveMetadata(true);
+  }
+
   private updateAmbientBlockAudio(): void {
     const camera = this.renderer.camera;
     const sounds = collectAmbientSounds(

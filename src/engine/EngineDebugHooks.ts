@@ -46,6 +46,12 @@ export interface EngineDebugHookDependencies {
   readonly weatherController: WeatherController;
   readonly precipitationSimulator: PrecipitationSimulator;
   readonly blockUpdateWorld: BlockUpdateWorld;
+  readonly chunkRenderer: { getPassMeshCounts(): unknown; probeChunkMesh(x: number, z: number): unknown };
+  /** Portal/dimension state, exposed for manual and automated portal testing. */
+  readonly portal: {
+    getState(): unknown;
+    placePlayer(x: number, y: number, z: number): void;
+  };
   readonly chunkManager: ChunkManager;
   readonly fluidAnimationSystem: { getDebugInfo(): unknown };
   readonly fireAnimationSystem: { getDebugInfo(): unknown };
@@ -83,6 +89,32 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
     validateMeshWorkers: () => deps.validationHarness.validateMeshWorker(),
     getTargetedEntity: () => deps.interactionController.getTargetedEntity(),
     getEntityMetrics: () => ({ active: deps.entityManager.activeCount, parked: deps.entityManager.parkedCount, tick: deps.entityManager.currentTick }),
+    /**
+     * Places a block through the normal world-mutation path (neighbour
+     * notification + lighting). Used by automated browser tests to build
+     * structures such as portal frames without simulating player input.
+     */
+    setBlock: (x: number, y: number, z: number, blockId: number) => {
+      deps.blockUpdateWorld.setBlock(x, y, z, blockId as never, {
+        reason: 'player', notifyNeighbours: true, updateLighting: true,
+      });
+      return deps.blockUpdateWorld.getBlock(x, y, z);
+    },
+    getBlockAt: (x: number, y: number, z: number) => deps.blockUpdateWorld.getBlock(x, y, z),
+    /**
+     * Portal/dimension diagnostics: active dimension, the Beta charge timer,
+     * and the live transition readiness. Lets a browser test observe travel
+     * progress without guessing from visuals.
+     */
+    getPortalState: () => deps.portal.getState(),
+    /**
+     * Moves the player to a world position. Used by automated tests to stand
+     * inside a portal; gameplay never calls this.
+     */
+    placePlayer: (x: number, y: number, z: number) => { deps.portal.placePlayer(x, y, z); },
+    getPassMeshCounts: () => deps.chunkRenderer.getPassMeshCounts(),
+    /** Diagnostic: mesh one chunk synchronously and report per-pass vertex counts. */
+    probeChunkMesh: (chunkX: number, chunkZ: number) => deps.chunkRenderer.probeChunkMesh(chunkX, chunkZ),
     getTickMetrics: () => deps.worldTickScheduler.getMetrics(),
     getRedstoneMetrics: () => ({ ...deps.worldTickScheduler.getMetrics(), powerQueries: deps.redstonePowerEngine.getMetrics() }),
     getFallingBlockMetrics: () => ({

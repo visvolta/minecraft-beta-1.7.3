@@ -314,9 +314,14 @@ export class WorldPersistenceService {
     const guardError = this.readGuardError();
     if (guardError !== undefined) return Promise.reject(guardError);
     const worldId = this.worldId!;
+    // Capture the dimension at ENQUEUE time. Reading `this.dimension` inside
+    // the deferred task would use whichever dimension is active when the task
+    // finally runs, so a queued Overworld read could resolve against Nether
+    // keys after a portal transition.
+    const dimension = this.dimension;
     return this.readExec.enqueue(async () => {
       const readStart = performance.now();
-      const bytes = await this.backend.readChunk(worldId, chunkX, chunkZ, this.dimension);
+      const bytes = await this.backend.readChunk(worldId, chunkX, chunkZ, dimension);
       this.performanceStats.lastChunkReadMs = performance.now() - readStart;
       if (bytes === undefined) return undefined;
       const decodeStart = performance.now();
@@ -341,6 +346,9 @@ export class WorldPersistenceService {
     const worldId = this.worldId!;
     const key = chunkKey(chunk.chunkX, chunk.chunkZ);
     const isBackground = priority < WRITE_PRIORITY_FORCED;
+    // Captured at enqueue time so a save queued in one dimension can never be
+    // written into another dimension's namespace after a transition.
+    const dimension = this.dimension;
     this.inFlightChunks.set(key, (this.inFlightChunks.get(key) ?? 0) + 1);
     if (isBackground) this.pendingBackgroundSaves++;
     this.notifyChange();
@@ -350,7 +358,7 @@ export class WorldPersistenceService {
       const recordBytes = await this.encodeChunkRecord(chunk, snapshotRevision);
       this.performanceStats.lastChunkEncodeMs = performance.now() - encodeStart;
       const writeStart = performance.now();
-      await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes, this.dimension);
+      await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes, dimension);
       this.performanceStats.lastChunkWriteMs = performance.now() - writeStart;
       // Captured-revision invariant: clean only if still at the captured revision.
       if (chunk.getPersistenceRevision() === snapshotRevision) {
@@ -396,8 +404,9 @@ export class WorldPersistenceService {
     const guardError = this.writeGuardError(priority);
     if (guardError !== undefined) return Promise.reject(guardError);
     const worldId = this.worldId!;
+    const dimension = this.dimension;
     return this.writeExec.enqueue(async () => {
-      await this.backend.deleteChunk(worldId, chunkX, chunkZ, this.dimension);
+      await this.backend.deleteChunk(worldId, chunkX, chunkZ, dimension);
     }, priority);
   }
 
@@ -445,6 +454,7 @@ export class WorldPersistenceService {
       return existing.promise;
     }
     const worldId = this.worldId!;
+    const dimension = this.dimension;
     const state: UnloadState = { canceled: false, promise: undefined as unknown as Promise<void> };
     const task = this.writeExec.enqueue(async () => {
       if (state.canceled) return;
@@ -454,7 +464,7 @@ export class WorldPersistenceService {
       this.performanceStats.lastChunkEncodeMs = performance.now() - encodeStart;
       if (state.canceled) return;
       const writeStart = performance.now();
-      await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes, this.dimension);
+      await this.backend.writeChunk(worldId, chunk.chunkX, chunk.chunkZ, recordBytes, dimension);
       this.performanceStats.lastChunkWriteMs = performance.now() - writeStart;
       if (chunk.getPersistenceRevision() === snapshotRevision) {
         chunk.markPersistenceClean(snapshotRevision);

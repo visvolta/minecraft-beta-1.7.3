@@ -187,6 +187,30 @@ export class Player extends Entity {
   }
   public attackFromMob(amount:number,attacker:DamageAttacker):boolean{return this.attackEntityFrom(DamageSource.mob(attacker),amount);}
 
+  /**
+   * Places the player at a portal destination after a dimension switch.
+   *
+   * Unlike a respawn this preserves the player entirely — health, hunger,
+   * inventory, air and fire all carry across dimensions in Beta. Only
+   * position and motion are reset: arriving with the velocity accumulated
+   * while walking into the source portal would fling the player out of the
+   * destination frame, and a stale fallDistance would deal fall damage on
+   * arrival.
+   */
+  public resetForPortalArrival(x: number, y: number, z: number): void {
+    this.setPosition(x, y, z);
+    this.position.x = x;
+    this.position.y = y;
+    this.position.z = z;
+    this.velocity.x = this.velocity.y = this.velocity.z = 0;
+    this.wishVelocity.x = this.wishVelocity.z = 0;
+    this.fallDistance = 0;
+    this.grounded = false;
+    this.collidedHorizontally = false;
+    this.inWater = this.wasInWater = this.enteredWaterThisTick = this.inLava = this.headUnderwater = false;
+    this.stopBreakingAnimation();
+  }
+
   public resetForRespawn(x:number,y:number,z:number):void{this.mountEntity(null);this.isFlying=false;this.position.x=x;this.position.y=y;this.position.z=z;this.velocity.x=this.velocity.y=this.velocity.z=0;this.wishVelocity.x=this.wishVelocity.z=0;this.health=this.maxHealth;this.fallDistance=0;this.fireTicks=0;this.air=this.maxAir;this.hurtResistantTime=0;this.hurtTime=0;this.lastDamageAmount=0;this.armourDamageRemainder=0;this.lastDamageSource=undefined;this.lastAttacker=undefined;this.attackedAtYaw=0;this.grounded=false;this.deathSequence=0;this.recentHealth=this.health;this.healthFlashTicks=0;this.setFoodState(20,5,0);this.foodTimer=this.starvationTimer=0;this.isEating=false;this.foodUseTicks=0;this.foodUseSlot=-1;this.foodUseItem=undefined;this.isSprinting=false;this.inWater=this.wasInWater=this.enteredWaterThisTick=this.inLava=this.headUnderwater=this.collidedHorizontally=false;this.stopBreakingAnimation();}
 
   public tickCombatState(): void {

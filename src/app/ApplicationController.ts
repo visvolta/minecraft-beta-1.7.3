@@ -4,6 +4,46 @@ import type { ItemTextureAtlas } from '../assets/ItemTextureAtlas';
 import type { EntityTextureAssets } from '../assets/EntityTextureAssets';
 import type { ArmourTextureAssets } from '../assets/ArmourTextureAssets';
 import { Engine } from '../engine/Engine';
+import { DIMENSION_NETHER, type DimensionId } from '../world/dimension/DimensionId';
+
+/** Safety bound so a failed transition can never hang behind the screen. */
+const DIMENSION_TRANSITION_TIMEOUT_MS = 30_000;
+
+/**
+ * Human-readable description of where a dimension transition has got to.
+ *
+ * Reports the FIRST unmet condition, so the message tracks the stage actually
+ * being waited on rather than the last one that happened to complete.
+ */
+function describeTransitionStage(readiness: TransitionReadiness): string {
+  if (!readiness.contextReady) return 'Preparing destination';
+  if (readiness.criticalChunksLoaded < readiness.criticalChunksRequired) return 'Loading chunks';
+  if (!readiness.lightingReady) return 'Calculating light';
+  if (!readiness.portalReady) return 'Locating portal';
+  if (!readiness.playerPlaced) return 'Placing player';
+  if (!readiness.meshesReady) return 'Building terrain';
+  return 'Finishing up';
+}
+
+/**
+ * Rejects if `promise` has not settled within `timeoutMs`.
+ *
+ * The engine bounds each of its own stages, but a hang between them would
+ * still block forever; this is the outer backstop that guarantees the
+ * `finally` block runs and the player is released.
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(
+      () => reject(new Error(`Dimension transition exceeded ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    promise.then(
+      (value) => { window.clearTimeout(timer); resolve(value); },
+      (error: unknown) => { window.clearTimeout(timer); reject(error instanceof Error ? error : new Error(String(error))); },
+    );
+  });
+}
 import type { PlayerSkinManager } from '../player/PlayerSkinManager';
 // New persistence system owns all world data (list/create/load/delete/rename/save)
 // and the application-owned backend that also stores app settings.
@@ -20,6 +60,7 @@ import { findBetaSpawn, getSafePlayerY } from '../world/generation/WorldSpawnFin
 import { CHUNK_SIZE_X } from '../world/chunkConstants';
 import { chunkKey } from '../world/chunkKey';
 import type { LoadingProgress } from './LoadingProgress';
+import type { TransitionReadiness } from '../world/dimension/DimensionTransition';
 import { MainMenuScreen } from '../ui/menu/MainMenuScreen';
 import { WorldSelectScreen } from '../ui/menu/WorldSelectScreen';
 import { WorldCreateScreen, type WorldCreateResult } from '../ui/menu/WorldCreateScreen';
@@ -152,6 +193,84 @@ export class ApplicationController {
     }
   }
 
+  /**
+   * Runs a dimension switch behind a loading screen.
+   *
+   * The source world is already frozen by the engine. The screen is shown
+   * BEFORE anything is torn down, so the player never sees a half-loaded or
+   * empty world, and it is only hidden once the destination's critical area
+   * is genuinely renderable.
+   */
+  private async handleDimensionTransition(
+    dimensionId: DimensionId,
+    x: number,
+    y: number,
+    z: number,
+  ): Promise<void> {
+    const engine = this.engine;
+    if (engine === null) return;
+
+    const transition = engine.getDimensionTransition();
+    const definition = engine.getDimensionRegistry().get(dimensionId);
+    if (definition === undefined) {
+      transition.abort();
+      engine.setPaused(false);
+      return;
+    }
+
+    // 1. Show the loading screen before the source world goes away.
+    const loading = new LoadingScreen();
+    loading.mount();
+    loading.update({
+      stage: 'terrain',
+      completed: 0,
+      total: undefined,
+      primaryMessage: dimensionId === DIMENSION_NETHER ? 'Entering the Nether' : 'Leaving the Nether',
+      secondaryMessage: 'Building terrain',
+    });
+
+    let succeeded = false;
+    try {
+      transition.beginLoadingDestination();
+
+      // 2. Switch the music profile while the screen covers the swap, so the
+      //    outgoing track never overlaps the incoming one.
+      this.audio.setMusicContext(definition.musicContext);
+
+      // 3. Drive the loading-screen progress from the engine's readiness while
+      //    the switch runs. The engine owns the actual work (save source ->
+      //    activate context -> critical chunks -> lighting -> portal -> place
+      //    player -> meshes); this loop only reports it and bounds the wait.
+      const progress = window.setInterval(() => {
+        const readiness = transition.getReadiness();
+        loading.update({
+          stage: readiness.criticalChunksLoaded >= readiness.criticalChunksRequired ? 'finalizing' : 'chunks',
+          completed: readiness.criticalChunksLoaded,
+          total: readiness.criticalChunksRequired,
+          primaryMessage: dimensionId === DIMENSION_NETHER ? 'Entering the Nether' : 'Leaving the Nether',
+          secondaryMessage: describeTransitionStage(readiness),
+        });
+      }, 100);
+
+      try {
+        succeeded = await withTimeout(
+          engine.activateDimension(dimensionId, x, y, z),
+          DIMENSION_TRANSITION_TIMEOUT_MS,
+        );
+      } finally {
+        window.clearInterval(progress);
+      }
+    } catch (error) {
+      console.error('[Dimension] transition failed', error);
+      succeeded = false;
+    } finally {
+      // 4. Reveal only now, and always resume: a failed transition must not
+      //    strand the player behind a permanent loading screen.
+      engine.finishDimensionTransition(succeeded);
+      loading.dispose();
+    }
+  }
+
   public getState(): ApplicationState { return this.state; }
   public hasEngine(): boolean { return this.engine !== null; }
 
@@ -253,7 +372,7 @@ export class ApplicationController {
       this.assertLoadActive(token);
       update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
       this.audio.beginWorldSession(result.gameMode === GameMode.Creative ? 'creative' : 'survival');
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error));
+      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error), (dimensionId, x, y, z) => void this.handleDimensionTransition(dimensionId, x, y, z));
       this.setScreen(null, 'in_game');
       this.engine.start();
       recordLoadPerformanceMark(loadPerfToken, 'engine-started');
@@ -314,7 +433,7 @@ export class ApplicationController {
       this.assertLoadActive(token);
       update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
       this.audio.beginWorldSession(metadata.gameMode === GameMode.Creative ? 'creative' : 'survival');
-      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error));
+      this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error), (dimensionId, x, y, z) => void this.handleDimensionTransition(dimensionId, x, y, z));
       this.setScreen(null, 'in_game');
       this.engine.start();
       recordLoadPerformanceMark(loadPerfToken, 'engine-started');

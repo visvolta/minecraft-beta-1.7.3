@@ -383,9 +383,16 @@ function attachPortalAnimationShader(material: THREE.MeshBasicMaterial, portalAn
         uniform float uPortalFrame;
         uniform float uPortalFrameCount;`)
       .replace('#include <map_fragment>', `#ifdef USE_MAP
-          // Frames are stacked vertically; walk the strip by frame index.
-          float portalV = (floor(uPortalFrame) + fract(vMapUv.y)) / uPortalFrameCount;
-          vec4 sampledDiffuseColor = texture2D(uPortalTexture, vec2(vMapUv.x, portalV));
+          // portal.png is a 16x512 vertical strip of 32 frames of 16x16.
+          // Geometry emits plain 0..1 UVs covering ONE whole frame, so a
+          // frame occupies 1/32 of the strip at offset frameIndex/32:
+          //   frameHeight = 1.0 / 32
+          //   vOffset     = frameIndex / 32
+          // Using fract() keeps the frame fully covered and wrapping safe.
+          float portalFrameHeight = 1.0 / uPortalFrameCount;
+          float portalVOffset = floor(uPortalFrame) * portalFrameHeight;
+          float portalV = portalVOffset + fract(vMapUv.y) * portalFrameHeight;
+          vec4 sampledDiffuseColor = texture2D(uPortalTexture, vec2(fract(vMapUv.x), portalV));
           diffuseColor *= sampledDiffuseColor;
         #endif`);
   };
@@ -648,16 +655,24 @@ export class ChunkRenderer {
     // Kept separate from fire/translucent because Beta's portal has distinct
     // blending and depth semantics, and the animation is driven by a frame
     // uniform shared by every portal mesh (no per-portal material).
+    // Beta draws the portal in alpha pass 1 as a self-illuminated surface: it
+    // is NOT modulated by world light (a portal is just as bright in a dark
+    // cave as at noon). Attaching the height-aware fog/lighting shader here
+    // would multiply it down to near-black at night, and additive blending on
+    // top of that made the plane effectively invisible.
+    //
+    // DoubleSide so the plane is visible from both faces; depthWrite off so it
+    // blends against terrain behind it without occluding itself.
     this.portalMaterial = new THREE.MeshBasicMaterial({
-      map: atlas.texture,
-      vertexColors: true,
+      map: portalAnimation.portalTexture,
+      vertexColors: false,
       transparent: true,
+      opacity: 1,
       depthWrite: false,
       depthTest: true,
       side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
     });
-    attachHeightAwareFog(this.portalMaterial);
     attachPortalAnimationShader(this.portalMaterial, portalAnimation);
 
     this.portalGroup = new THREE.Group();
@@ -853,6 +868,24 @@ export class ChunkRenderer {
     return this.meshQueue.getStats().geometryCreationMs;
   }
 
+  /**
+   * Diagnostic: synchronously mesh a chunk and report each pass's vertex
+   * count, so a missing pass can be traced without a browser debugger.
+   */
+  public probeChunkMesh(chunkX: number, chunkZ: number): Record<string, number> | { error: string } {
+    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+    if (chunk === undefined) return { error: 'chunk not loaded' };
+    const mask = computeChunkPassMask(chunk.getBlockDataView(), this.blockRegistry);
+    const passes = this.mesher.buildAllPasses(chunk);
+    const out: Record<string, number> = { mask };
+    for (const [name, geo] of Object.entries(passes)) {
+      out[name] = geo.getAttribute('position')?.count ?? 0;
+      geo.dispose();
+    }
+    out.hasPortalBit = (mask & ChunkPassMask.Portal) !== 0 ? 1 : 0;
+    return out;
+  }
+
   public getPassMeshCounts(): {
     terrain: number;
     cutout: number;
@@ -860,6 +893,7 @@ export class ChunkRenderer {
     lava: number;
     translucent: number;
     fire: number;
+    portal: number;
     depth: number;
     stateBuckets: number;
   } {
@@ -869,9 +903,10 @@ export class ChunkRenderer {
     const lava = this.lavaMeshes.size;
     const translucent = this.translucentMeshes.size;
     const fire = this.fireMeshes.size;
+    const portal = this.portalMeshes.size;
     const depth = this.translucentDepthMeshes.size + this.waterDepthMeshes.size + this.lavaDepthMeshes.size;
-    const stateBuckets = [terrain, cutout, depth, translucent, water, lava, fire].filter((count) => count > 0).length;
-    return { terrain, cutout, water, lava, translucent, fire, depth, stateBuckets };
+    const stateBuckets = [terrain, cutout, depth, translucent, water, lava, fire, portal].filter((count) => count > 0).length;
+    return { terrain, cutout, water, lava, translucent, fire, portal, depth, stateBuckets };
   }
 
   public getMeshingStats(): ChunkMeshQueueStats {
@@ -922,6 +957,7 @@ export class ChunkRenderer {
       result.leaves.dispose();
       result.fire.dispose();
       result.translucent.dispose();
+      result.portal.dispose();
       return;
     }
 
@@ -934,6 +970,7 @@ export class ChunkRenderer {
       result.leaves.dispose();
       result.fire.dispose();
       result.translucent.dispose();
+      result.portal.dispose();
       return;
     }
 

@@ -121,7 +121,7 @@ export class ChunkStreamer {
     generatorKind: string,
     /** Dimension skylight rule forwarded to the worker's initial-light pass. */
     hasSkyLight: boolean,
-    private readonly trustPersistedLighting = false,
+    private trustPersistedLighting = false,
     private readonly onChunkLoaded?: (chunk: Chunk) => void,
     private readonly onPersistenceError?: (error: RecordCorruptionError) => void,
   ) {
@@ -130,6 +130,77 @@ export class ChunkStreamer {
     this.lightEngine = lightEngine;
     this.persistence = persistence;
     this.generationQueue = new ChunkGenerationQueue(chunkManager, generator, worldSeed, contextIdentity, generatorKind, hasSkyLight);
+  }
+
+  /**
+   * Re-points the streamer at another dimension without destroying it.
+   *
+   * A dimension switch replaces the world the streamer is responsible for, so
+   * every piece of per-world bookkeeping must be dropped: the desired set, the
+   * in-flight read set and the queued integrations all describe chunks in the
+   * dimension being left. Reusing the instance (rather than constructing a new
+   * one) keeps the generation workers warm and avoids re-wiring the renderer,
+   * light engine and chunk manager references that do not change.
+   *
+   * The caller is responsible for having already flushed/unloaded the source
+   * dimension's chunks and re-pointed persistence at the new namespace.
+   */
+  public rebindContext(
+    contextIdentity: WorldContextIdentity,
+    generator: WorldGenerator,
+    generatorKind: string,
+    hasSkyLight: boolean,
+    trustPersistedLighting: boolean,
+  ): void {
+    this.generationQueue.rebindContext(contextIdentity, generatorKind, hasSkyLight, generator);
+    this.desiredChunks.clear();
+    this.loadingChunks.clear();
+    this.pendingIntegrations.clear();
+    this.trustPersistedLighting = trustPersistedLighting;
+    // Force the next update() to re-stream from scratch around the new
+    // position rather than assuming the camera has not changed chunk.
+    this.started = false;
+    this.lastChunkX = null;
+    this.lastChunkZ = null;
+    this.lastPriorityHeadingX = Number.NaN;
+    this.lastPriorityHeadingZ = Number.NaN;
+    this.halted = false;
+    this.quiescing = false;
+  }
+
+  /**
+   * Advances generation and integration for chunks already requested via
+   * `dispatchCriticalLoad`, WITHOUT re-streaming the whole render radius.
+   *
+   * `update()` cannot be used to wait for a small set of chunks: it calls
+   * `streamAround`, which marks the full radius-6 neighbourhood (169 chunks)
+   * as desired and floods the generation queue, so the handful of chunks
+   * actually being waited on end up queued behind ~160 that nobody is waiting
+   * for. During a dimension transition that reliably blew the load budget.
+   *
+   * Chunks within the integration critical radius of `centerChunkX/Z` bypass
+   * the per-frame integration budget, which is exactly what a transition
+   * wants: the loading screen is already up, so there is no frame to protect.
+   */
+  public pumpCriticalLoads(centerChunkX: number, centerChunkZ: number): void {
+    if (this.disposed || this.halted || this.quiescing) return;
+
+    const completed = this.generationQueue.process(
+      MAX_SYNC_GENERATION_JOBS_PER_FRAME,
+      MAX_SYNC_GENERATION_MS_PER_FRAME,
+      this.desiredChunks,
+      true,
+    );
+    for (const { chunk, lightingAdopted } of completed) {
+      this.pendingIntegrations.set(chunkKey(chunk.chunkX, chunk.chunkZ), {
+        chunk,
+        persisted: false,
+        trustLighting: lightingAdopted,
+        readyAtMs: performance.now(),
+      });
+    }
+
+    this.drainPendingIntegrations(centerChunkX, centerChunkZ);
   }
 
   public dispatchCriticalLoad(chunkX: number, chunkZ: number): void {

@@ -65,7 +65,7 @@ import { chunkKey } from '../chunkKey';
  */
 export class ChunkGenerationQueue {
   private readonly chunkManager: ChunkManager;
-  private readonly fallbackGenerator: WorldGenerator;
+  private fallbackGenerator: WorldGenerator;
   private readonly worldSeed: bigint;
   private useWorkers: boolean;
   private readonly pending = new Map<number, PendingChunk>();
@@ -95,11 +95,11 @@ export class ChunkGenerationQueue {
     fallbackGenerator: WorldGenerator,
     worldSeed: bigint,
     /** Identity of the owning world context, echoed through every job. */
-    private readonly contextIdentity: WorldContextIdentity,
+    private contextIdentity: WorldContextIdentity,
     /** Generator selector for the worker ('overworld' | 'nether' | custom). */
-    private readonly generatorKind: string,
+    private generatorKind: string,
     /** Dimension lighting rule forwarded to the worker's initial-light pass. */
-    private readonly hasSkyLight: boolean,
+    private hasSkyLight: boolean,
   ) {
     this.chunkManager = chunkManager;
     this.fallbackGenerator = fallbackGenerator;
@@ -127,6 +127,37 @@ export class ChunkGenerationQueue {
     this.idleWorkers.length = 0;
     this.pending.clear();
     this.pendingHeap.length = 0;
+    this.active.clear();
+    this.activeChunkKeys.clear();
+  }
+
+  /**
+   * Re-points this queue at a different dimension's world context.
+   *
+   * Every queued and in-flight job belongs to the OLD context, so all of it is
+   * dropped: pending jobs are cleared outright, and results still in flight
+   * are rejected on arrival because `drainWorkerResults` compares the echoed
+   * identity against the (now new) `contextIdentity`. Workers themselves are
+   * kept alive — re-spawning them on every portal trip would cost far more
+   * than the identity check that already exists.
+   */
+  public rebindContext(
+    contextIdentity: WorldContextIdentity,
+    generatorKind: string,
+    hasSkyLight: boolean,
+    fallbackGenerator: WorldGenerator,
+  ): void {
+    this.contextIdentity = contextIdentity;
+    this.generatorKind = generatorKind;
+    this.hasSkyLight = hasSkyLight;
+    this.fallbackGenerator = fallbackGenerator;
+    // Drop work belonging to the dimension we just left.
+    this.pending.clear();
+    this.pendingHeap.length = 0;
+    this.completedResults.length = 0;
+    // In-flight jobs cannot be recalled, but their workers must be returned to
+    // the idle pool or the queue would starve after a few transitions.
+    for (const active of this.active.values()) this.idleWorkers.push(active.worker);
     this.active.clear();
     this.activeChunkKeys.clear();
   }

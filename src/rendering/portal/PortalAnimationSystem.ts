@@ -15,10 +15,31 @@ import * as THREE from 'three';
  * One system drives every portal mesh through a shared frame uniform, so
  * animating never rebuilds geometry and never needs a per-portal material.
  */
+/** Beta advances the portal texture one frame per game tick. */
+export const PORTAL_FRAME_COUNT = 32;
+export const PORTAL_TICKS_PER_FRAME = 1;
+
+/**
+ * Frame index for a world tick. Pure, so the wrapping behaviour can be
+ * validated headlessly without constructing a WebGL texture loader.
+ */
+export function portalFrameForTick(totalGameTicks: number): number {
+  return Math.floor(totalGameTicks / PORTAL_TICKS_PER_FRAME) % PORTAL_FRAME_COUNT;
+}
+
+/**
+ * Vertical placement of one frame inside the strip.
+ * `vOffset = frameIndex / 32`, `height = 1 / 32`.
+ */
+export function portalFrameUv(frameIndex: number): { readonly vOffset: number; readonly vHeight: number } {
+  const vHeight = 1 / PORTAL_FRAME_COUNT;
+  const wrapped = ((frameIndex % PORTAL_FRAME_COUNT) + PORTAL_FRAME_COUNT) % PORTAL_FRAME_COUNT;
+  return { vOffset: wrapped * vHeight, vHeight };
+}
+
 export class PortalAnimationSystem {
-  /** Beta advances the portal texture one frame per game tick. */
-  public static readonly FRAME_COUNT = 32;
-  public static readonly TICKS_PER_FRAME = 1;
+  public static readonly FRAME_COUNT = PORTAL_FRAME_COUNT;
+  public static readonly TICKS_PER_FRAME = PORTAL_TICKS_PER_FRAME;
 
   public readonly portalTexture: THREE.Texture;
 
@@ -32,7 +53,7 @@ export class PortalAnimationSystem {
 
   /** Advances the animation from the shared world clock. */
   public update(totalGameTicks: number): void {
-    this.frame = Math.floor(totalGameTicks / PortalAnimationSystem.TICKS_PER_FRAME) % PortalAnimationSystem.FRAME_COUNT;
+    this.frame = portalFrameForTick(totalGameTicks);
   }
 
   public getFrame(): number {
