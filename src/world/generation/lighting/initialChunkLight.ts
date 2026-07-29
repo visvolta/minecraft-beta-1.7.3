@@ -23,8 +23,14 @@ import {
  * continues to go through LightEngine. Splitting it this way keeps one
  * deterministic algorithm rather than two divergent implementations.
  *
- * Light is stored exactly as `Chunk` stores it: one byte per cell, skylight in
- * the high nibble, blocklight in the low nibble.
+ * Light is stored exactly as `Chunk` stores it: one byte per cell, SKYLIGHT in
+ * the LOW nibble and BLOCKLIGHT in the HIGH nibble.
+ *
+ * That nibble order is not arbitrary — it is dictated by `Chunk.getSkylight`
+ * (`light & 0x0F`) and `Chunk.getBlocklight` (`light >> 4`). Packing them the
+ * other way round silently swaps the two channels: open sky reads back as
+ * blocklight 15 / skylight 0, so freshly generated chunks render black until
+ * an unrelated block edit makes LightEngine rewrite the bytes correctly.
  */
 
 /** Maximum Beta light level. */
@@ -62,6 +68,29 @@ export function buildLightLookupTables(registry: BlockRegistry): LightLookupTabl
   }
 
   return { opacity, emission };
+}
+
+/**
+ * Blocks that do NOT raise the heightmap.
+ *
+ * Must stay in step with `Chunk.NON_OPAQUE_FOR_HEIGHTMAP`. Beta expresses the
+ * same idea as `Block.lightOpacity[id] == 0` in `generateSkylightMap`; water is
+ * the load-bearing case, since it attenuates light (opacity 3) yet leaves the
+ * heightmap alone, which is why an ocean surface is lit 15 and not 12.
+ */
+const HEIGHTMAP_TRANSPARENT = new Set<number>([
+  AIR_BLOCK_ID,
+  8, 9,    // water (flowing, still)
+  10, 11,  // lava (flowing, still)
+  37, 38,  // dandelion, rose
+  39, 40,  // brown/red mushroom
+  31,      // tall grass
+  32,      // dead bush
+  83,      // sugar cane / reed
+]);
+
+function raisesHeightmap(blockId: number): boolean {
+  return !HEIGHTMAP_TRANSPARENT.has(blockId);
 }
 
 /** XZY index used by Chunk storage: x fastest, then z, then y. */
@@ -118,50 +147,48 @@ export function computeInitialChunkLight(
 
   // ---- 1. Vertical skylight projection -------------------------------------
   // Skipped entirely for no-sky dimensions.
+  //
+  // Mirrors Beta `Chunk.generateSkylightMap`: find the heightmap (the first
+  // cell from the top whose block has NON-ZERO light opacity), give everything
+  // at or above it full sunlight, then attenuate downward.
+  //
+  // Using the heightmap rather than "first non-transparent cell" is what makes
+  // an ocean surface read 15 instead of 12: water has opacity 3 but does not
+  // raise the heightmap, exactly as Beta's `lightOpacity[water] == 0` check in
+  // the heightmap loop. The main-thread LightEngine already works this way, so
+  // matching it here keeps the worker and main-thread paths bit-identical.
   if (hasSkyLight) {
-  for (let z = 0; z < CHUNK_SIZE_Z; z++) {
-    for (let x = 0; x < CHUNK_SIZE_X; x++) {
-      let current = MAX_LIGHT;
-      for (let y = CHUNK_SIZE_Y - 1; y >= 0; y--) {
-        const index = cellIndex(x, y, z);
-        const blockOpacity = opacity[blocks[index]!]!;
-
-        if (current === MAX_LIGHT && blockOpacity === 0) {
-          // Still in open sky.
-          sky[index] = MAX_LIGHT;
-          // Column cells with a horizontal neighbour to spread into are seeded
-          // below once the whole column is known; seeding every open-sky cell
-          // would enqueue the entire sky volume.
-          continue;
+    for (let z = 0; z < CHUNK_SIZE_Z; z++) {
+      for (let x = 0; x < CHUNK_SIZE_X; x++) {
+        // Beta: walk down while the block below is heightmap-transparent.
+        let height = CHUNK_SIZE_Y;
+        while (height > 0 && !raisesHeightmap(blocks[cellIndex(x, height - 1, z)]!)) {
+          height -= 1;
         }
 
-        current -= blockOpacity > 0 ? Math.max(1, blockOpacity) : 1;
-        if (current < 0) current = 0;
-        sky[index] = current;
-        if (current > 0) {
-          queue[queueTail++] = index;
+        // At/above the heightmap: full sunlight.
+        for (let y = CHUNK_SIZE_Y - 1; y >= height; y--) {
+          sky[cellIndex(x, y, z)] = MAX_LIGHT;
         }
-      }
-    }
-  }
 
-  // Seed the lowest open-sky cell of each column so sunlight can spread
-  // horizontally into overhangs and cave mouths.
-  for (let z = 0; z < CHUNK_SIZE_Z; z++) {
-    for (let x = 0; x < CHUNK_SIZE_X; x++) {
-      for (let y = CHUNK_SIZE_Y - 1; y >= 0; y--) {
-        const index = cellIndex(x, y, z);
-        if (sky[index] !== MAX_LIGHT) break;
-        const below = y > 0 ? cellIndex(x, y - 1, z) : -1;
-        if (below < 0 || sky[below] !== MAX_LIGHT) {
-          queue[queueTail++] = index;
-          break;
+        // The heightmap cell itself seeds horizontal spread into overhangs.
+        if (height < CHUNK_SIZE_Y) queue[queueTail++] = cellIndex(x, height, z);
+
+        // Below the heightmap: attenuate by opacity, minimum one level per
+        // block so light cannot travel downward forever through transparent
+        // blocks.
+        let current = MAX_LIGHT;
+        for (let y = height - 1; y >= 0; y--) {
+          const index = cellIndex(x, y, z);
+          current -= Math.max(1, opacity[blocks[index]!]!);
+          if (current < 0) current = 0;
+          sky[index] = current;
+          if (current > 0) queue[queueTail++] = index;
         }
       }
     }
-  }
 
-  propagate(sky, blocks, opacity, queue, queueHead, queueTail);
+    propagate(sky, blocks, opacity, queue, queueHead, queueTail);
   }
 
   // ---- 2. Block-light sources ---------------------------------------------
@@ -177,8 +204,11 @@ export function computeInitialChunkLight(
   propagate(block, blocks, opacity, queue, queueHead, queueTail);
 
   // ---- 3. Pack into Chunk's nibble layout ---------------------------------
+  // MUST match Chunk.getSkylight/getBlocklight exactly:
+  //   skylight   -> low  nibble (light & 0x0F)
+  //   blocklight -> high nibble (light >> 4)
   for (let index = 0; index < CHUNK_VOLUME; index++) {
-    light[index] = ((sky[index]! & 0xf) << 4) | (block[index]! & 0xf);
+    light[index] = (sky[index]! & 0xf) | ((block[index]! & 0xf) << 4);
   }
 
   return light;

@@ -117,13 +117,14 @@ import { PortalAnimationSystem } from '../rendering/portal/PortalAnimationSystem
 import { PortalParticleSystem } from '../rendering/portal/PortalParticleSystem';
 import { PortalTravelState } from '../world/portal/PortalTravelState';
 import { isInsidePortal } from '../world/portal/PortalContact';
+import { PortalIndex, scanChunkForPortals, PORTAL_INDEX_RECORD_KEY } from '../world/portal/PortalIndex';
 import { portalAxisAt } from '../world/portal/PortalFrame';
 import {
   DimensionTransition,
   TRANSITION_CRITICAL_RADIUS,
   criticalChunkCount,
 } from '../world/dimension/DimensionTransition';
-import { Teleporter, PORTAL_BUILD_MIN_Y, PORTAL_BUILD_MAX_Y } from '../world/portal/Teleporter';
+import { Teleporter, PORTAL_BUILD_MIN_Y, PORTAL_BUILD_MAX_Y, PORTAL_SEARCH_RADIUS } from '../world/portal/Teleporter';
 import { WorldEventQueue } from '../world/events/WorldEventQueue';
 import { ChunkStreamer } from '../world/ChunkStreamer';
 import type { WorldGenerator } from '../world/WorldGenerator';
@@ -135,6 +136,7 @@ import { DIMENSION_NETHER, DIMENSION_OVERWORLD, type DimensionId } from '../worl
 import type { DimensionDefinition } from '../world/dimension/DimensionDefinition';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
 import { ClimateSampler } from '../world/generation/climate/ClimateSampler';
+import type { HostileMobKind, HostileSpawnEntry, PassiveMobKind, PassiveSpawnEntry } from '../world/generation/climate/biomes';
 import { WeatherController } from '../world/weather/WeatherController';
 import { PrecipitationSimulator as _UnusedPrecipitationSimulator } from '../world/weather/PrecipitationSimulator';
 import { PrecipitationRenderer } from '../rendering/weather/PrecipitationRenderer';
@@ -242,6 +244,27 @@ const GEOMETRY_MEMORY_SAMPLE_MS = 250;
 const PORTAL_AMBIENCE_RADIUS = 8;
 
 /**
+ * Maps a dimension definition's Beta entity id to an implemented spawner kind.
+ *
+ * A dimension may legitimately list entity types this project has not built
+ * yet (the Nether's Ghast and PigZombie). Those ids are absent here, so they
+ * are filtered out of the spawn table instead of being attempted and failing.
+ */
+const HOSTILE_KIND_BY_ENTITY_ID: Readonly<Record<string, HostileMobKind | undefined>> = {
+  Zombie: 'zombie',
+  Skeleton: 'skeleton',
+  Spider: 'spider',
+  Creeper: 'creeper',
+};
+
+const PASSIVE_KIND_BY_ENTITY_ID: Readonly<Record<string, PassiveMobKind | undefined>> = {
+  Pig: 'pig',
+  Cow: 'cow',
+  Sheep: 'sheep',
+  Chicken: 'chicken',
+};
+
+/**
  * Budget for the destination half of a dimension switch.
  *
  * Each stage is bounded separately so one slow stage cannot consume the whole
@@ -251,6 +274,9 @@ const PORTAL_AMBIENCE_RADIUS = 8;
 const DIMENSION_CHUNK_LOAD_TIMEOUT_MS = 20_000;
 const DIMENSION_MESH_SETTLE_TIMEOUT_MS = 8_000;
 const DIMENSION_TRANSITION_POLL_MS = 16;
+
+/** How long to wait for one indexed portal anchor's chunk to stream in. */
+const PORTAL_ANCHOR_LOAD_TIMEOUT_MS = 4_000;
 
 export class Engine {
   private readonly renderer: Renderer;
@@ -342,6 +368,13 @@ export class Engine {
   private readonly portalTravel = new PortalTravelState();
   /** Single owner of any in-flight dimension switch. */
   private readonly dimensionTransition = new DimensionTransition();
+  /**
+   * Portal anchors for the ACTIVE dimension. Rebuilt on every dimension
+   * switch, so an Overworld anchor can never satisfy a Nether search.
+   */
+  private portalIndex = new PortalIndex();
+  /** Last rain strength handed to the audio mixer (diagnostics only). */
+  private lastRainAudioStrength = 0;
   private readonly worldEventQueue: WorldEventQueue;
   private readonly chunkStreamer: ChunkStreamer;
   private readonly lightEngine: LightEngine;
@@ -623,11 +656,17 @@ export class Engine {
     this.blockUpdateWorld.setEntityManager(this.entityManager);
     this.blockUpdateWorld.setBehaviourPlayer(this.player);
     this.blockUpdateWorld.setEventQueue(this.worldEventQueue);
+    // Keep the portal index in step with every portal block create/destroy.
+    this.blockUpdateWorld.setPortalChangeListener((x, _y, z) => this.reindexPortalsAround(x, z));
     this.blockUpdateWorld.setGameTickProvider(() => this.worldTickScheduler.getGameTick());
     this.blockUpdateWorld.setNextIntProvider((bound: number) => randomTickScheduler.nextInt(bound));
     this.persistence.setSimulationTickProvider(() => this.worldTickScheduler.getGameTick());
 
     this.worldTickScheduler.addGameTickCallback(() => {
+      // A dimension without weather runs no precipitation simulation at all,
+      // rather than simulating rain that is then hidden. Beta's Nether has no
+      // weather, and an inactive system must not keep doing background work.
+      if (!this.activeDimension.weather.hasWeather) return;
       const weatherState = this.weatherController.getState();
       if (weatherState.raining) {
         this.precipitationSimulator.tick(
@@ -658,6 +697,13 @@ export class Engine {
       getSkylightSubtracted: () => this.worldTime.getSkylightSubtracted(),
       getDifficulty: () => metadata.difficulty,
       isThundering: () => this.weatherController.getState().thundering,
+      // Dimension spawn tables. Returning null means "use the Overworld biome
+      // table"; returning a list (possibly empty) overrides it completely.
+      // Entries whose entity type is not implemented yet are filtered out, so
+      // the Nether's authentic Ghast/PigZombie roster stays recorded in the
+      // dimension definition without the spawner trying to construct them.
+      getDimensionSpawnEntries: () => this.dimensionHostileSpawnEntries(),
+      getDimensionPassiveSpawnEntries: () => this.dimensionPassiveSpawnEntries(),
     });
     this.worldSpawnPoint = metadata.spawn;
     this.precipitationRenderer = new PrecipitationRenderer(
@@ -985,6 +1031,9 @@ export class Engine {
         this.signManager.synchronizeChunk(chunk.chunkX, chunk.chunkZ, chunk);
         this.worldTickScheduler.indexLoadedChunkTicks(chunk);
         this.worldTickScheduler.reconcileChunkBoundaries(chunk);
+        // Index any portals this chunk contains so the teleporter can find
+        // them later without rescanning 128 blocks of unloaded world.
+        this.portalIndex.reconcileChunk(chunk.chunkX, chunk.chunkZ, scanChunkForPortals(chunk));
     }, (error) => this.onPersistenceError?.(error));
     this.deathScreen=new DeathScreen(()=>this.respawnController.request());
     this.playerDeathController=new PlayerDeathController(this.player,this.inventory,this.itemEntityManager,worldRng,this.deathScreen,()=>{this.deathSavePending=true;});
@@ -1019,6 +1068,36 @@ export class Engine {
       precipitationSimulator: this.precipitationSimulator,
       blockUpdateWorld: this.blockUpdateWorld,
       chunkRenderer: this.chunkRenderer,
+      environment: {
+        getState: () => {
+          const dimension = this.activeDimension;
+          const fog = this.renderer.getFogState();
+          const weather = this.weatherController.getState();
+          return {
+            dimension: this.activeDimensionId,
+            hasSky: dimension.sky.hasSky,
+            hasClouds: dimension.sky.hasClouds,
+            hasWeather: dimension.weather.hasWeather,
+            skyRootVisible: this.skyRenderer.isVisible(),
+            cloudRootVisible: this.cloudRenderer.isVisible(),
+            ambientLightFloor: dimension.lighting.ambientLightFloor,
+            hasSkyLight: dimension.lighting.hasSkyLight,
+            fogMode: fog?.mode ?? null,
+            fogColorHex: fog?.colorHex ?? null,
+            backgroundHex: this.renderer.getBackgroundHex(),
+            skylightSubtracted: this.chunkRenderer.getSkylightSubtracted(),
+            rainStrength: weather.getRainStrength(weather.partialTick),
+            rainAudio: this.lastRainAudioStrength,
+          };
+        },
+        getEntityKinds: () => {
+          const kinds: string[] = [];
+          this.entityManager.forEachActive((entity) => {
+            kinds.push(entity.constructor.name.replace(/Entity$/, '').toLowerCase());
+          });
+          return kinds;
+        },
+      },
       portal: {
         getState: () => ({
           dimension: this.activeDimensionId,
@@ -1070,6 +1149,9 @@ export class Engine {
       this.animationFrameId = null;
     }
     document.body.appendChild(this.renderer.domElement);
+    // Restore this dimension's portal anchors so the very first portal trip
+    // can already link to portals built in a previous session.
+    void this.loadPortalIndex();
     this.debugOverlay.mount();
     const profilerEnabled = readProfilerEnabledSetting();
     this.performanceProfiler.setEnabled(profilerEnabled);
@@ -1501,23 +1583,47 @@ export class Engine {
     }
     this.playerArmourRenderer.sync();
 
+    // Every environment decision below is driven by the ACTIVE DIMENSION's
+    // rules, not by a dimension id check. A dimension with no weather never
+    // advances the weather clock, never renders sky/clouds, and never feeds
+    // rain to the audio mixer.
+    const dimension = this.activeDimension;
+    const dimensionHasWeather = dimension.weather.hasWeather;
+
     const weatherSimStart = performance.now();
-    this.weatherController.update(deltaSeconds);
+    if (dimensionHasWeather) this.weatherController.update(deltaSeconds);
     const weatherSimEnd = performance.now();
     const weatherState = this.weatherController.getState();
-    const previewFade = previewWeatherFade(weatherState.getRainStrength(weatherState.partialTick), weatherState.getThunderStrength(weatherState.partialTick));
-    this.skyRenderer.update(camera, this.worldTime, previewFade);
+    const rainStrength = dimensionHasWeather ? weatherState.getRainStrength(weatherState.partialTick) : 0;
+    const previewFade = previewWeatherFade(rainStrength, dimensionHasWeather ? weatherState.getThunderStrength(weatherState.partialTick) : 0);
 
-    const atmos = buildAtmosphericState(this.skyRenderer.getCurrentColorState(), weatherState, this.lightningManager.getState().getFlashStrength(weatherState.partialTick));
-    this.skyRenderer.applyAtmosphericState(atmos);
+    this.skyRenderer.setVisible(dimension.sky.hasSky);
+    this.cloudRenderer.setVisible(dimension.sky.hasClouds);
+    if (dimension.sky.hasSky) this.skyRenderer.update(camera, this.worldTime, previewFade);
+
+    const atmos = buildAtmosphericState(
+      this.skyRenderer.getCurrentColorState(),
+      weatherState,
+      dimensionHasWeather ? this.lightningManager.getState().getFlashStrength(weatherState.partialTick) : 0,
+    );
+    if (dimension.sky.hasSky) this.skyRenderer.applyAtmosphericState(atmos);
     this.audioManager.updateListener(camera.position.x, camera.position.y, camera.position.z, this.cameraController.getYaw(), this.cameraController.getPitch());
-    this.audioManager.setRain(weatherState.getRainStrength(weatherState.partialTick));
-    this.rainCoverSampleSeconds -= deltaSeconds;
-    if (this.rainCoverSampleSeconds <= 0) { this.rainCoverSampleSeconds = 0.25; this.audioManager.setRainCover(this.sampleRainCover(camera.position.x, camera.position.y, camera.position.z)); }
-    this.chunkRenderer.setSkylightSubtracted(atmos.effectiveSkylightSubtracted);
-    this.chunkRenderer.setSunBrightnessFactor(atmos.sunBrightnessFactor);
-    const cloudColor = { r: atmos.cloud.r, g: atmos.cloud.g, b: atmos.cloud.b, hex: atmos.cloud.hex };
-    this.cloudRenderer.update(camera.position.x, camera.position.z, deltaSeconds, cloudColor, atmos.cloudFogStrength);
+    // No weather => no rain audio, and no rain-cover raycasts either.
+    this.audioManager.setRain(rainStrength);
+    this.lastRainAudioStrength = rainStrength;
+    if (dimensionHasWeather) {
+      this.rainCoverSampleSeconds -= deltaSeconds;
+      if (this.rainCoverSampleSeconds <= 0) { this.rainCoverSampleSeconds = 0.25; this.audioManager.setRainCover(this.sampleRainCover(camera.position.x, camera.position.y, camera.position.z)); }
+    }
+    // A dimension with no sky has no day/night skylight subtraction: its
+    // ambient floor comes from the light table instead.
+    this.chunkRenderer.setSkylightSubtracted(dimension.lighting.hasSkyLight ? atmos.effectiveSkylightSubtracted : 0);
+    this.chunkRenderer.setSunBrightnessFactor(dimension.lighting.hasSkyLight ? atmos.sunBrightnessFactor : 1);
+    this.chunkRenderer.setAmbientLightFloor(dimension.lighting.ambientLightFloor);
+    if (dimension.sky.hasClouds) {
+      const cloudColor = { r: atmos.cloud.r, g: atmos.cloud.g, b: atmos.cloud.b, hex: atmos.cloud.hex };
+      this.cloudRenderer.update(camera.position.x, camera.position.z, deltaSeconds, cloudColor, atmos.cloudFogStrength);
+    }
 
     const preStreamMeshingStats = this.chunkRenderer.getMeshingStats();
     this.chunkStreamer.update(camera.position.x, camera.position.z, this.cameraController.getYaw(), this.player.velocity.x, this.player.velocity.z, preStreamMeshingStats.queued, preStreamMeshingStats.pendingUploads);
@@ -1668,7 +1774,13 @@ export class Engine {
       remeshFanOutChunks: lightingMetrics.remeshFanOutChunks,
     });
 
-    const fogState = this.fogController.compute({ eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z, overworldColorHex: atmos.horizon.hex, overworldDensityMultiplier: atmos.fogDensityMultiplier });
+    const fogState = this.fogController.compute({
+      eyeX: camera.position.x, eyeY: camera.position.y, eyeZ: camera.position.z,
+      overworldColorHex: atmos.horizon.hex,
+      overworldDensityMultiplier: atmos.fogDensityMultiplier,
+      // Beta WorldProviderHell.func_4096_a — constant (0.2, 0.03, 0.03).
+      dimensionFogColor: dimension.sky.constantFogColor,
+    });
     this.renderer.setFogState(fogState);
     this.blockHighlight.setTarget(this.interactionController.getCurrentHit());
     const activeMiningPos = this.interactionController.breakingController.getMiningBlockPos(); const progress = this.interactionController.breakingController.getProgress();
@@ -2331,6 +2443,7 @@ export class Engine {
     // 1. Persist the dimension we are leaving. Chunk records are namespaced by
     //    dimension, so this must happen BEFORE persistence is re-pointed or
     //    Nether chunks would be written into Overworld keys.
+    this.savePortalIndex();
     await this.saveActiveDimensionState();
 
     // 2. Tear down the source world's residency. Meshes must go with the
@@ -2363,6 +2476,9 @@ export class Engine {
       destination.lighting.hasSkyLight,
       trustPersistedLighting,
     );
+    // The portal index is per dimension: load the destination's before any
+    // search runs, or the Overworld's anchors would be consulted in the Nether.
+    await this.loadPortalIndex();
     transition.updateReadiness({ contextReady: true });
 
     // 4. Load the critical ring around the (pre-portal) target. The teleporter
@@ -2378,8 +2494,11 @@ export class Engine {
     this.establishCriticalLighting(targetChunkX, targetChunkZ);
     transition.updateReadiness({ lightingReady: true });
 
-    // 6. Find an existing portal or build one (Beta Teleporter).
-    const placement = this.resolveDestinationPortal(targetX, targetY, targetZ);
+    // 6. Find an existing portal or build one (Beta Teleporter). This happens
+    //    BEFORE the player is placed and before the loading screen is allowed
+    //    to hide, so the Overworld is never revealed and then teleported away
+    //    from.
+    const placement = await this.resolveDestinationPortal(targetX, targetY, targetZ);
     transition.updateReadiness({ portalReady: true });
 
     // 7. Position the player and settle the camera on the new location.
@@ -2387,9 +2506,20 @@ export class Engine {
     this.portalTravel.completeTransition();
     transition.updateReadiness({ playerPlaced: true });
 
+    // An existing portal can be far from the scaled target, so the critical
+    // ring that must be renderable is the one around the PLAYER, not the one
+    // around the original search origin.
+    const placementChunkX = Math.floor(placement.x / CHUNK_SIZE_X);
+    const placementChunkZ = Math.floor(placement.z / CHUNK_SIZE_Z);
+    if (placementChunkX !== targetChunkX || placementChunkZ !== targetChunkZ) {
+      await this.loadCriticalChunks(placementChunkX, placementChunkZ);
+      this.establishCriticalLighting(placementChunkX, placementChunkZ);
+    }
+
     // 8. Mesh the critical ring so the reveal shows geometry, not holes.
-    await this.settleCriticalMeshes(targetChunkX, targetChunkZ);
+    await this.settleCriticalMeshes(placementChunkX, placementChunkZ);
     transition.updateReadiness({ meshesReady: true });
+    this.savePortalIndex();
 
     return transition.isReadyToReveal();
   }
@@ -2490,8 +2620,26 @@ export class Engine {
     }
   }
 
-  /** Beta `Teleporter`: nearest existing portal, else build one. */
-  private resolveDestinationPortal(x: number, y: number, z: number): { x: number; y: number; z: number } {
+  /**
+   * Beta `Teleporter`: reuse the nearest existing portal, and only build one
+   * when the search genuinely fails.
+   *
+   * Search strategy, in order:
+   *   1. Consult the dimension-local portal index for anchors within Beta's
+   *      128-block radius, nearest first. The index is a cache, so each
+   *      candidate is re-verified against live blocks; if its chunk is not
+   *      resident the chunk is loaded on demand before verifying.
+   *   2. Fall back to Beta's raw scan over resident columns, which also
+   *      catches portals that predate the index.
+   *   3. Only if BOTH find nothing, run Beta's safe-placement search and
+   *      forced-construction fallback.
+   *
+   * Step 1 is what fixes return linking. Previously only the 9-chunk critical
+   * ring (about +/-16 blocks) was resident when this ran, so a portal 800
+   * Overworld blocks away was invisible to the search and every return trip
+   * built a redundant portal.
+   */
+  private async resolveDestinationPortal(x: number, y: number, z: number): Promise<{ x: number; y: number; z: number }> {
     const teleporter = new Teleporter(this.worldSeed + BigInt(this.activeDimensionId));
     const world = {
       getBlock: (bx: number, by: number, bz: number) => this.blockUpdateWorld.getBlock(bx, by, bz),
@@ -2504,8 +2652,90 @@ export class Engine {
       isColumnAvailable: (bx: number, bz: number) => this.blockUpdateWorld.isLoaded(bx, bz),
     };
 
+    // --- 1. Indexed candidates, nearest first --------------------------------
+    const candidates = this.portalIndex.findNear(x, y, z, PORTAL_SEARCH_RADIUS);
+    for (const candidate of candidates) {
+      const verified = await this.verifyPortalAnchor(candidate);
+      if (verified === undefined) continue;
+      // Re-run Beta's own placement rules from the verified anchor so the
+      // player is centred in the portal exactly as an in-world find would.
+      const placed = teleporter.findExistingPortal(world, verified.x + 0.5, verified.y + 0.5, verified.z + 0.5);
+      if (placed !== undefined) return placed;
+    }
+
+    // --- 2. Beta raw scan over whatever is resident --------------------------
+    const existing = teleporter.findExistingPortal(world, x, y, z);
+    if (existing !== undefined) return existing;
+
+    // --- 3. Nothing found anywhere: build one --------------------------------
     const clampedY = Math.max(PORTAL_BUILD_MIN_Y, Math.min(PORTAL_BUILD_MAX_Y, y));
-    return teleporter.findOrCreate(world, x, clampedY, z);
+    const built = teleporter.createPortal(world, x, clampedY, z);
+    // Register immediately so the return trip links back to this portal.
+    this.reindexPortalsAround(built.x, built.z);
+    return teleporter.findExistingPortal(world, built.x, built.y, built.z) ?? built;
+  }
+
+  /**
+   * Confirms an indexed anchor still has a portal block, loading its chunk if
+   * necessary.
+   *
+   * A stale anchor (portal since broken) is dropped from the index and skipped
+   * rather than trusted, so the cache can never resurrect a deleted portal.
+   */
+  private async verifyPortalAnchor(anchor: { x: number; y: number; z: number }): Promise<{ x: number; y: number; z: number } | undefined> {
+    const chunkX = Math.floor(anchor.x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(anchor.z / CHUNK_SIZE_Z);
+
+    if (!this.chunkManager.hasChunk(chunkX, chunkZ)) {
+      this.chunkStreamer.dispatchCriticalLoad(chunkX, chunkZ);
+      const deadline = performance.now() + PORTAL_ANCHOR_LOAD_TIMEOUT_MS;
+      while (!this.chunkManager.hasChunk(chunkX, chunkZ) && performance.now() < deadline) {
+        this.chunkStreamer.pumpCriticalLoads(chunkX, chunkZ);
+        await new Promise((resolve) => setTimeout(resolve, DIMENSION_TRANSITION_POLL_MS));
+      }
+      if (!this.chunkManager.hasChunk(chunkX, chunkZ)) return undefined;
+    }
+
+    if (this.blockUpdateWorld.getBlock(anchor.x, anchor.y, anchor.z) !== BlockIds.Portal) {
+      // Stale entry: reconcile the whole chunk so every anchor in it is fixed.
+      this.reindexPortalsAround(anchor.x, anchor.z);
+      return undefined;
+    }
+
+    return anchor;
+  }
+
+  /** Re-scans the chunk containing (x, z) and updates the portal index. */
+  private reindexPortalsAround(x: number, z: number): void {
+    const chunkX = Math.floor(x / CHUNK_SIZE_X);
+    const chunkZ = Math.floor(z / CHUNK_SIZE_Z);
+    const chunk = this.chunkManager.getChunk(chunkX, chunkZ);
+    if (chunk === undefined) return;
+    this.portalIndex.reconcileChunk(chunkX, chunkZ, scanChunkForPortals(chunk));
+  }
+
+  /** Loads the active dimension's persisted portal index. */
+  private async loadPortalIndex(): Promise<void> {
+    this.portalIndex = new PortalIndex();
+    try {
+      this.portalIndex.deserialize(await this.persistence.readRecord(PORTAL_INDEX_RECORD_KEY));
+    } catch (error) {
+      // The index is a cache; a failed read degrades to the raw Beta scan.
+      console.warn('[Portal] could not load the portal index:', error);
+    }
+    // Fold in anything already resident, which also covers a first-ever run.
+    for (const chunk of this.chunkManager) {
+      this.portalIndex.reconcileChunk(chunk.chunkX, chunk.chunkZ, scanChunkForPortals(chunk));
+    }
+  }
+
+  /** Persists the active dimension's portal index if it changed. */
+  private savePortalIndex(): void {
+    if (!this.portalIndex.isDirty()) return;
+    const bytes = this.portalIndex.serialize();
+    this.portalIndex.clearDirty();
+    this.persistence.writeRecord(PORTAL_INDEX_RECORD_KEY, bytes, WRITE_PRIORITY_FORCED)
+      .catch((error: unknown) => { console.warn('[Portal] could not save the portal index:', error); });
   }
 
   /**
@@ -2539,6 +2769,34 @@ export class Engine {
     }
     this.setPaused(false);
     void this.saveMetadata(true);
+  }
+
+  /**
+   * Hostile spawn entries for the active dimension, or null to fall back to
+   * the Overworld biome tables.
+   *
+   * The Overworld deliberately returns null so biome-driven spawning is
+   * untouched. Any other dimension returns its own list with unimplemented
+   * entity types filtered out, which for the Nether today means an empty list
+   * — no spawning at all, rather than Overworld mobs or failed constructions.
+   */
+  private dimensionHostileSpawnEntries(): readonly HostileSpawnEntry[] | null {
+    if (this.activeDimensionId === DIMENSION_OVERWORLD) return null;
+    const available = this.activeDimension.spawn.monsters.filter((entry) => entry.available);
+    return available.flatMap((entry) => {
+      const kind = HOSTILE_KIND_BY_ENTITY_ID[entry.entityId];
+      return kind === undefined ? [] : [{ kind, weight: entry.weight }];
+    });
+  }
+
+  /** Passive equivalent of {@link dimensionHostileSpawnEntries}. */
+  private dimensionPassiveSpawnEntries(): readonly PassiveSpawnEntry[] | null {
+    if (this.activeDimensionId === DIMENSION_OVERWORLD) return null;
+    const available = this.activeDimension.spawn.creatures.filter((entry) => entry.available);
+    return available.flatMap((entry) => {
+      const kind = PASSIVE_KIND_BY_ENTITY_ID[entry.entityId];
+      return kind === undefined ? [] : [{ kind, weight: entry.weight }];
+    });
   }
 
   private updateAmbientBlockAudio(): void {

@@ -8,7 +8,7 @@ import type { ChunkManager } from '../../world/ChunkManager';
 import { CHUNK_SIZE_Y } from '../../world/chunkConstants';
 import type { ClimateSampler } from '../../world/generation/climate/ClimateSampler';
 import { selectBiome } from '../../world/generation/climate/BiomeSelector';
-import type { HostileMobKind, HostileSpawnEntry } from '../../world/generation/climate/biomes';
+import type { HostileMobKind, HostileSpawnEntry, PassiveSpawnEntry } from '../../world/generation/climate/biomes';
 import type { JavaRandom } from '../../world/generation/random/JavaRandom';
 import type { Entity } from '../core/Entity';
 import type { EntityManager } from '../core/EntityManager';
@@ -31,6 +31,22 @@ export interface NaturalMobSpawnerOptions {
   readonly getSkylightSubtracted: () => number;
   readonly getDifficulty: () => Difficulty;
   readonly isThundering: () => boolean;
+  /**
+   * Spawn table for the ACTIVE DIMENSION.
+   *
+   * Returning an empty list disables natural hostile spawning entirely for
+   * that dimension. Without this the spawner fell back to the Overworld biome
+   * table everywhere, so zombies, skeletons, spiders and creepers spawned in
+   * the Nether — which Beta's `BiomeGenHell` explicitly clears.
+   *
+   * The dimension definition still records the authentic Beta roster (Ghast
+   * and PigZombie at weight 10) with `available: false`, so the intent is
+   * preserved for when those entities are implemented; entries flagged
+   * unavailable are filtered out here rather than attempted and failed.
+   */
+  readonly getDimensionSpawnEntries: () => readonly HostileSpawnEntry[] | null;
+  /** Passive equivalent of {@link getDimensionSpawnEntries}. */
+  readonly getDimensionPassiveSpawnEntries: () => readonly PassiveSpawnEntry[] | null;
 }
 
 const HOSTILE_DIMENSIONS: Readonly<Record<HostileMobKind, readonly [number, number]>> = {
@@ -65,6 +81,8 @@ export class NaturalMobSpawner {
       world: options.world, climateSampler: options.climateSampler, rng: options.rng,
       player: options.player, worldSpawn: options.worldSpawn,
       getSkylightSubtracted: options.getSkylightSubtracted,
+      // Passive spawns follow the same dimension rule as hostiles.
+      getDimensionSpawnEntries: () => options.getDimensionPassiveSpawnEntries(),
     });
   }
 
@@ -153,7 +171,18 @@ export class NaturalMobSpawner {
       for(const blockBox of getBlockBounds(this.options.blockRegistry,this.options.behaviourRegistry,this.options.world,x,y,z,'collision'))if(box.intersects(blockBox))return true;
     } return false;
   }
+  /**
+   * Spawn entries for a chunk.
+   *
+   * A dimension that supplies its own table overrides the biome table
+   * completely — biomes are an Overworld concept and must not leak into other
+   * dimensions. Only the biome path is cached, because the dimension table is
+   * already a cheap constant lookup and caching it per chunk would have to be
+   * invalidated on every dimension switch.
+   */
   private getSpawnList(chunkX:number,chunkZ:number,originX:number,originZ:number):readonly HostileSpawnEntry[]{
+    const dimensionEntries=this.options.getDimensionSpawnEntries();
+    if(dimensionEntries!==null)return dimensionEntries;
     const key=`${chunkX},${chunkZ}`;const cached=this.biomeSpawnCache.get(key);if(cached)return cached;
     const climate=this.options.climateSampler.sampleRegion(originX,originZ,1,1)[0];const list=climate?selectBiome(climate).hostileSpawns:[];this.biomeSpawnCache.set(key,list);return list;
   }

@@ -11,6 +11,14 @@ import type { TextureAtlas } from '../assets/TextureAtlas';
 import { ChunkMeshingQueue, type ChunkMeshQueueStats, type ChunkMeshGeometrySet } from './meshing/ChunkMeshingQueue';
 import { ChunkPassMask, computeChunkPassMask, hasChunkPass } from './meshing/ChunkPassMask';
 import { TEXTURE_MIN_BRIGHTNESS } from './voxelLighting';
+
+/**
+ * Beta `WorldProvider.generateLightBrightnessTable` ambient floor (`var1`).
+ *
+ * The base Overworld provider uses 0.05; `WorldProviderHell` overrides it to
+ * 0.1, which is why the Nether never goes fully black even with no skylight.
+ */
+export const OVERWORLD_AMBIENT_LIGHT_FLOOR = 0.05;
 import type { FluidAnimationSystem } from './fluid/FluidAnimationSystem';
 import { FLUID_RENDER_SETTINGS } from './fluid/FluidRenderSettings';
 import type { FireAnimationSystem } from './fire/FireAnimationSystem';
@@ -80,6 +88,9 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
     uSunBrightnessFactor: { value: 1 },
     uTextureMinBrightness: { value: TEXTURE_MIN_BRIGHTNESS },
     uDynamicLightingEnabled: { value: 1 },
+    // Beta `WorldProvider.generateLightBrightnessTable` var1; the Overworld
+    // uses 0.05 and WorldProviderHell raises it to 0.1.
+    uAmbientLightFloor: { value: OVERWORLD_AMBIENT_LIGHT_FLOOR },
   };
   material.userData.dynamicLightingUniforms = uniforms;
   material.onBeforeCompile = (shader): void => {
@@ -87,6 +98,7 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
     shader.uniforms.uSunBrightnessFactor = uniforms.uSunBrightnessFactor;
     shader.uniforms.uTextureMinBrightness = uniforms.uTextureMinBrightness;
     shader.uniforms.uDynamicLightingEnabled = uniforms.uDynamicLightingEnabled;
+    shader.uniforms.uAmbientLightFloor = uniforms.uAmbientLightFloor;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -100,10 +112,18 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
         uniform float uSunBrightnessFactor;
         uniform float uTextureMinBrightness;
         uniform float uDynamicLightingEnabled;
+        uniform float uAmbientLightFloor;
+        // Beta WorldProvider.generateLightBrightnessTable:
+        //   table[i] = (1 - d) / (d * 3 + 1) * (1 - var1) + var1
+        // where d = 1 - i/15 and var1 is the dimension's ambient floor
+        // (Overworld 0.05, WorldProviderHell 0.1). The floor is applied HERE,
+        // at the light-table/rendering stage, and is never written back as
+        // propagated block light, so sealed caves stay dark.
         float betaLightBrightness(float lightLevel) {
           float clamped = clamp(lightLevel, 0.0, 15.0);
           float darkness = 1.0 - clamped / 15.0;
-          return (1.0 - darkness) / (darkness * 3.0 + 1.0);
+          float base = (1.0 - darkness) / (darkness * 3.0 + 1.0);
+          return base * (1.0 - uAmbientLightFloor) + uAmbientLightFloor;
         }`,
       )
       .replace(
@@ -188,6 +208,10 @@ export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
     uSunBrightnessFactor: { value: 1 },
     uTextureMinBrightness: { value: TEXTURE_MIN_BRIGHTNESS },
     uDynamicLightingEnabled: { value: 1 },
+    // Entities are lit by the same Beta light table as terrain, so they must
+    // pick up the dimension's ambient floor too or mobs would look black in
+    // the Nether while the blocks around them do not.
+    uAmbientLightFloor: { value: OVERWORLD_AMBIENT_LIGHT_FLOOR },
     uStaticSkyLight: { value: 15.0 },
     uStaticBlockLight: { value: 0.0 },
     uStaticAoFactor: { value: 1.0 },
@@ -199,6 +223,7 @@ export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
     shader.uniforms.uSunBrightnessFactor = uniforms.uSunBrightnessFactor;
     shader.uniforms.uTextureMinBrightness = uniforms.uTextureMinBrightness;
     shader.uniforms.uDynamicLightingEnabled = uniforms.uDynamicLightingEnabled;
+    shader.uniforms.uAmbientLightFloor = uniforms.uAmbientLightFloor;
     shader.uniforms.uStaticSkyLight = uniforms.uStaticSkyLight;
     shader.uniforms.uStaticBlockLight = uniforms.uStaticBlockLight;
     shader.uniforms.uStaticAoFactor = uniforms.uStaticAoFactor;
@@ -212,6 +237,7 @@ export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
         uniform float uSunBrightnessFactor;
         uniform float uTextureMinBrightness;
         uniform float uDynamicLightingEnabled;
+        uniform float uAmbientLightFloor;
 
         uniform float uStaticSkyLight;
         uniform float uStaticBlockLight;
@@ -220,10 +246,17 @@ export function attachEntityLighting(material: THREE.MeshBasicMaterial): void {
 
         varying vec3 vEntityLightingFactor;
 
+        // Beta WorldProvider.generateLightBrightnessTable:
+        //   table[i] = (1 - d) / (d * 3 + 1) * (1 - var1) + var1
+        // where d = 1 - i/15 and var1 is the dimension's ambient floor
+        // (Overworld 0.05, WorldProviderHell 0.1). The floor is applied HERE,
+        // at the light-table/rendering stage, and is never written back as
+        // propagated block light, so sealed caves stay dark.
         float betaLightBrightness(float lightLevel) {
           float clamped = clamp(lightLevel, 0.0, 15.0);
           float darkness = 1.0 - clamped / 15.0;
-          return (1.0 - darkness) / (darkness * 3.0 + 1.0);
+          float base = (1.0 - darkness) / (darkness * 3.0 + 1.0);
+          return base * (1.0 - uAmbientLightFloor) + uAmbientLightFloor;
         }`,
       )
       .replace(
@@ -485,6 +518,8 @@ export class ChunkRenderer {
 
   private skylightSubtracted = 0;
   private sunBrightnessFactor = 1;
+  /** Active dimension's Beta light-table ambient floor. */
+  private ambientLightFloor = OVERWORLD_AMBIENT_LIGHT_FLOOR;
   private meshUploadsThisFrame = 0;
   private lastDirtyScanMs = 0;
   private lastSceneInsertionMs = 0;
@@ -745,6 +780,30 @@ export class ChunkRenderer {
     if (clamped === this.skylightSubtracted) return;
     this.skylightSubtracted = clamped;
     this.updateDynamicLightingUniforms();
+  }
+
+  /**
+   * Sets the active dimension's ambient light floor (Beta light-table `var1`).
+   *
+   * This is a RENDERING value only: it lifts the brightness curve so a no-sky
+   * dimension is dim rather than black. It is deliberately not fed into the
+   * light engine, because injecting it as emission would light sealed caves.
+   */
+  public setAmbientLightFloor(value: number): void {
+    const clamped = THREE.MathUtils.clamp(value, 0, 1);
+    if (Math.abs(clamped - this.ambientLightFloor) < 1e-6) return;
+    this.ambientLightFloor = clamped;
+    this.updateDynamicLightingUniforms();
+  }
+
+  /** Current skylight subtraction, for diagnostics. */
+  public getSkylightSubtracted(): number {
+    return this.skylightSubtracted;
+  }
+
+  /** Current dimension ambient light floor, for diagnostics. */
+  public getAmbientLightFloor(): number {
+    return this.ambientLightFloor;
   }
 
   public setSunBrightnessFactor(value: number): void {
@@ -1142,12 +1201,14 @@ export class ChunkRenderer {
         uSunBrightnessFactor: { value: number };
         uTextureMinBrightness: { value: number };
         uDynamicLightingEnabled: { value: number };
+        uAmbientLightFloor?: { value: number };
       } | undefined;
       if (uniforms === undefined) continue;
       uniforms.uSkylightSubtracted.value = this.skylightSubtracted;
       uniforms.uSunBrightnessFactor.value = this.sunBrightnessFactor;
       uniforms.uTextureMinBrightness.value = TEXTURE_MIN_BRIGHTNESS;
       uniforms.uDynamicLightingEnabled.value = 1;
+      if (uniforms.uAmbientLightFloor !== undefined) uniforms.uAmbientLightFloor.value = this.ambientLightFloor;
     }
   }
 

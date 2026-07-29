@@ -34,7 +34,7 @@ import { CHUNK_LOAD_RADIUS } from '../world/ChunkStreamer';
  * dependency on camera rotation.
  */
 
-export type FogMode = 'overworld' | 'water' | 'lava' | 'debug-bypass';
+export type FogMode = 'overworld' | 'water' | 'lava' | 'debug-bypass' | 'dimension';
 
 /** Which of the two THREE.Fog variants a state uses. */
 export type FogKind = 'exp2' | 'linear' | 'none';
@@ -133,6 +133,23 @@ export interface FogControllerInputs {
    * pre-Stage-18 behaviour when the caller omits the field.
    */
   readonly overworldDensityMultiplier?: number;
+  /**
+   * Constant fog colour supplied by the active dimension, if it defines one
+   * (Beta `WorldProvider.func_4096_a`). The Nether returns (0.2, 0.03, 0.03)
+   * regardless of time of day or weather.
+   *
+   * When present this REPLACES the sky-derived overworld colour entirely, so
+   * no Overworld horizon tint can leak into a dimension that has no sky. Eye
+   * -in-water and eye-in-lava still take priority, since those describe what
+   * the camera is submerged in rather than the dimension it is in.
+   */
+  readonly dimensionFogColor?: { readonly r: number; readonly g: number; readonly b: number } | undefined;
+}
+
+/** Packs a 0..1 RGB triple into 0xRRGGBB. */
+export function packFogColor(color: { r: number; g: number; b: number }): number {
+  const to8 = (v: number): number => Math.max(0, Math.min(255, Math.round(v * 255)));
+  return (to8(color.r) << 16) | (to8(color.g) << 8) | to8(color.b);
 }
 
 /**
@@ -177,6 +194,22 @@ export class FogController {
       };
     }
 
+
+    // A dimension with a constant fog colour (Beta `func_4096_a`) overrides
+    // the sky-derived colour. Density still scales with render distance so the
+    // Nether fogs consistently at any view distance; weather multipliers are
+    // ignored because such dimensions have no weather.
+    if (inputs.dimensionFogColor !== undefined) {
+      return {
+        mode: 'dimension',
+        kind: 'exp2',
+        enabled: true,
+        colorHex: packFogColor(inputs.dimensionFogColor),
+        near: 0,
+        far: overworldFogFarDistance(),
+        density: overworldFogDensity(),
+      };
+    }
 
     // Overworld = exponential-density fog. Both `far` and `density` are
     // reported so the F3 overlay can print a useful "range" value even

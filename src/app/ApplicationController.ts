@@ -82,6 +82,7 @@ import { AudioManager } from '../audio/AudioManager';
 import { GameMode } from '../player/GameMode';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { Chunk } from '../world/Chunk';
+import { buildLightLookupTables, computeInitialChunkLight } from '../world/generation/lighting/initialChunkLight';
 import { applyGuiScaleCssVariables, setGlobalGuiScaleSetting } from '../ui/GuiScale';
 import {
   beginLoadPerformanceSession,
@@ -654,7 +655,17 @@ export class ApplicationController {
     await this.showWorldSelect();
   }
 
-  /** Generate and durably save the spawn area so a new world is initialized before publishing. */
+  /**
+   * Generate and durably save the spawn area so a new world is initialized
+   * before publishing.
+   *
+   * Initial lighting MUST be computed before the write. These records are
+   * later read back through the normal persisted-chunk path, which trusts the
+   * stored SkyLight/BlockLight arrays and therefore skips relighting. Saving
+   * an unlit chunk here is indistinguishable from a legitimately dark one, so
+   * the spawn area would load pitch black and only correct itself once a block
+   * edit made LightEngine rewrite it.
+   */
   private async persistSpawnArea(
     service: WorldPersistenceService,
     generator: BetaWorldGenerator,
@@ -664,6 +675,9 @@ export class ApplicationController {
   ): Promise<void> {
     const spawnChunkX = Math.floor(spawn.x / CHUNK_SIZE_X);
     const spawnChunkZ = Math.floor(spawn.z / CHUNK_SIZE_X);
+    // The Overworld has sky; the shared module is the same code the generation
+    // worker runs, so persisted spawn light matches streamed light exactly.
+    const lightTables = buildLightLookupTables(this.blockRegistry);
     for (let dz = -CREATION_SPAWN_PERSIST_RADIUS; dz <= CREATION_SPAWN_PERSIST_RADIUS; dz++) {
       for (let dx = -CREATION_SPAWN_PERSIST_RADIUS; dx <= CREATION_SPAWN_PERSIST_RADIUS; dx++) {
         const chunkX = spawnChunkX + dx;
@@ -674,6 +688,8 @@ export class ApplicationController {
           recordLoadGenerationRequest(loadPerfToken, 'persistSpawnArea', chunk.chunkX, chunk.chunkZ);
           generator.populate(chunk);
         }
+        chunk.loadLightData(computeInitialChunkLight(chunk.copyBlocks(), lightTables, { hasSkyLight: true }));
+        chunk.setPersistedLightingDataLoaded(true);
         await service.saveChunk(chunk, WRITE_PRIORITY_FORCED);
       }
     }

@@ -22,6 +22,8 @@ import { NetherTerrainGenerator } from './NetherTerrainGenerator';
 export class NetherWorldGenerator implements WorldGenerator {
   private readonly terrain: NetherTerrainGenerator;
   private readonly worldSeed: bigint;
+  /** Monotonic tiebreaker for scheduled lava-spring ticks within a chunk. */
+  private nextTickSequence = 0;
 
   public constructor(worldSeed: bigint) {
     this.worldSeed = worldSeed;
@@ -68,30 +70,65 @@ export class NetherWorldGenerator implements WorldGenerator {
     this.generateMushroom(chunk, random, BlockIds.RedMushroom);
   }
 
-  /** Beta `WorldGenHellLava`: a lava spring embedded in a netherrack ceiling. */
+  /**
+   * Beta `WorldGenHellLava`: a lava spring embedded in a netherrack wall or
+   * ceiling, which then flows out to form a lavafall.
+   *
+   * Beta's exact predicate:
+   *   - the block ABOVE must be netherrack;
+   *   - the block itself must be air or netherrack;
+   *   - of the five neighbours (4 horizontal + below) EXACTLY FOUR are
+   *     netherrack and EXACTLY ONE is air.
+   *
+   * That single air neighbour is the mouth the lava pours out of, which is
+   * precisely what makes these lavafalls rather than sealed pockets. Beta then
+   * places `lavaMoving` (id 10) and runs one immediate update tick so the
+   * spring starts flowing during generation.
+   *
+   * Placing a STILL source here instead was wrong twice over: still lava never
+   * spreads, so no lavafall ever formed, and the block id did not match the
+   * reference. The block is placed as flowing and marked for a fluid update so
+   * the runtime fluid simulation takes it from there.
+   *
+   * Out-of-chunk neighbours are treated as netherrack rather than skipped:
+   * the Nether is solid netherrack by default, so this keeps the enclosure
+   * count meaningful at chunk borders instead of silently failing the `== 4`
+   * test for every edge column.
+   */
   private generateHellLava(chunk: Chunk, random: JavaRandom, x: number, y: number, z: number): void {
     if (y < 1 || y + 1 >= CHUNK_SIZE_Y) return;
     if (chunk.getBlock(x, y + 1, z) !== BlockIds.Netherrack) return;
     const here = chunk.getBlock(x, y, z);
     if (here !== AIR_BLOCK_ID && here !== BlockIds.Netherrack) return;
 
-    // Beta counts solid netherrack neighbours and open air neighbours, and
-    // only places when the pocket is mostly enclosed.
     let netherrackNeighbours = 0;
     let airNeighbours = 0;
-    for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
-      const nx = x + dx;
-      const nz = z + dz;
-      if (nx < 0 || nx >= CHUNK_SIZE_X || nz < 0 || nz >= CHUNK_SIZE_Z) continue;
-      const neighbour = chunk.getBlock(nx, y, nz);
+    const tally = (nx: number, ny: number, nz: number): void => {
+      if (nx < 0 || nx >= CHUNK_SIZE_X || nz < 0 || nz >= CHUNK_SIZE_Z) {
+        // Outside this chunk: default Nether fill is netherrack.
+        netherrackNeighbours += 1;
+        return;
+      }
+      const neighbour = chunk.getBlock(nx, ny, nz);
       if (neighbour === BlockIds.Netherrack) netherrackNeighbours += 1;
-      if (neighbour === AIR_BLOCK_ID) airNeighbours += 1;
-    }
-    if (chunk.getBlock(x, y - 1, z) === BlockIds.Netherrack) netherrackNeighbours += 1;
-    if (chunk.getBlock(x, y - 1, z) === AIR_BLOCK_ID) airNeighbours += 1;
+      else if (neighbour === AIR_BLOCK_ID) airNeighbours += 1;
+    };
+
+    tally(x - 1, y, z);
+    tally(x + 1, y, z);
+    tally(x, y, z - 1);
+    tally(x, y, z + 1);
+    tally(x, y - 1, z);
 
     if (netherrackNeighbours === 4 && airNeighbours === 1) {
-      chunk.setBlock(x, y, z, BlockIds.LavaStill);
+      // Beta: Block.lavaMoving + an immediate updateTick so it starts flowing.
+      chunk.setBlock(x, y, z, BlockIds.LavaFlowing);
+      // Beta runs the update tick immediately during generation. Here the
+      // spring is queued on the chunk's own scheduled-tick queue instead: it
+      // survives save/load, it is indexed when the chunk is adopted, and it
+      // keeps generation free of world/runtime dependencies. The fluid
+      // simulation then spreads it into a lavafall on the first tick.
+      chunk.getScheduledTicks().schedule(x, y, z, BlockIds.LavaFlowing, 0, this.nextTickSequence++);
     }
 
     void random;

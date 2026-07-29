@@ -1,4 +1,4 @@
-import type { BlockId } from '../blocks/BlockId';
+import { BlockIds, type BlockId } from '../blocks/BlockId';
 import type { BlockRegistry } from '../blocks/BlockRegistry';
 import type { BlockBehaviourContext, BlockBehaviourRegistry } from './BlockBehaviour';
 import { ALL_BLOCK_DIRECTIONS, offsetBlockPosition, oppositeDirection, type BlockPosition } from './BlockDirections';
@@ -139,6 +139,19 @@ export class BlockUpdateWorld {
     return this.lightEngine.getSkylight(worldX, worldY, worldZ);
   }
 
+  private portalChangeListener: ((x: number, y: number, z: number) => void) | undefined;
+
+  /**
+   * Observer fired whenever a portal block is created or removed.
+   *
+   * A single hook here beats threading a portal index through every behaviour:
+   * fire ignition, portal decay, player mining and worldgen all funnel through
+   * `setBlock`, so one listener sees every case.
+   */
+  public setPortalChangeListener(listener: ((x: number, y: number, z: number) => void) | undefined): void {
+    this.portalChangeListener = listener;
+  }
+
   public setBlock(worldX: number, worldY: number, worldZ: number, blockId: BlockId, options: SetBlockOptions = {}): boolean {
     if (worldY < 0 || worldY >= CHUNK_SIZE_Y) return false;
     const { chunkX, chunkZ, localX, localZ } = worldToChunkLocal(worldX, worldZ);
@@ -165,6 +178,14 @@ export class BlockUpdateWorld {
       affectsWeather: false,
       affectsLight: false,
     });
+
+    // Portal blocks appearing or disappearing must keep the portal index in
+    // step, or the teleporter can link to a portal that no longer exists (or
+    // miss one that was just lit).
+    if (this.portalChangeListener !== undefined
+        && (previousBlockId === BlockIds.Portal || blockId === BlockIds.Portal)) {
+      this.portalChangeListener(worldX, worldY, worldZ);
+    }
 
     if (options.updateLighting ?? true) this.lightEngine.handleBlockEdit(worldX, worldY, worldZ);
     this.markBoundaryNeighboursDirty(chunkX, chunkZ, localX, localZ);

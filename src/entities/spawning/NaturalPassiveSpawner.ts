@@ -43,6 +43,12 @@ export interface PassiveSpawnerOptions {
   readonly player: Player;
   readonly worldSpawn: Readonly<{ x: number; y: number; z: number }>;
   readonly getSkylightSubtracted: () => number;
+  /**
+   * Passive spawn table for the ACTIVE DIMENSION, or null to use the biome
+   * table. Beta's `BiomeGenHell` clears the creature list, so the Nether
+   * supplies an empty table and no cows/sheep/pigs can appear there.
+   */
+  readonly getDimensionSpawnEntries: () => readonly PassiveSpawnEntry[] | null;
 }
 
 export function scaledPassiveCap(eligibleChunkCount: number): number {
@@ -177,6 +183,10 @@ export class NaturalPassiveSpawner {
     originX: number,
     originZ: number,
   ): readonly PassiveSpawnEntry[] {
+    // A dimension-supplied table overrides biomes entirely (see the hostile
+    // spawner for the full rationale).
+    const dimensionEntries = this.options.getDimensionSpawnEntries();
+    if (dimensionEntries !== null) return dimensionEntries;
     const key = `${chunkX},${chunkZ}`;
     const cached = this.biomeSpawnCache.get(key);
     if (cached !== undefined) return cached;

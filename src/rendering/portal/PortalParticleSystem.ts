@@ -11,10 +11,20 @@ import { PortalAxis } from '../../world/portal/PortalAxis';
  * out of both faces rather than filling the cube.
  *
  * Implementation notes:
- *  - One pooled `THREE.Points` object for every particle, matching the
- *    existing entity particle sink. No Object3D per particle.
- *  - The supplied 8x8 `generic_*.png` frames are used directly, picked at
- *    random per particle like Beta's particle atlas indices.
+ *  - ONE `THREE.InstancedMesh`-style batch: a single quad geometry with
+ *    per-instance attributes. No Object3D per particle.
+ *  - The four supplied `generic_*.png` frames are combined into one texture
+ *    ATLAS so every frame is actually reachable from a single draw call. A
+ *    `THREE.PointsMaterial` can only bind ONE map, so the previous Points
+ *    implementation silently rendered `generic_0` for every particle and the
+ *    other three assets were never displayed at all.
+ *  - Quads are billboarded in the VERTEX SHADER against the camera's right/up
+ *    basis, so they always face the viewer. `THREE.Points` gl_PointSize
+ *    sprites are screen-aligned squares whose on-screen size does not track
+ *    perspective the same way and which cannot be depth-offset off the portal
+ *    plane; that caused the z-fighting against the portal surface.
+ *  - Sprites are square (the assets are square), so the native aspect ratio is
+ *    preserved exactly — no stretching.
  *  - Particles are distance-culled at spawn and expire on their own, so none
  *    survive a portal being broken or its chunk unloading.
  */
@@ -31,7 +41,23 @@ export const PORTAL_PARTICLE_TEXTURES: readonly string[] = [
 export const PORTAL_PARTICLES_PER_TICK = 4;
 
 /** Beyond this distance portals stop emitting, to bound the particle budget. */
-const PORTAL_PARTICLE_MAX_DISTANCE = 32;
+export const PORTAL_PARTICLE_MAX_DISTANCE = 32;
+
+/** Native pixel size of each supplied frame; they are square. */
+export const PORTAL_PARTICLE_TEXTURE_SIZE = 8;
+
+/**
+ * World-space edge length of a portal particle quad.
+ *
+ * Square, matching the square source frames, so the sprite is never stretched.
+ */
+export const PORTAL_PARTICLE_QUAD_SIZE = 0.16;
+
+/**
+ * Pushed toward the camera along the view vector so a particle sitting exactly
+ * on the portal plane cannot z-fight it. Small enough not to read as an offset.
+ */
+const DEPTH_BIAS = 0.02;
 
 /** Hard cap on simultaneously live portal particles. */
 const MAX_PARTICLES = 2048;
@@ -41,47 +67,96 @@ const MIN_LIFETIME_SECONDS = 1;
 const MAX_LIFETIME_SECONDS = 2;
 
 export class PortalParticleSystem {
-  private readonly points: THREE.Points;
-  private readonly geometry: THREE.BufferGeometry;
-  private readonly material: THREE.PointsMaterial;
-  private readonly textures: THREE.Texture[] = [];
+  private readonly mesh: THREE.Mesh;
+  private readonly geometry: THREE.InstancedBufferGeometry;
+  private readonly material: THREE.ShaderMaterial;
+  private readonly atlasTexture: THREE.Texture;
 
-  private readonly positions = new Float32Array(MAX_PARTICLES * 3);
+  private readonly offsets = new Float32Array(MAX_PARTICLES * 3);
   private readonly velocities = new Float32Array(MAX_PARTICLES * 3);
   private readonly colors = new Float32Array(MAX_PARTICLES * 3);
+  /** Per-instance atlas column, so all four supplied frames are used. */
+  private readonly frames = new Float32Array(MAX_PARTICLES);
+  private readonly alphas = new Float32Array(MAX_PARTICLES);
   private readonly life = new Float32Array(MAX_PARTICLES);
   private readonly maxLife = new Float32Array(MAX_PARTICLES);
   private active = 0;
 
   public constructor(scene: THREE.Scene) {
-    const loader = new THREE.TextureLoader();
-    for (const path of PORTAL_PARTICLE_TEXTURES) {
-      const texture = loader.load(path, (loaded) => this.configure(loaded));
-      this.configure(texture);
-      this.textures.push(texture);
-    }
+    this.atlasTexture = buildParticleAtlas(PORTAL_PARTICLE_TEXTURES);
 
-    this.geometry = new THREE.BufferGeometry();
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
-    this.geometry.setDrawRange(0, 0);
+    // Unit quad, billboarded in the vertex shader.
+    const quad = new THREE.PlaneGeometry(1, 1);
+    this.geometry = new THREE.InstancedBufferGeometry();
+    this.geometry.index = quad.index;
+    this.geometry.setAttribute('position', quad.getAttribute('position'));
+    this.geometry.setAttribute('uv', quad.getAttribute('uv'));
+    quad.dispose();
 
-    // A single shared material keeps this to one draw call. The supplied PNGs
-    // are 1-bit alpha, so alphaTest preserves their hard-edged transparency.
-    this.material = new THREE.PointsMaterial({
-      size: 0.16,
-      map: this.textures[0] ?? null,
-      vertexColors: true,
+    this.geometry.setAttribute('instanceOffset', new THREE.InstancedBufferAttribute(this.offsets, 3));
+    this.geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(this.colors, 3));
+    this.geometry.setAttribute('instanceFrame', new THREE.InstancedBufferAttribute(this.frames, 1));
+    this.geometry.setAttribute('instanceAlpha', new THREE.InstancedBufferAttribute(this.alphas, 1));
+    this.geometry.instanceCount = 0;
+
+    const frameCount = PORTAL_PARTICLE_TEXTURES.length;
+    this.material = new THREE.ShaderMaterial({
+      uniforms: {
+        uAtlas: { value: this.atlasTexture },
+        uFrameCount: { value: frameCount },
+        uQuadSize: { value: PORTAL_PARTICLE_QUAD_SIZE },
+        uDepthBias: { value: DEPTH_BIAS },
+      },
+      vertexShader: `
+        attribute vec3 instanceOffset;
+        attribute vec3 instanceColor;
+        attribute float instanceFrame;
+        attribute float instanceAlpha;
+        uniform float uFrameCount;
+        uniform float uQuadSize;
+        uniform float uDepthBias;
+        varying vec2 vUv;
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          // Select this instance's column of the horizontal atlas. Each frame
+          // is square and occupies exactly 1/uFrameCount of the width, so the
+          // sprite keeps its native 1:1 aspect.
+          float frame = clamp(floor(instanceFrame + 0.5), 0.0, uFrameCount - 1.0);
+          vUv = vec2((uv.x + frame) / uFrameCount, uv.y);
+          vColor = instanceColor;
+          vAlpha = instanceAlpha;
+
+          // Billboard: build the quad in VIEW space so it always faces the
+          // camera regardless of camera roll or particle position.
+          vec4 viewCenter = modelViewMatrix * vec4(instanceOffset, 1.0);
+          viewCenter.xyz += vec3(position.xy * uQuadSize, uDepthBias);
+          gl_Position = projectionMatrix * viewCenter;
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D uAtlas;
+        varying vec2 vUv;
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          vec4 texel = texture2D(uAtlas, vUv);
+          // The supplied frames are 1-bit alpha; discard fully preserves their
+          // hard-edged transparency instead of blending a halo.
+          if (texel.a < 0.5) discard;
+          gl_FragColor = vec4(texel.rgb * vColor, vAlpha);
+        }
+      `,
       transparent: true,
-      alphaTest: 0.5,
       depthWrite: false,
-      sizeAttenuation: true,
+      depthTest: true,
+      side: THREE.DoubleSide,
     });
 
-    this.points = new THREE.Points(this.geometry, this.material);
-    this.points.frustumCulled = false;
-    this.points.renderOrder = 24;
-    scene.add(this.points);
+    this.mesh = new THREE.Mesh(this.geometry, this.material);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 24;
+    scene.add(this.mesh);
   }
 
   /**
@@ -125,9 +200,9 @@ export class PortalParticleSystem {
         vx = Math.random() * 2 * side;
       }
 
-      this.positions[base] = px;
-      this.positions[base + 1] = py;
-      this.positions[base + 2] = pz;
+      this.offsets[base] = px;
+      this.offsets[base + 1] = py;
+      this.offsets[base + 2] = pz;
       this.velocities[base] = vx;
       this.velocities[base + 1] = vy;
       this.velocities[base + 2] = vz;
@@ -138,6 +213,11 @@ export class PortalParticleSystem {
       this.colors[base] = (166 / 255) * shade;
       this.colors[base + 1] = (18 / 255) * shade;
       this.colors[base + 2] = (222 / 255) * shade;
+
+      // Pick one of the four supplied frames at random, like Beta's particle
+      // atlas index. Every frame is reachable because they share one atlas.
+      this.frames[index] = Math.floor(Math.random() * PORTAL_PARTICLE_TEXTURES.length);
+      this.alphas[index] = 1;
 
       const lifetime = MIN_LIFETIME_SECONDS + Math.random() * (MAX_LIFETIME_SECONDS - MIN_LIFETIME_SECONDS);
       this.life[index] = lifetime;
@@ -158,10 +238,12 @@ export class PortalParticleSystem {
         if (i !== last) {
           const lastBase = last * 3;
           for (let c = 0; c < 3; c++) {
-            this.positions[base + c] = this.positions[lastBase + c]!;
+            this.offsets[base + c] = this.offsets[lastBase + c]!;
             this.velocities[base + c] = this.velocities[lastBase + c]!;
             this.colors[base + c] = this.colors[lastBase + c]!;
           }
+          this.frames[i] = this.frames[last]!;
+          this.alphas[i] = this.alphas[last]!;
           this.life[i] = this.life[last]!;
           this.maxLife[i] = this.maxLife[last]!;
         }
@@ -174,21 +256,27 @@ export class PortalParticleSystem {
       this.velocities[base] = this.velocities[base]! * drag;
       this.velocities[base + 1] = this.velocities[base + 1]! * drag;
       this.velocities[base + 2] = this.velocities[base + 2]! * drag;
-      this.positions[base] = this.positions[base]! + this.velocities[base]! * deltaSeconds;
-      this.positions[base + 1] = this.positions[base + 1]! + this.velocities[base + 1]! * deltaSeconds;
-      this.positions[base + 2] = this.positions[base + 2]! + this.velocities[base + 2]! * deltaSeconds;
+      this.offsets[base] = this.offsets[base]! + this.velocities[base]! * deltaSeconds;
+      this.offsets[base + 1] = this.offsets[base + 1]! + this.velocities[base + 1]! * deltaSeconds;
+      this.offsets[base + 2] = this.offsets[base + 2]! + this.velocities[base + 2]! * deltaSeconds;
+      // Fade out over the final third of the lifetime so particles dissolve
+      // rather than popping.
+      const remaining = this.life[i]! / this.maxLife[i]!;
+      this.alphas[i] = remaining > 0.33 ? 1 : Math.max(0, remaining / 0.33);
       i += 1;
     }
 
-    this.geometry.setDrawRange(0, this.active);
-    (this.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    (this.geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
+    this.geometry.instanceCount = this.active;
+    (this.geometry.getAttribute('instanceOffset') as THREE.InstancedBufferAttribute).needsUpdate = true;
+    (this.geometry.getAttribute('instanceColor') as THREE.InstancedBufferAttribute).needsUpdate = true;
+    (this.geometry.getAttribute('instanceFrame') as THREE.InstancedBufferAttribute).needsUpdate = true;
+    (this.geometry.getAttribute('instanceAlpha') as THREE.InstancedBufferAttribute).needsUpdate = true;
   }
 
   /** Drops every live particle, e.g. when switching dimension. */
   public clear(): void {
     this.active = 0;
-    this.geometry.setDrawRange(0, 0);
+    this.geometry.instanceCount = 0;
   }
 
   public getActiveCount(): number {
@@ -198,15 +286,51 @@ export class PortalParticleSystem {
   public dispose(): void {
     this.geometry.dispose();
     this.material.dispose();
-    for (const texture of this.textures) texture.dispose();
-    this.points.removeFromParent();
+    this.atlasTexture.dispose();
+    this.mesh.removeFromParent();
+  }
+}
+
+/**
+ * Combines the supplied square frames into one horizontal atlas.
+ *
+ * A single texture means a single draw call AND — unlike a `PointsMaterial`,
+ * which binds exactly one map — it makes every supplied frame reachable. Each
+ * frame keeps its own square cell, so sampling `(uv.x + frame) / frameCount`
+ * reproduces the original 1:1 pixels with no stretching.
+ *
+ * Images load asynchronously; each one is blitted into its cell on arrival and
+ * the atlas is flagged for re-upload.
+ */
+function buildParticleAtlas(paths: readonly string[]): THREE.Texture {
+  const size = PORTAL_PARTICLE_TEXTURE_SIZE;
+  const canvas = document.createElement('canvas');
+  canvas.width = size * paths.length;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+
+  const texture = new THREE.CanvasTexture(canvas);
+  // Beta pixel-art filtering; NEVER interpolate these 8x8 frames.
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+
+  if (context !== null) {
+    context.imageSmoothingEnabled = false;
+    paths.forEach((path, index) => {
+      const image = new Image();
+      image.onload = (): void => {
+        // Draw at the frame's native size: no scaling, alpha preserved.
+        context.clearRect(index * size, 0, size, size);
+        context.drawImage(image, index * size, 0, size, size);
+        texture.needsUpdate = true;
+      };
+      image.src = path;
+    });
   }
 
-  private configure(texture: THREE.Texture): void {
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    texture.generateMipmaps = false;
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.needsUpdate = true;
-  }
+  return texture;
 }

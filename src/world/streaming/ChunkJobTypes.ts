@@ -38,8 +38,8 @@ export interface ChunkGenerationResult {
   readonly metadata: ArrayBuffer;
   /**
    * Chunk-local initial lighting computed in the worker via the shared
-   * `computeInitialChunkLight` module (skylight high nibble, blocklight low
-   * nibble). The main thread adopts this instead of recomputing the same BFS,
+   * `computeInitialChunkLight` module (skylight LOW nibble, blocklight HIGH
+   * nibble, matching Chunk's storage). The main thread adopts this instead of recomputing the same BFS,
    * and still performs border reconciliation itself.
    */
   readonly light: ArrayBuffer;

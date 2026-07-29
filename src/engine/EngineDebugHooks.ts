@@ -48,6 +48,10 @@ export interface EngineDebugHookDependencies {
   readonly blockUpdateWorld: BlockUpdateWorld;
   readonly chunkRenderer: { getPassMeshCounts(): unknown; probeChunkMesh(x: number, z: number): unknown };
   /** Portal/dimension state, exposed for manual and automated portal testing. */
+  readonly environment: {
+    getState(): unknown;
+    getEntityKinds(): string[];
+  };
   readonly portal: {
     getState(): unknown;
     placePlayer(x: number, y: number, z: number): void;
@@ -107,6 +111,14 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
      * progress without guessing from visuals.
      */
     getPortalState: () => deps.portal.getState(),
+    /** Skylight at a world position (Chunk's LOW nibble). */
+    getSkylight: (x: number, y: number, z: number) => deps.lightEngine.getSkylight(x, y, z),
+    /** Block light at a world position (Chunk's HIGH nibble). */
+    getBlocklight: (x: number, y: number, z: number) => deps.lightEngine.getBlocklight(x, y, z),
+    /** Active dimension's environment rules and their live rendered values. */
+    getEnvironmentState: () => deps.environment.getState(),
+    /** Kinds of every live entity, for asserting Nether spawn exclusion. */
+    getNetherEntityKinds: () => deps.environment.getEntityKinds(),
     /**
      * Moves the player to a world position. Used by automated tests to stand
      * inside a portal; gameplay never calls this.

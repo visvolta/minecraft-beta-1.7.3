@@ -302,6 +302,23 @@ export class CloudRenderer {
     };
   }
 
+  /**
+   * Shows/hides the clouds wholesale.
+   *
+   * Driven by the active dimension's sky rules (Beta `WorldProvider.hasNoSky`)
+   * rather than a Nether check here, so a future dimension gets the same
+   * behaviour by configuration alone. Hiding the root also skips its update
+   * work, so a dimension without clouds pays nothing for them.
+   */
+  public setVisible(visible: boolean): void {
+    this.root.visible = visible;
+  }
+
+  /** Whether this renderer's root is currently drawn. */
+  public isVisible(): boolean {
+    return this.root.visible;
+  }
+
   public dispose(): void {
     this.disposeMesh();
     this.material.dispose();

@@ -115,6 +115,16 @@ export class Renderer {
    * Cost: a handful of shader compiles the first time the player
    * enters water/lava, then cached forever.
    */
+  /** Current fog state, for diagnostics and the F3 overlay. */
+  public getFogState(): FogState {
+    return this.currentFogState;
+  }
+
+  /** Scene clear/background colour as 0xRRGGBB, for diagnostics. */
+  public getBackgroundHex(): number {
+    return this.backgroundColor.getHex();
+  }
+
   public setFogState(state: FogState): void {
     this.currentFogState = state;
 
