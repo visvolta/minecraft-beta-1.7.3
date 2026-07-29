@@ -567,7 +567,8 @@ class MeshBuffers {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(tc, 3));
-    // Normalized so the shader reads sky/block as 0..15 and ao/brightness as 0..1.
+    // Normalized so the GPU reads sky/block RGB as 0..1; ao/faceBrightness
+    // travel in the separate surfaceShade attribute (see below).
     // xyzw = skylight, blockR, blockG, blockB (each normalized 0..15 -> 0..1).
     geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(pl, 4, true));
     const ss = new Uint8Array(this.surfaceShade.view());

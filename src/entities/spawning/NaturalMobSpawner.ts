@@ -95,6 +95,21 @@ export class NaturalMobSpawner {
   public getEligibleChunkCount(): number { this.buildEligibleChunks(); return this.eligibleChunks.length; }
   public getScaledHostileCap(): number { return scaledHostileCap(this.getEligibleChunkCount()); }
 
+  /**
+   * Drops every cached Overworld biome spawn table.
+   *
+   * Biome tables are an Overworld concept, so they must never outlive a
+   * dimension switch: after leaving the Overworld a stale entry could be
+   * served if a dimension's own table were ever absent. The active dimension's
+   * authoritative table (see {@link NaturalMobSpawnerOptions.getDimensionSpawnEntries})
+   * already overrides the biome path, but clearing the cache on transition is
+   * what makes that override robust against future regressions.
+   */
+  public clearDimensionCaches(): void {
+    this.biomeSpawnCache.clear();
+    this.passive.clearDimensionCaches();
+  }
+
   private tickHostiles(): number {
     this.acceptedThisPass.length = 0; this.buildEligibleChunks();
     if (this.options.entityManager.activeHostileMobCount > scaledHostileCap(this.eligibleChunks.length)) return 0;

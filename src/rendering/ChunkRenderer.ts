@@ -105,12 +105,14 @@ export function attachHeightAwareFog(material: THREE.MeshBasicMaterial): void {
         '#include <common>',
         `#include <common>
         attribute vec3 tintColor;
-        // Normalized uint8x4: x=sky*17, y=block*17, z=ao, w=faceBrightness.
-        // Reading .xy back through *15.0 recovers the exact Beta light level
-        // because 255/17 == 15 for every one of the 16 discrete levels.
-        // xyzw = skylight, blockR, blockG, blockB (normalized 0..15 -> 0..1).
+        // packedLight = normalized uint8x4: xyzw = skylight, blockR, blockG,
+        // blockB. Each channel is packed as level*17 so the GPU's 0..1
+        // normalization recovers level/15 exactly (255/17 == 15) for all 16
+        // Beta light levels; the shader multiplies back by 15.0.
         attribute vec4 packedLight;
-        // xy = ambient occlusion, face brightness.
+        // surfaceShade = normalized uint8x2: xy = ambient occlusion, face
+        // brightness. These were split out of packedLight so the four light
+        // bytes can carry full RGB block light; they are NOT light levels.
         attribute vec2 surfaceShade;
         uniform float uSkylightSubtracted;
         uniform float uSunBrightnessFactor;

@@ -46,8 +46,10 @@ export interface PopulatedMeshAttributeBuffers {
   readonly positions: ArrayBuffer;
   readonly uvs: ArrayBuffer;
   readonly tintColors: ArrayBuffer;
-  /** Normalized uint8x4: sky, block, ao, faceBrightness. */
+  /** Normalized uint8x4: skylight, blockR, blockG, blockB (each 0..15 -> 0..1). */
   readonly packedLight: ArrayBuffer;
+  /** Normalized uint8x2: ambient occlusion, face brightness (each 0..1). */
+  readonly surfaceShade: ArrayBuffer;
   /** Fluid/fire passes only; zero-length for the general layout. */
   readonly fluidTextureKinds: ArrayBuffer;
   readonly fluidFrameUvs: ArrayBuffer;

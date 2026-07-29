@@ -3,12 +3,8 @@ import type { TextureAtlas } from '../../assets/TextureAtlas';
 import type { Chunk } from '../../world/Chunk';
 import type { ChunkManager } from '../../world/ChunkManager';
 import { getWorkerCount, isWorkerFeatureEnabled } from '../../world/streaming/WorkerFeatureFlags';
-import type {
-  ChunkMeshJob,
-  ChunkMeshResult,
-  MeshAttributeBuffers,
-  PopulatedMeshAttributeBuffers,
-} from './ChunkMeshJobTypes';
+import type { ChunkMeshJob, ChunkMeshResult } from './ChunkMeshJobTypes';
+import { geometryFromBuffers, isPopulatedMeshAttributeBuffers } from './ChunkMeshTransfer';
 
 interface PendingMeshJob {
   readonly chunkX: number;
@@ -74,50 +70,7 @@ export interface ChunkMeshGeometrySet {
 }
 
 import { chunkKey } from '../../world/chunkKey';
-
-/**
- * An empty geometry for a pass that produced no vertices.
- *
- * `fluidLayout` must match the pass, not the data: a fluid pass always
- * declares fluidTextureKind/fluidFrameUv even when empty, so downstream
- * geometry validation sees a consistent layout for that pass.
- */
-function emptyGeometryFromBuffers(fluidLayout: boolean): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
-  geometry.setAttribute('tintColor', new THREE.Float32BufferAttribute(new Float32Array(), 3));
-  geometry.setAttribute('packedLight', new THREE.Uint8BufferAttribute(new Uint8Array(), 4, true));
-  if (fluidLayout) {
-    geometry.setAttribute('fluidTextureKind', new THREE.Float32BufferAttribute(new Float32Array(), 1));
-    geometry.setAttribute('fluidFrameUv', new THREE.Float32BufferAttribute(new Float32Array(), 2));
-  }
-  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(), 1));
-  return geometry;
-}
-
-function isPopulatedMeshAttributeBuffers(buffers: MeshAttributeBuffers): buffers is PopulatedMeshAttributeBuffers {
-  return buffers.empty !== true;
-}
-
-/** Adopt transferred ArrayBuffers without copying. Ownership moves to the geometry. */
-function geometryFromBuffers(buffers: MeshAttributeBuffers, fluidLayout: boolean): THREE.BufferGeometry {
-  if (!isPopulatedMeshAttributeBuffers(buffers)) return emptyGeometryFromBuffers(fluidLayout);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buffers.positions), 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(buffers.uvs), 2));
-  geometry.setAttribute('tintColor', new THREE.BufferAttribute(new Float32Array(buffers.tintColors), 3));
-  geometry.setAttribute('packedLight', new THREE.BufferAttribute(new Uint8Array(buffers.packedLight), 4, true));
-  if (fluidLayout) {
-    geometry.setAttribute('fluidTextureKind', new THREE.BufferAttribute(new Float32Array(buffers.fluidTextureKinds), 1));
-    geometry.setAttribute('fluidFrameUv', new THREE.BufferAttribute(new Float32Array(buffers.fluidFrameUvs), 2));
-  }
-  geometry.setIndex(new THREE.BufferAttribute(
-    buffers.indexType === 'uint16' ? new Uint16Array(buffers.indices) : new Uint32Array(buffers.indices),
-    1,
-  ));
-  return geometry;
-}
+import { CHUNK_VOLUME } from '../../world/chunkConstants';
 
 const SNAPSHOT_BYTES = 16 * 128 * 16; // chunk volume
 
@@ -515,7 +468,14 @@ export class ChunkMeshingQueue {
         blocks.set(chunk.getBlockDataView());
         const metadata = this.snapshotPool.acquire();
         metadata.set(chunk.getMetadataDataView());
-        const light = this.snapshotPool.acquire();
+        // Light is packed RGB: one Uint16 per cell (2 * CHUNK_VOLUME bytes).
+        // The byte snapshot pool above is sized for the OLD 1-byte/cell light
+        // format (SNAPSHOT_BYTES == CHUNK_VOLUME). Using it here truncated each
+        // word to its low byte, the worker reconstructed only CHUNK_VOLUME/2
+        // elements, and Chunk.loadLightData then threw a RangeError on every
+        // mesh job — so worker meshing produced nothing and terrain was never
+        // rendered. Snapshot light at its real Uint16 width.
+        const light = new Uint16Array(CHUNK_VOLUME);
         light.set(chunk.getLightDataView());
         this.inFlightSnapshotBytes += blocks.byteLength + metadata.byteLength + light.byteLength;
         chunks.push({
@@ -556,6 +516,7 @@ export class ChunkMeshingQueue {
       total += mesh.uvs.byteLength;
       total += mesh.tintColors.byteLength;
       total += mesh.packedLight.byteLength;
+      total += mesh.surfaceShade.byteLength;
       total += mesh.fluidTextureKinds.byteLength;
       total += mesh.fluidFrameUvs.byteLength;
       total += mesh.indices.byteLength;

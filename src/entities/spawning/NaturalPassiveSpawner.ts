@@ -119,6 +119,11 @@ export class NaturalPassiveSpawner {
     return scaledPassiveCap(this.eligibleChunks.length);
   }
 
+  /** Clears cached Overworld biome spawn tables; see NaturalMobSpawner.clearDimensionCaches. */
+  public clearDimensionCaches(): void {
+    this.biomeSpawnCache.clear();
+  }
+
   private buildEligibleChunks(): void {
     const centerX = Math.floor(this.options.player.position.x / 16);
     const centerZ = Math.floor(this.options.player.position.z / 16);

@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { BlockRegistry } from '../blocks/BlockRegistry';
 import { registerDefaultBlocks } from '../blocks/registerDefaultBlocks';
 import { ChunkManager } from '../world/ChunkManager';
@@ -8,10 +7,13 @@ import { VegetationColorProvider } from '../world/generation/climate/VegetationC
 import type {
   ChunkMeshResult,
   ChunkMeshWorkerError,
-  MeshAttributeBuffers,
   ChunkMeshWorkerMessage,
-  PopulatedMeshAttributeBuffers,
 } from '../rendering/meshing/ChunkMeshJobTypes';
+import {
+  extractGeometryBuffers,
+  transferListForBuffers,
+  isPopulatedMeshAttributeBuffers,
+} from '../rendering/meshing/ChunkMeshTransfer';
 
 const registry = new BlockRegistry();
 registerDefaultBlocks(registry);
@@ -31,65 +33,16 @@ class WorkerAtlas {
 
 const atlas = new WorkerAtlas();
 
-function ownArrayBuffer(view: ArrayBufferView): ArrayBuffer {
-  if (view.byteOffset === 0 && view.byteLength === view.buffer.byteLength) {
-    return view.buffer as ArrayBuffer;
-  }
-  return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
-}
-
-function attributeBuffer(geometry: THREE.BufferGeometry, name: string): ArrayBuffer {
-  const attribute = geometry.getAttribute(name);
-  if (attribute === undefined) {
-    return new Float32Array().buffer;
-  }
-  return ownArrayBuffer(attribute.array as ArrayBufferView);
-}
-
-function extractGeometry(geometry: THREE.BufferGeometry): MeshAttributeBuffers {
-  const index = geometry.getIndex();
-  const position = geometry.getAttribute('position');
-  const vertexCount = position?.count ?? 0;
-  const indexCount = index?.count ?? 0;
-  if (vertexCount === 0 || indexCount === 0) return createEmptyMeshAttributeBuffers();
-  return {
-    positions: attributeBuffer(geometry, 'position'),
-
-    uvs: attributeBuffer(geometry, 'uv'),
-
-    tintColors: attributeBuffer(geometry, 'tintColor'),
-    packedLight: attributeBuffer(geometry, 'packedLight'),
-    fluidTextureKinds: attributeBuffer(geometry, 'fluidTextureKind'),
-    fluidFrameUvs: attributeBuffer(geometry, 'fluidFrameUv'),
-    indices: index === null ? new Uint32Array().buffer : ownArrayBuffer(index.array as ArrayBufferView),
-    indexType: index !== null && index.array instanceof Uint16Array ? 'uint16' : 'uint32',
-    vertexCount,
-    indexCount,
-  };
-}
-
-function createEmptyMeshAttributeBuffers(): MeshAttributeBuffers {
-  return { empty: true, vertexCount: 0, indexCount: 0 };
-}
-
-function isPopulatedMesh(mesh: MeshAttributeBuffers): mesh is PopulatedMeshAttributeBuffers {
-  return mesh.empty !== true;
-}
-
+/**
+ * Collects every ArrayBuffer the populated passes must move to the main thread.
+ * Delegated to the shared transfer module so the transfer list can never drift
+ * from the attribute set that {@link extractGeometryBuffers} produces.
+ */
 function transferList(result: ChunkMeshResult): Transferable[] {
   const list: Transferable[] = [];
   for (const mesh of [result.terrain, result.water, result.lava, result.cutout, result.leaves, result.fire, result.translucent, result.portal]) {
-    if (!isPopulatedMesh(mesh)) continue;
-    list.push(
-      mesh.positions,
-      mesh.uvs,
-
-      mesh.tintColors,
-      mesh.packedLight,
-      mesh.fluidTextureKinds,
-      mesh.fluidFrameUvs,
-      mesh.indices,
-    );
+    if (!isPopulatedMeshAttributeBuffers(mesh)) continue;
+    list.push(...transferListForBuffers(mesh));
   }
   return list;
 }
@@ -158,14 +111,14 @@ workerSelf.onmessage = (event: MessageEvent<ChunkMeshWorkerMessage>): void => {
       chunkX: job.targetChunkX,
       chunkZ: job.targetChunkZ,
       targetRevision: job.targetRevision,
-      terrain: extractGeometry(passes.terrain),
-      water: extractGeometry(passes.water),
-      lava: extractGeometry(passes.lava),
-      cutout: extractGeometry(passes.cutout),
-      leaves: extractGeometry(passes.leaves),
-      fire: extractGeometry(passes.fire),
-      translucent: extractGeometry(passes.translucent),
-      portal: extractGeometry(passes.portal),
+      terrain: extractGeometryBuffers(passes.terrain),
+      water: extractGeometryBuffers(passes.water),
+      lava: extractGeometryBuffers(passes.lava),
+      cutout: extractGeometryBuffers(passes.cutout),
+      leaves: extractGeometryBuffers(passes.leaves),
+      fire: extractGeometryBuffers(passes.fire),
+      translucent: extractGeometryBuffers(passes.translucent),
+      portal: extractGeometryBuffers(passes.portal),
       durationMs: performance.now() - start,
       voxelVisits: mesher.lastVoxelVisits,
     };

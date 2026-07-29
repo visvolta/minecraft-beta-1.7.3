@@ -134,6 +134,7 @@ import { DimensionRegistry, convertCoordinate } from '../world/dimension/Dimensi
 import { OVERWORLD_DIMENSION } from '../world/dimension/overworldDimension';
 import { NETHER_DIMENSION } from '../world/dimension/netherDimension';
 import { DIMENSION_NETHER, DIMENSION_OVERWORLD, type DimensionId } from '../world/dimension/DimensionId';
+import { dimensionScopedKey } from '../world/dimension/dimensionKeys';
 import type { DimensionDefinition } from '../world/dimension/DimensionDefinition';
 import { LightEngine } from '../world/generation/lighting/LightEngine';
 import { ClimateSampler } from '../world/generation/climate/ClimateSampler';
@@ -490,6 +491,13 @@ export class Engine {
     this.dimensions.register(NETHER_DIMENSION);
     this.activeDimensionId = metadata.playerDimension ?? DIMENSION_OVERWORLD;
     if (!this.dimensions.has(this.activeDimensionId)) this.activeDimensionId = DIMENSION_OVERWORLD;
+    // The persistence service namespaces chunk/record keys by its `dimension`
+    // field, which defaults to the Overworld and is otherwise only re-pointed
+    // during a portal switch. A world saved in the Nether must re-point it HERE,
+    // before the streamer issues its first chunk reads — otherwise every Nether
+    // (x,z) read/write lands in the Overworld key namespace and the two
+    // dimensions collide (Nether terrain overwriting/reading Overworld chunks).
+    this.persistence.setDimension(this.activeDimensionId);
     this.worldSeed = worldSeed;
     this.worldGenerator = this.activeDimension.createGenerator(worldSeed);
     this.worldTime = new WorldTime();
@@ -2489,6 +2497,9 @@ export class Engine {
     //    on arrival rather than integrated into the wrong world.
     this.contextGeneration += 1;
     this.activeDimensionId = dimensionId;
+    // Biome spawn tables are an Overworld concept; drop any cached ones so the
+    // destination's authoritative dimension table is the only spawn source.
+    this.naturalMobSpawner.clearDimensionCaches();
     this.worldGenerator = destination.createGenerator(this.worldSeed);
     this.persistence.setDimension(dimensionId);
 
@@ -2747,7 +2758,11 @@ export class Engine {
   private async loadPortalIndex(): Promise<void> {
     this.portalIndex = new PortalIndex();
     try {
-      this.portalIndex.deserialize(await this.persistence.readRecord(PORTAL_INDEX_RECORD_KEY));
+      // Scope the portal index by dimension (Overworld key is unchanged for
+      // backward compatibility). readRecord/writeRecord take no dimension, so
+      // without this every dimension's portal index shares one key and a
+      // Nether save overwrites the Overworld index.
+      this.portalIndex.deserialize(await this.persistence.readRecord(dimensionScopedKey(this.activeDimensionId, PORTAL_INDEX_RECORD_KEY)));
     } catch (error) {
       // The index is a cache; a failed read degrades to the raw Beta scan.
       console.warn('[Portal] could not load the portal index:', error);
@@ -2763,7 +2778,7 @@ export class Engine {
     if (!this.portalIndex.isDirty()) return;
     const bytes = this.portalIndex.serialize();
     this.portalIndex.clearDirty();
-    this.persistence.writeRecord(PORTAL_INDEX_RECORD_KEY, bytes, WRITE_PRIORITY_FORCED)
+    this.persistence.writeRecord(dimensionScopedKey(this.activeDimensionId, PORTAL_INDEX_RECORD_KEY), bytes, WRITE_PRIORITY_FORCED)
       .catch((error: unknown) => { console.warn('[Portal] could not save the portal index:', error); });
   }
 

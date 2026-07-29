@@ -138,7 +138,7 @@ export interface InitialLightOptions {
  * @param tables Opacity/emission LUTs from {@link buildLightLookupTables}.
  * @param options Dimension lighting rules; defaults to a sky-lit dimension.
  * @param out Optional destination buffer to fill (length CHUNK_VOLUME).
- * @returns Packed light bytes: skylight in the high nibble, blocklight in the low nibble.
+ * @returns Packed light words (Uint16Array): sky, red, green, blue per `LightValue.packLight`.
  */
 export function computeInitialChunkLight(
   blocks: Uint8Array,
