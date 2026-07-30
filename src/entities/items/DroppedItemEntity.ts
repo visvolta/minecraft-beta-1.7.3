@@ -8,6 +8,7 @@ import type { Drop } from './BlockDropResolver';
 import { classifyItemRender, isBlock3dCategory, isFlatItemCategory, isToolCategory } from '../../inventory/ItemRenderClassifier';
 import { BlockItemModelBuilder } from '../../inventory/BlockItemModelBuilder';
 import { ItemIconResolver } from '../../inventory/ItemIconResolver';
+import { spawnEggDescriptorByNumericId } from '../SpawnEggDescriptor';
 
 /** Dropped-item cube footprint (Beta `EntityItem` is 0.25×0.25). */
 const ITEM_SIZE = 0.25;
@@ -116,6 +117,10 @@ export class DroppedItemEntity extends Entity {
       } else if (isBlock3dCategory(category) && def !== undefined) {
         mesh = new THREE.Mesh(BlockItemModelBuilder.build3DGeometry(def, this.ctx.blockAtlas), this.ctx.heldBlockMaterial);
         mesh.scale.set(0.25, 0.25, 0.25);
+      } else if (this.drop.type === 'item' && this.drop.id === 'spawn_egg') {
+        // Spawn eggs render as two tinted sprite layers, using the same
+        // descriptor colours as the inventory icon.
+        mesh = this.buildSpawnEggMesh();
       } else if (isFlatItemCategory(category) || isToolCategory(category)) {
         const texName = this.icons.resolveTextureName(this.drop.id);
         let uvRect = this.ctx.itemAtlas.getUvRect(texName);
@@ -236,6 +241,40 @@ export class DroppedItemEntity extends Entity {
     if (this.age >= DESPAWN_AGE) {
       this.markRemoved();
     }
+  }
+
+  /**
+   * Builds the dropped spawn-egg visual: the base sprite tinted with the
+   * descriptor's primary colour, plus the overlay sprite tinted with its
+   * secondary colour. Vertex colours carry the tints, so the shared item
+   * material and the source textures are both left untouched.
+   */
+  private buildSpawnEggMesh(): THREE.Mesh {
+    const descriptor = spawnEggDescriptorByNumericId(this.drop.metadata);
+    const baseUv = this.ctx.itemAtlas.getUvRect('spawn_egg');
+    if (descriptor === undefined || baseUv === undefined) {
+      return new THREE.Mesh(BlockItemModelBuilder.buildDebugPlaceholder(), this.ctx.itemHeldMaterial);
+    }
+
+    const primary = new THREE.Color(descriptor.primaryColor);
+    const mesh = new THREE.Mesh(
+      this.createOpposedQuadsGeometry(baseUv.u0, baseUv.v0, baseUv.u1, baseUv.v1, primary.r, primary.g, primary.b),
+      this.ctx.itemHeldMaterial,
+    );
+
+    const overlayUv = this.ctx.itemAtlas.getUvRect('spawn_egg_overlay');
+    if (overlayUv !== undefined) {
+      const secondary = new THREE.Color(descriptor.secondaryColor);
+      const overlay = new THREE.Mesh(
+        this.createOpposedQuadsGeometry(overlayUv.u0, overlayUv.v0, overlayUv.u1, overlayUv.v1, secondary.r, secondary.g, secondary.b),
+        this.ctx.itemHeldMaterial,
+      );
+      // Nudge the overlay forward so it wins the depth test against the base.
+      overlay.position.z = 0.002;
+      mesh.add(overlay);
+    }
+
+    return mesh;
   }
 
   private createOpposedQuadsGeometry(

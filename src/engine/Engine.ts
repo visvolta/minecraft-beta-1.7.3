@@ -24,6 +24,7 @@ import { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import { EntityManager } from '../entities/core/EntityManager';
 import { createDefaultEntityTypeRegistry } from '../entities/core/EntityType';
 import { registerEntityTypes } from '../entities/registerEntityTypes';
+import { spawnEggDescriptorByNumericId } from '../entities/SpawnEggDescriptor';
 import { JavaRandom } from '../world/generation/random/JavaRandom';
 import { NaturalMobSpawner } from '../entities/spawning/NaturalMobSpawner';
 import { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';
@@ -846,9 +847,15 @@ export class Engine {
       this.player,
       this.recipeRegistry
     );
-    const displayNameResolver = (stack: { identity: { type: string; id: string | number } }) => {
+    const displayNameResolver = (stack: { identity: { type: string; id: string | number }; metadata?: number }) => {
       if (stack.identity.type === 'item') {
         const item = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+        // Spawn eggs are named from the entity descriptor, so a new mob's egg
+        // is named correctly without touching the item table.
+        if (item?.id === 'spawn_egg') {
+          const descriptor = spawnEggDescriptorByNumericId(stack.metadata ?? 0);
+          if (descriptor !== undefined) return descriptor.itemName;
+        }
         if (item?.displayName !== undefined) return item.displayName;
         if (item !== undefined) return item.id.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
       }

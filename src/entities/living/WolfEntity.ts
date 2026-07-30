@@ -8,6 +8,7 @@ import { WolfModel } from './WolfModel';
 import type { Player } from '../../player/Player';
 import type { Entity } from '../core/Entity';
 import type { Drop } from '../items/BlockDropResolver';
+import { wrapDegrees } from './LivingAnimationMath';
 
 export class WolfEntity extends AnimalEntity {
   public readonly typeId = EntityTypeIds.Wolf;
@@ -125,7 +126,21 @@ export class WolfEntity extends AnimalEntity {
 
   public override updateRenderInterpolation(alpha: number): void {
     super.updateRenderInterpolation(alpha);
-    if (this.model) this.model.updateWolfState(this.isTamed, this.isAngry, this.isSitting, this.health / this.maxHealth);
+    const model = this.model;
+    if (model === null) return;
+
+    // Interpolate the same Beta-style state the quadrupeds use, so the wolf
+    // animates between simulation ticks instead of snapping at 20 Hz.
+    const legYaw = this.prevLegYaw + (this.legYaw - this.prevLegYaw) * alpha;
+    const bodyYaw = this.prevRenderYawOffset + wrapDegrees(this.renderYawOffset - this.prevRenderYawOffset) * alpha;
+    const headYaw = this.prevHeadYaw + wrapDegrees(this.headYaw - this.prevHeadYaw) * alpha;
+    const headPitch = this.prevHeadPitch + (this.headPitch - this.prevHeadPitch) * alpha;
+
+    model.updatePose(this.isTamed, this.isAngry, this.isSitting, legYaw, this.legSwing, headYaw - bodyYaw, headPitch);
+
+    const flash = !this.isDead() && this.maxHurtTime > 0 ? this.hurtTime / this.maxHurtTime : 0;
+    model.setHurtFlash(Math.max(flash, this.isBurning() ? 0.15 : 0));
+    model.setDeathProgress(this.isDead() ? Math.min(this.deathTime / 20, 1) : 0);
   }
 
   protected rebuildModel(): void {

@@ -3,17 +3,15 @@
  */
 
 import { applyDirtBackground, guiWidth, GuiButton, Screen } from './MenuWidgets';
-import { PanoramaRegistry, DEFAULT_PANORAMA } from './PanoramaRegistry';
+import { PANORAMA_REGISTRY } from './PanoramaRegistry';
 
 export class PanoramaPickerScreen extends Screen {
-  private readonly registry = new PanoramaRegistry();
   private currentId = 'default';
   private label: HTMLDivElement;
 
   public constructor(private readonly onDone: (selectedId: string) => void) {
     super();
     applyDirtBackground(this.root);
-    this.registry.register(DEFAULT_PANORAMA);
 
     const title = document.createElement('div');
     title.textContent = 'Panorama';
@@ -35,7 +33,7 @@ export class PanoramaPickerScreen extends Screen {
   }
 
   private cycle(): void {
-    const ids = this.registry.listIds();
+    const ids = PANORAMA_REGISTRY.listIds();
     if (ids.length <= 1) return;
     const idx = ids.indexOf(this.currentId);
     this.currentId = ids[(idx + 1) % ids.length] ?? 'default';

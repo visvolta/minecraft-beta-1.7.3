@@ -2,6 +2,8 @@ import { BlockIds } from '../../blocks/BlockId';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
 import type { NeighbourUpdateEvent } from '../updates/BlockMutation';
 import type { ItemStack } from '../../inventory/ItemStack';
+import { ArrowEntity } from '../../entities/projectiles/ArrowEntity';
+import { SnowballEntity, ThrownEggEntity } from '../../entities/projectiles/ThrownItemEntity';
 
 /** Piston-style direction offsets for dispenser facing. */
 const DIR_OFFSETS: readonly { readonly x: number; readonly y: number; readonly z: number }[] = [
@@ -106,29 +108,16 @@ export class DispenserBehaviour implements BlockBehaviour {
   /** Spawns an Arrow/Snowball/Egg projectile in the given direction. */
   private spawnProjectile(ctx: BlockBehaviourContext, type: string, x: number, y: number, z: number, dx: number, dy: number, dz: number): void {
     if (ctx.entities === undefined) return;
-    // Lazy import to avoid circular deps — the entity constructors are available
-    // via the entity manager's context.
     const manager = ctx.entities;
     const entityCtx = manager.context;
-    // Use dynamic entity creation through the manager's context.
-    // ArrowEntity constructor: (ctx, owner, x, y, z).
-    try {
-      if (type === 'arrow') {
-        // Construct via reflection-like approach: the ArrowEntity import is
-        // deferred to avoid circular deps. We create it via the context.
-        // Fallback: if we can't construct, drop as item.
-        const { ArrowEntity } = require('../../entities/projectiles/ArrowEntity');
-        const arrow = new ArrowEntity(entityCtx, undefined, x, y, z);
-        arrow.launch(dx, dy, dz, 1.5, 1);
-        manager.add(arrow);
-      } else {
-        const { SnowballEntity, ThrownEggEntity } = require('../../entities/projectiles/ThrownItemEntity');
-        const projectile = type === 'snowball' ? new SnowballEntity(entityCtx, x, y, z) : new ThrownEggEntity(entityCtx, x, y, z);
-        projectile.launch(dx, dy, dz, 1.5, 1);
-        manager.add(projectile);
-      }
-    } catch {
-      // Fallback: drop as item entity if projectile construction fails.
+    if (type === 'arrow') {
+      const arrow = new ArrowEntity(entityCtx, null, x, y, z);
+      arrow.launch(dx, dy, dz, 1.5, 1);
+      manager.add(arrow);
+    } else {
+      const projectile = type === 'snowball' ? new SnowballEntity(entityCtx, null, x, y, z) : new ThrownEggEntity(entityCtx, null, x, y, z);
+      projectile.launch(dx, dy, dz, 1.5, 1);
+      manager.add(projectile);
     }
   }
 }

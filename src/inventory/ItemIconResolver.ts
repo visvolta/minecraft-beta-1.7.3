@@ -199,6 +199,28 @@ const BLOCK_TEXTURE_FALLBACKS: Record<string, string> = {
   // Cactus
   '81': '/textures/blocks/cactus_side.png',
   'cactus': '/textures/blocks/cactus_side.png',
+  // Dirt. Solid blocks normally render as 3D icons, but the held-item and
+  // dropped-item sprite paths still resolve a flat texture for them.
+  '3': '/textures/blocks/dirt.png',
+  'dirt': '/textures/blocks/dirt.png',
+  // Mob Spawner. Classified 'unsupported' (never drawn as a fallback cube),
+  // which routes it through the sprite path and so still needs a texture.
+  '52': '/textures/blocks/mob_spawner.png',
+  'mob_spawner': '/textures/blocks/mob_spawner.png',
+  // Fence: non-solid, so it resolves as a flat item; Beta draws the fence
+  // item from the oak plank texture.
+  '85': '/textures/blocks/planks_oak.png',
+  'fence': '/textures/blocks/planks_oak.png',
+  // Cake: the placed block. Beta's inventory item is the cake item, but the
+  // block id still needs a texture for held/dropped rendering.
+  '92': '/textures/blocks/cake_top.png',
+  'cake_block': '/textures/blocks/cake_top.png',
+  // Redstone Repeater. 93 (idle) and 94 (active) are the same item to the
+  // player; both map to their respective block faces so neither warns.
+  '93': '/textures/blocks/repeater_off.png',
+  'repeater_off': '/textures/blocks/repeater_off.png',
+  '94': '/textures/blocks/repeater_on.png',
+  'repeater_on': '/textures/blocks/repeater_on.png',
 };
 
 export class ItemIconResolver {

@@ -1,4 +1,5 @@
 import type { EntityTickContext } from '../core/EntityContext';
+import { DamageSource } from '../damage/DamageSource';
 import { LivingEntity } from './LivingEntity';
 
 /**
@@ -26,7 +27,6 @@ export abstract class WaterMobEntity extends LivingEntity {
       this.airSupply--;
       if (this.airSupply <= -20) {
         this.airSupply = 0;
-        const { DamageSource } = require('../damage/DamageSource');
         this.attackEntityFrom(DamageSource.drown(), 1);
       }
     }

@@ -40,6 +40,12 @@ const CREATIVE_EXCLUDED_BLOCKS: ReadonlySet<number> = new Set<number>([
   BlockIds.IronDoor,
   BlockIds.Reed,
   BlockIds.RedstoneWire,
+  // Powered/lit counterparts are implementation-only states, not separate
+  // items. The player places the idle form and redstone swaps it at runtime,
+  // so listing both would show the same item twice.
+  BlockIds.RedstoneRepeaterActive,
+  // Cake's placed block; the player-facing entry is the cake item.
+  BlockIds.Cake,
 ]);
 
 export type CreativeTabId = 'all' | 'building' | 'decoration' | 'redstone' | 'transportation' | 'misc' | 'tools' | 'combat' | 'food';

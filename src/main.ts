@@ -6,6 +6,7 @@ import { PlayerSkinManager } from './player/PlayerSkinManager';
 import { ItemTextureAtlas } from './assets/ItemTextureAtlas';
 import { ArmourTextureAssets } from './assets/ArmourTextureAssets';
 import { ApplicationController } from './app/ApplicationController';
+import { SPAWN_EGG_ICONS } from './assets/SpawnEggIconRenderer';
 
 async function bootstrap(): Promise<void> {
   const blockRegistry = new BlockRegistry();
@@ -16,6 +17,11 @@ async function bootstrap(): Promise<void> {
     ItemTextureAtlas.load(),
     AssetManager.loadEntityTextures(),
     ArmourTextureAssets.load(),
+    // Composites every spawn-egg icon once. A failure here must not block
+    // startup; slots then fall back to the untinted spawn_egg texture.
+    SPAWN_EGG_ICONS.load().catch((error: unknown) => {
+      console.warn('[SpawnEggIcons] Failed to composite spawn egg icons:', error);
+    }),
   ]);
 
   const skinManager = new PlayerSkinManager();

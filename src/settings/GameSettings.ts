@@ -2,6 +2,7 @@ import { Difficulty } from '../world/Difficulty';
 import { DEFAULT_RENDER_DISTANCE, normalizeRenderDistance, type RenderDistance } from './RenderDistance';
 import type { InputAction } from '../input/Input';
 import { normalizeGuiScale, type GuiScaleSetting } from '../ui/GuiScale';
+import { normalizePanoramaBlur, type PanoramaBlur } from '../ui/menu/PanoramaBlur';
 
 export interface GameSettings {
   readonly version: 1;
@@ -10,7 +11,7 @@ export interface GameSettings {
   readonly video: { readonly viewBobbing: boolean; readonly guiScale: GuiScaleSetting; readonly aaMode: 'smaa' | 'fxaa' | 'off'; readonly renderScale: number; readonly renderDistance: RenderDistance };
   readonly controls: { readonly bindings: Readonly<Record<InputAction, readonly string[]>> };
   readonly gameplay: { readonly difficulty: Difficulty };
-  readonly panorama?: { readonly id: string };
+  readonly panorama?: { readonly id: string; readonly blur: PanoramaBlur };
 }
 
 export const DEFAULT_KEY_BINDINGS: Readonly<Record<InputAction, readonly string[]>> = {
@@ -33,7 +34,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   video: { viewBobbing: true, guiScale: 0, aaMode: 'smaa', renderScale: 1, renderDistance: DEFAULT_RENDER_DISTANCE },
   controls: { bindings: DEFAULT_KEY_BINDINGS },
   gameplay: { difficulty: Difficulty.Normal },
-  panorama: { id: 'default' },
+  panorama: { id: 'default', blur: 'medium' },
 };
 
 export function validateGameSettings(value: unknown): GameSettings {
@@ -52,6 +53,7 @@ export function validateGameSettings(value: unknown): GameSettings {
   const difficulty = gameplay.difficulty;
   const panoramaSource = typeof source.panorama === 'object' && source.panorama !== null ? source.panorama as Record<string, unknown> : {};
   const panoramaId = typeof panoramaSource.id === 'string' ? panoramaSource.id : DEFAULT_GAME_SETTINGS.panorama?.id ?? 'default';
+  const panoramaBlur = normalizePanoramaBlur(panoramaSource.blur);
   return {
     version: 1,
     audio: {
@@ -74,7 +76,7 @@ export function validateGameSettings(value: unknown): GameSettings {
     },
     controls: { bindings },
     gameplay: { difficulty: difficulty === Difficulty.Peaceful || difficulty === Difficulty.Easy || difficulty === Difficulty.Normal || difficulty === Difficulty.Hard ? difficulty : Difficulty.Normal },
-    panorama: { id: panoramaId },
+    panorama: { id: panoramaId, blur: panoramaBlur },
   };
 }
 

@@ -5,6 +5,7 @@ import { classifyItemRender, isBlock3dCategory } from './ItemRenderClassifier';
 import type { ItemStack } from './ItemStack';import { renderDurabilityBar } from './DurabilityBarRenderer';
 import type { AnimatedIconFrames } from './AnimatedIconFrames';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
+import { SPAWN_EGG_ICONS } from '../assets/SpawnEggIconRenderer';
 
 /**
  * Shared icon and stack-count renderer.
@@ -24,6 +25,11 @@ export class SlotContentRenderer {
   ) {}
 
   public getIconUrl(stack: ItemStack): string {
+    // Spawn eggs are composited (tinted base + tinted overlay) rather than a
+    // single texture. Resolved here so every slot surface shares one path.
+    const spawnEgg = this.spawnEggIconUrl(stack);
+    if (spawnEgg !== null) return spawnEgg;
+
     const category = classifyItemRender(stack.identity, this.blockRegistry);
     if (isBlock3dCategory(category)) {
       return this.blockIcons.icon(stack.identity.id as number, stack.metadata) || ItemIconResolver.missing();
@@ -31,6 +37,18 @@ export class SlotContentRenderer {
     const animated = this.animatedFrameUrl(stack);
     if (animated !== null) return animated;
     return this.itemIcons.resolve(String(stack.identity.id));
+  }
+
+  /**
+   * The composited icon for a spawn egg stack, or null for anything else.
+   * Falls back to null (and therefore the plain texture) until the source
+   * images have loaded.
+   */
+  private spawnEggIconUrl(stack: ItemStack): string | null {
+    if (stack.identity.type !== 'item') return null;
+    const definition = DEFAULT_ITEM_DEFINITIONS.get(stack.identity.id);
+    if (definition?.id !== 'spawn_egg') return null;
+    return SPAWN_EGG_ICONS.get(stack.metadata) ?? null;
   }
 
   /**

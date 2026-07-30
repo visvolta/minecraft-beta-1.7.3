@@ -18,9 +18,20 @@ import type { EntityTypeId } from './core/EntityType';
 export interface SpawnEggDescriptor {
   readonly entityStringId: string;
   readonly entityNumericId: EntityTypeId;
+  /** The mob's own name, e.g. "Zombie Pigman". Never includes "Spawn Egg". */
   readonly displayName: string;
+  /**
+   * The egg's item name. Defaults to `<displayName> Spawn Egg`, so a future
+   * custom entity gets a correct name for free; set it only to override.
+   */
+  readonly itemName: string;
   readonly primaryColor: string;   // hex, base egg tint
   readonly secondaryColor: string; // hex, overlay/spot tint
+}
+
+/** Derives the Beta-style egg item name from a mob's display name. */
+export function spawnEggItemName(displayName: string): string {
+  return `${displayName} Spawn Egg`;
 }
 
 /** Modern reference spawn-egg colors (post-12w01a authoritative palette). */
@@ -44,7 +55,7 @@ export const SPAWN_EGG_COLORS: Readonly<Record<string, { primary: string; second
 export function buildSpawnEggDescriptorRegistry(): Readonly<Record<string, SpawnEggDescriptor>> {
   const descriptors: Record<string, SpawnEggDescriptor> = {};
 
-  const entries: Array<{ id: string; numeric: number; name: string }> = [
+  const entries: Array<{ id: string; numeric: number; name: string; itemName?: string }> = [
     { id: 'Zombie', numeric: 7, name: 'Zombie' },
     { id: 'Skeleton', numeric: 8, name: 'Skeleton' },
     { id: 'Creeper', numeric: 10, name: 'Creeper' },
@@ -67,8 +78,10 @@ export function buildSpawnEggDescriptorRegistry(): Readonly<Record<string, Spawn
     }
     descriptors[entry.id] = {
       entityStringId: entry.id,
-      entityNumericId: entry.numeric as any,
+      entityNumericId: entry.numeric as EntityTypeId,
       displayName: entry.name,
+      // Auto-derived unless the entry explicitly overrides it.
+      itemName: entry.itemName ?? spawnEggItemName(entry.name),
       primaryColor: colors.primary,
       secondaryColor: colors.secondary,
     };
@@ -78,3 +91,13 @@ export function buildSpawnEggDescriptorRegistry(): Readonly<Record<string, Spawn
 }
 
 export const DEFAULT_SPAWN_EGG_DESCRIPTORS = buildSpawnEggDescriptorRegistry();
+
+/** Reverse index: entity numeric id (spawn-egg metadata) → descriptor. */
+const BY_NUMERIC_ID: ReadonlyMap<number, SpawnEggDescriptor> = new Map(
+  Object.values(DEFAULT_SPAWN_EGG_DESCRIPTORS).map((d) => [d.entityNumericId as number, d]),
+);
+
+/** Looks up a spawn-egg descriptor by the metadata value stored on the stack. */
+export function spawnEggDescriptorByNumericId(numericId: number): SpawnEggDescriptor | undefined {
+  return BY_NUMERIC_ID.get(numericId);
+}
