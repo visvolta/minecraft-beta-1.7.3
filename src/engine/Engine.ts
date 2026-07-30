@@ -106,7 +106,7 @@ import { registerButtonBehaviour } from '../world/behaviours/ButtonBehaviour';
 import { registerLeverBehaviour } from '../world/behaviours/LeverBehaviour';
 import { registerRedstoneWireBehaviour } from '../world/behaviours/RedstoneWireBehaviour';
 import { registerRedstoneTorchBehaviour } from '../world/behaviours/RedstoneTorchBehaviour';
-import { registerRedstoneRepeaterBehaviour } from '../world/behaviours/RedstoneRepeaterBehaviour';
+import { registerRedstoneRepeaterBehaviour } from '../world/behaviours/RedstoneRepeaterBehaviour.ts';
 import { registerNoteBlockBehaviour } from '../world/behaviours/NoteBlockBehaviour';
 import { registerPistonBehaviour } from '../world/behaviours/PistonBaseBehaviour';
 import { registerTntBehaviour } from '../world/behaviours/TntBehaviour';
