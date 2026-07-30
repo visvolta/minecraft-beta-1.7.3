@@ -1,5 +1,6 @@
 import type { MobSoundEvent } from '../entities/sound/MobSoundEvent';
 import type { MobSoundSink } from '../entities/sound/MobSoundSink';
+import { GameMode } from '../player/GameMode';
 import type { GameSettings } from '../settings/GameSettings';
 import { DEFAULT_AUDIO_SETTINGS, toGain, type AudioSettings } from './AudioSettings';
 import { AUDIO_MANIFEST, DIG_SOUND_MATERIALS, STEP_SOUND_MATERIALS, manifestByKey, type AudioEntry } from './AudioManifest';
@@ -30,6 +31,19 @@ type AudioListenerCompat = AudioListener & SpatialAudioNodeCompat & {
 };
 
 export type MusicContext = 'menu' | 'survival' | 'creative' | 'nether' | 'none';
+
+/**
+ * Resolves the active music context from the dimension's provider profile
+ * (`musicContext`) and the game mode. The dimension definition is the source of
+ * truth (Nether -> nether, Overworld -> survival); creative mode in the
+ * Overworld overrides to creative music, while the Nether keeps its own profile
+ * regardless of mode. Pure and unit-tested so the load-time "Nether save plays
+ * Nether music immediately" guarantee can be verified without WebAudio.
+ */
+export function resolveMusicContext(dimensionContext: MusicContext, gameMode: GameMode): MusicContext {
+  if (dimensionContext === 'survival' && gameMode === GameMode.Creative) return 'creative';
+  return dimensionContext;
+}
 
 const RETRY_AFTER_MS = 5000;
 const GAME_MUSIC_MIN_SILENCE_MS = 12_000 * 50;

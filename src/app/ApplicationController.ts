@@ -78,7 +78,7 @@ import { ControlsScreen } from '../ui/menu/ControlsScreen';
 import type { Screen } from '../ui/menu/MenuWidgets';
 import { loadGameSettings, saveGameSettings } from '../settings/SettingsStorage';
 import { DEFAULT_GAME_SETTINGS, type GameSettings } from '../settings/GameSettings';
-import { AudioManager } from '../audio/AudioManager';
+import { AudioManager, resolveMusicContext } from '../audio/AudioManager';
 import { GameMode } from '../player/GameMode';
 import { BetaWorldGenerator } from '../world/generation/BetaWorldGenerator';
 import { Chunk } from '../world/Chunk';
@@ -235,8 +235,9 @@ export class ApplicationController {
       transition.beginLoadingDestination();
 
       // 2. Switch the music profile while the screen covers the swap, so the
-      //    outgoing track never overlaps the incoming one.
-      this.audio.setMusicContext(definition.musicContext);
+      //    outgoing track never overlaps the incoming one. Resolved provider-
+      //    style from the destination dimension's music profile + game mode.
+      this.audio.setMusicContext(resolveMusicContext(definition.musicContext, engine.gameMode));
 
       // 3. Drive the loading-screen progress from the engine's readiness while
       //    the switch runs. The engine owns the actual work (save source ->
@@ -372,8 +373,10 @@ export class ApplicationController {
       recordLoadPerformanceMark(loadPerfToken, 'spawn-persist-complete');
       this.assertLoadActive(token);
       update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.audio.beginWorldSession(result.gameMode === GameMode.Creative ? 'creative' : 'survival');
       this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error), (dimensionId, x, y, z) => void this.handleDimensionTransition(dimensionId, x, y, z));
+      // Begin the world session AFTER the engine resolves the saved dimension, so a
+      // Nether save resumes Nether music directly (no Overworld track first).
+      this.audio.beginWorldSession(this.engine.getMusicContext());
       this.setScreen(null, 'in_game');
       this.engine.start();
       recordLoadPerformanceMark(loadPerfToken, 'engine-started');
@@ -433,8 +436,10 @@ export class ApplicationController {
       await this.prepareSpawn(metadata.seed, update, token, loadPerfToken);
       this.assertLoadActive(token);
       update({ stage: 'finalizing', completed: 1, total: 1, primaryMessage: 'Finalizing', secondaryMessage: 'Starting game' });
-      this.audio.beginWorldSession(metadata.gameMode === GameMode.Creative ? 'creative' : 'survival');
       this.engine = new Engine(this.blockRegistry, this.atlas, this.itemAtlas, this.entityTextures, this.armourTextures, service, this.skinManager, this.settings, this.audio, () => void this.showPauseMenu(), (error) => void this.handlePersistenceError(error), (dimensionId, x, y, z) => void this.handleDimensionTransition(dimensionId, x, y, z));
+      // Begin the world session AFTER the engine resolves the saved dimension, so a
+      // Nether save resumes Nether music directly (no Overworld track first).
+      this.audio.beginWorldSession(this.engine.getMusicContext());
       this.setScreen(null, 'in_game');
       this.engine.start();
       recordLoadPerformanceMark(loadPerfToken, 'engine-started');

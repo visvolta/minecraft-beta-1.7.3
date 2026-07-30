@@ -13,7 +13,7 @@ import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 import { GameMode } from '../player/GameMode';
 import type { GameSettings } from '../settings/GameSettings';
 import { normalizeRenderDistance } from '../settings/RenderDistance';
-import type { AudioManager } from '../audio/AudioManager';
+import { resolveMusicContext, type AudioManager, type MusicContext } from '../audio/AudioManager';
 import { PlayerController } from '../player/PlayerController';
 import { InteractionController } from '../player/InteractionController';
 import { PlayerPhysics } from '../physics/PlayerPhysics';
@@ -1234,6 +1234,20 @@ export class Engine {
 
   /** Id of the dimension currently being simulated and rendered. */
   public getActiveDimensionId(): DimensionId { return this.activeDimensionId; }
+
+  /**
+   * The music context for the ACTIVE dimension, provider-driven through the
+   * dimension definition's `musicContext` (Nether -> nether, Overworld ->
+   * survival), refined for creative mode in the Overworld. Used on world load
+   * so a save in the Nether resumes Nether music immediately rather than
+   * starting an Overworld track first.
+   */
+  public getMusicContext(): MusicContext {
+    return resolveMusicContext(this.activeDimension.musicContext, this.player.gameMode);
+  }
+
+  /** Current game mode, so dimension switches can resolve music provider-style. */
+  public get gameMode(): GameMode { return this.player.gameMode; }
 
   /** True while a dimension switch is in flight (input/simulation frozen). */
   public isDimensionTransitionActive(): boolean { return this.dimensionTransition.isActive(); }

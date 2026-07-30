@@ -193,16 +193,21 @@ export class NaturalMobSpawner {
   }
 
   /**
-   * Ghast spawn validation: a 4x4x4 clear volume with no liquid, plus Beta's
-   * 1-in-20 rarity. No solid-floor requirement (it flies) and no light gate
-   * (the Nether has no sky; Beta's `EntityLiving.getCanSpawnHere` only checks
-   * AABB clearance and liquid).
+   * Ghast spawn validation. Beta applies two gates to every monster-category
+   * spawn (Ghasts included): `canCreatureTypeSpawnAtLocation` (solid floor
+   * below, air at/above, not liquid) BEFORE `getCanSpawnHere`. The floor
+   * requirement was previously missing, which let Ghasts spawn at any air
+   * position in open caverns (~every Y layer) instead of only just above a
+   * floor — a thin shell per column — and overcrowded the Nether.
+   *
+   * `getCanSpawnHere` (Beta `EntityGhast`): 1-in-20 rarity, clear 4x4x4 AABB,
+   * no liquid, difficulty > 0 (gated upstream). No light gate (the Nether has
+   * no sky; Beta's ghast has none either), so Pigman weight is unaffected.
    */
   private isValidGhastSpawn(x: number, y: number, z: number): boolean {
+    if (!this.canSpawnAtLocation(x, y, z)) return false;
     if (this.options.rng.nextInt(GHAST_RARITY) !== 0) return false;
     if (y < 1 || y + 4 >= CHUNK_SIZE_Y) return false;
-    const bx = Math.floor(x); const bz = Math.floor(z);
-    if (!this.options.world.isLoaded(bx, bz)) return false;
     if (!this.passesDistanceRules(x, y, z)) return false;
     const [width, height] = HOSTILE_DIMENSIONS.ghast; const half = width / 2;
     const box = new AABB(x - half, y, z - half, x + half, y + height, z + half);
@@ -210,6 +215,22 @@ export class NaturalMobSpawner {
     if (this.options.entityManager.getEntitiesInAABB(box).length > 0 || box.intersects(this.options.player.getAABB())) return false;
     for (const accepted of this.acceptedThisPass) if (box.intersects(accepted)) return false;
     return true;
+  }
+
+  /**
+   * Beta `SpawnerAnimals.canCreatureTypeSpawnAtLocation` for the air-material
+   * monster category: a solid cube below the feet, air at the feet, not liquid,
+   * and air above. Applied to every hostile candidate (Pigman inlines the same
+   * checks; Ghast now routes through here too).
+   */
+  private canSpawnAtLocation(x: number, y: number, z: number): boolean {
+    if (y < 1 || y >= CHUNK_SIZE_Y - 1) return false;
+    const bx = Math.floor(x); const bz = Math.floor(z);
+    if (!this.options.world.isLoaded(bx, bz)) return false;
+    const below = this.options.blockRegistry.getById(this.options.world.getBlock(bx, y - 1, bz));
+    const at = this.options.blockRegistry.getById(this.options.world.getBlock(bx, y, bz));
+    const above = this.options.blockRegistry.getById(this.options.world.getBlock(bx, y + 1, bz));
+    return below?.solid === true && !at?.solid && !at?.isLiquid && !above?.solid;
   }
   private areAabbChunksLoaded(box: AABB): boolean {
     for (let cx=Math.floor(box.minX/16);cx<=Math.floor((box.maxX-Number.EPSILON)/16);cx++) for(let cz=Math.floor(box.minZ/16);cz<=Math.floor((box.maxZ-Number.EPSILON)/16);cz++) if(!this.options.chunkManager.hasChunk(cx,cz))return false; return true;
