@@ -17,6 +17,8 @@ export class ArrowEntity extends ProjectileEntity {
   protected readonly gravity = 0.05;
   protected readonly drag = 0.99;
   public inGround = false;
+  /** Beta `doesArrowBelongToPlayer`: only player-fired stuck arrows can be picked back up. */
+  public playerOwned = false;
   public xTile = -1; public yTile = -1; public zTile = -1;
   public inTile = 0; public inData = 0; public arrowShake = 0; public ticksInGround = 0;
   private ownGeometry:BoxGeometry|null=null;private ownMaterial:MeshBasicMaterial|null=null;private visualRoot:Group|null=null;
@@ -64,12 +66,12 @@ export class ArrowEntity extends ProjectileEntity {
   protected writeEntityNbt(map: Map<string, NbtTag>): void {
     map.set('xTile', nbt.short(this.xTile)); map.set('yTile', nbt.short(this.yTile)); map.set('zTile', nbt.short(this.zTile));
     map.set('inTile', nbt.byte(this.inTile)); map.set('inData', nbt.byte(this.inData)); map.set('shake', nbt.byte(this.arrowShake));
-    map.set('inGround', nbt.byte(this.inGround ? 1 : 0)); map.set('TicksInGround', nbt.int(this.ticksInGround)); map.set('TicksInAir', nbt.int(this.ticksInAir));map.set('ArrowYaw',nbt.float(this.yaw));map.set('ArrowPitch',nbt.float(this.pitch));
+    map.set('inGround', nbt.byte(this.inGround ? 1 : 0)); map.set('TicksInGround', nbt.int(this.ticksInGround)); map.set('TicksInAir', nbt.int(this.ticksInAir));map.set('ArrowYaw',nbt.float(this.yaw));map.set('ArrowPitch',nbt.float(this.pitch));map.set('PlayerOwned',nbt.byte(this.playerOwned?1:0));
   }
   protected readEntityNbt(data: NbtCompound): void {
     const number = (key: string, fallback = 0): number => { const t = data.value.get(key); return t && (t.type === 'byte' || t.type === 'short' || t.type === 'int') ? t.value : fallback; };
     this.xTile = number('xTile', -1); this.yTile = number('yTile', -1); this.zTile = number('zTile', -1); this.inTile = number('inTile'); this.inData = number('inData');
-    this.arrowShake=number('shake');this.inGround=number('inGround')!==0;this.ticksInGround=number('TicksInGround');this.ticksInAir=number('TicksInAir');const yaw=data.value.get('ArrowYaw'),pitch=data.value.get('ArrowPitch');if(yaw?.type==='float'||yaw?.type==='double'){this.yaw=yaw.value;this.previousYaw=yaw.value;}if(pitch?.type==='float'||pitch?.type==='double'){this.pitch=pitch.value;this.previousPitch=pitch.value;}this.owner=null;
+    this.arrowShake=number('shake');this.inGround=number('inGround')!==0;this.playerOwned=number('PlayerOwned')!==0;this.ticksInGround=number('TicksInGround');this.ticksInAir=number('TicksInAir');const yaw=data.value.get('ArrowYaw'),pitch=data.value.get('ArrowPitch');if(yaw?.type==='float'||yaw?.type==='double'){this.yaw=yaw.value;this.previousYaw=yaw.value;}if(pitch?.type==='float'||pitch?.type==='double'){this.pitch=pitch.value;this.previousPitch=pitch.value;}this.owner=null;
   }
   public static deserialize(ctx: EntityWorldContext, data: NbtCompound): ArrowEntity { const e = new ArrowEntity(ctx, null, 0, 0, 0); e.readFromNbt(data); return e; }
 }

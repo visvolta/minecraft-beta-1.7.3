@@ -27,6 +27,8 @@ export interface BetaDeviation {
  * dropping only feathers alongside meat-dropping cows/sheep is inconsistent.
  */
 export const BETA_ITEM_DEVIATIONS: readonly BetaDeviation[] = [
+  { id: 'ghast_tear', numericId: 370, reason: 'Requested addition: Ghasts drop Ghast Tears (Beta 1.7.3 Ghasts drop gunpowder).' },
+  { id: 'quartz', numericId: 406, reason: 'Requested addition: Nether Quartz item (1.5+ content, not in Beta 1.7.3).' },
   { id: 'beef_raw', numericId: 363, reason: 'Requested addition: cows drop beef (Beta cows drop leather only).' },
   { id: 'beef_cooked', numericId: 364, reason: 'Requested addition: smelted counterpart of beef_raw.' },
   { id: 'chicken_raw', numericId: 365, reason: 'Requested addition: consistency with beef/mutton (Beta chickens drop feathers only).' },
@@ -43,6 +45,10 @@ export const BETA_ITEM_DEVIATIONS: readonly BetaDeviation[] = [
  * channel for those, so each needs a placeholder id above Beta's range.
  */
 export const BETA_BLOCK_DEVIATIONS: readonly BetaDeviation[] = [
+  { id: 'nether_quartz_ore', numericId: 244, reason: 'Requested addition: Nether Quartz Ore (1.5+ content, not in Beta 1.7.3).' },
+  { id: 'quartz_block', numericId: 245, reason: 'Requested addition: Block of Quartz (1.5+ content, not in Beta 1.7.3).' },
+  { id: 'chiseled_quartz', numericId: 246, reason: 'Requested addition: Chiseled Quartz (1.5+ content, not in Beta 1.7.3).' },
+  { id: 'pillar_quartz', numericId: 247, reason: 'Requested addition: Quartz Pillar (1.5+ content, not in Beta 1.7.3).' },
   { id: 'birch_leaves', numericId: 250, reason: 'Temporary id: Beta stores birch as Leaves(18) metadata 2.' },
   { id: 'birch_log', numericId: 251, reason: 'Temporary id: Beta stores birch as Log(17) metadata 2.' },
   { id: 'spruce_log', numericId: 252, reason: 'Temporary id: Beta stores spruce as Log(17) metadata 1.' },

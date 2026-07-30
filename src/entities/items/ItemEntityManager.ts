@@ -3,7 +3,7 @@ import type { Player } from '../../player/Player';
 import type { Drop } from './BlockDropResolver';
 import type { Inventory } from '../../inventory/Inventory';
 import type { EntityManager } from '../core/EntityManager';
-import { DroppedItemEntity } from './DroppedItemEntity';import { DEFAULT_ITEM_DEFINITIONS,type ItemDefinitionRegistry } from '../../items/ItemDefinitionRegistry';
+import { DroppedItemEntity } from './DroppedItemEntity';import { ArrowEntity } from '../projectiles/ArrowEntity';import { DEFAULT_ITEM_DEFINITIONS,type ItemDefinitionRegistry } from '../../items/ItemDefinitionRegistry';
 
 /**
  * Thin facade for dropped items on top of the shared {@link EntityManager}.
@@ -84,6 +84,22 @@ export class ItemEntityManager {
         item.drop = { ...item.drop, count: remainder };
         item.rebuildVisualsForCount(remainder);
       }
+    }
+
+    // Beta `EntityArrow.onCollideWithPlayer`: a player-fired arrow stuck in a
+    // block (inGround, no shake) is recovered into the inventory. Skeleton
+    // arrows (playerOwned=false) are never picked up. Inventory-full arrows stay.
+    const stuckArrows = this.entityManager.getEntitiesInAABB(
+      pickupBox,
+      (entity): entity is ArrowEntity =>
+        entity instanceof ArrowEntity && entity.playerOwned && entity.inGround && entity.arrowShake <= 0 && !entity.removed,
+    );
+    for (const a of stuckArrows) {
+      if (a.removed || !a.getAABB().intersects(pickupBox)) continue;
+      const accepted = this.inventory.insert('item', 'arrow', 1, 0);
+      if (accepted <= 0) continue;
+      this.triggerPickup('item', 'arrow', accepted, 0);
+      this.entityManager.remove(a);
     }
   }
 

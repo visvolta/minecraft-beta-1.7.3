@@ -182,7 +182,7 @@ export class Player extends Entity {
     }
 
     this.lastDamageSource=source;this.lastAttacker=source.attacker;this.recentHealth=this.health;this.healthFlashTicks=20;
-    if(fullHit&&source.appliesKnockback&&source.attacker){const dx=this.position.x-source.attacker.position.x,dz=this.position.z-source.attacker.position.z,length=Math.hypot(dx,dz);if(length>1e-6){this.velocity.x+=dx/length*8;this.velocity.z+=dz/length*8;}this.velocity.y=Math.max(this.velocity.y,8);this.attackedAtYaw=Math.atan2(dz,dx)-this.bodyYaw;}
+    if(fullHit&&source.appliesKnockback&&source.attacker){const dx=this.position.x-source.attacker.position.x,dz=this.position.z-source.attacker.position.z,length=Math.hypot(dx,dz);this.velocity.x*=0.5;this.velocity.z*=0.5;if(length>1e-6){this.velocity.x+=dx/length*0.4;this.velocity.z+=dz/length*0.4;}this.velocity.y+=0.4;if(this.velocity.y>0.4)this.velocity.y=0.4;this.attackedAtYaw=Math.atan2(dz,dx)-this.bodyYaw;}
     this.setHealth(this.health-healthDamage);this.addExhaustion(.3);if(this.health===0)this.deathSequence++;this.damageListener?.({ source, amount: healthDamage, lethal: this.health === 0, fullHit });return true;
   }
   public attackFromMob(amount:number,attacker:DamageAttacker):boolean{return this.attackEntityFrom(DamageSource.mob(attacker),amount);}

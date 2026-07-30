@@ -55,7 +55,7 @@ import { SnowballEntity, ThrownEggEntity, THROWN_ITEM_SPEED, THROWN_ITEM_INACCUR
 import { MinecartEntity } from '../entities/MinecartEntity';
 import { DamageSource } from '../entities/damage/DamageSource';
 import { selectMeleeTarget } from './MeleeTargeting';
-import { MELEE_REACH, PLAYER_MELEE_DAMAGE } from './PlayerConstants';import { combatDurabilityCost } from '../items/ItemDurability';
+import { MELEE_REACH, PLAYER_MELEE_DAMAGE } from './PlayerConstants';import { combatDurabilityCost } from '../items/ItemDurability';import { getMeleeDamage } from '../items/MeleeDamage';
 import { AnimalEntity } from '../entities/living/AnimalEntity';
 import type { AnimalInteractionService } from '../entities/interactions/AnimalInteractionService';import type { FoodUseController } from './FoodUseController';
 import { getRailBlockInfoAt } from '../world/rails/RailShapes';
@@ -234,7 +234,10 @@ export class InteractionController {
 
   /** Applies a player melee hit through the shared living-entity damage flow. */
   private attackTargetedEntity(entity: LivingEntity): void {
-    if(entity.attackEntityFrom(DamageSource.player(this.player),PLAYER_MELEE_DAMAGE)){this.player.addExhaustion(.3);const slot=this.selectedSlotIndex,cost=combatDurabilityCost(this.inventory.getStack(slot));if(cost>0&&this.inventory.damageItemInSlot(slot,cost)?.status==='broken')this.itemEntityManager.emitItemBreak(this.player.position.x,this.player.position.y,this.player.position.z);}
+    // Beta held-item damage (sword/tools/hand). Replaces the previous flat
+    // PLAYER_MELEE_DAMAGE so a diamond sword no longer hits like a bare hand.
+    const damage = getMeleeDamage(this.inventory.getStack(this.selectedSlotIndex));
+    if(entity.attackEntityFrom(DamageSource.player(this.player),damage)){this.player.addExhaustion(.3);const slot=this.selectedSlotIndex,cost=combatDurabilityCost(this.inventory.getStack(slot));if(cost>0&&this.inventory.damageItemInSlot(slot,cost)?.status==='broken')this.itemEntityManager.emitItemBreak(this.player.position.x,this.player.position.y,this.player.position.z);}
   }
 
   public getSelectedSlotIndex(): number {
@@ -662,6 +665,7 @@ export class InteractionController {
     const originZ = this.player.position.z - Math.sin(yaw) * 0.16;
 
     const arrow = new ArrowEntity(this.entityManager.context, this.player as unknown as Entity, originX, originY, originZ);
+    arrow.playerOwned = true; // Beta `doesArrowBelongToPlayer`: player-fired arrows can be recovered.
     const dirX = -Math.sin(yaw) * Math.cos(pitch);
     const dirY = -Math.sin(pitch);
     const dirZ = Math.cos(yaw) * Math.cos(pitch);

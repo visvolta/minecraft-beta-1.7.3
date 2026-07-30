@@ -1,7 +1,7 @@
 import type { TreeWorldAccessor } from '../trees/TreeWorldAccessor';
 import type { JavaRandom } from '../random/JavaRandom';
 import { BlockIds } from '../../../blocks/BlockId';
-import { pickDungeonSpawnerMob, rollDungeonChest, type LootStack } from './DungeonLoot';
+import { pickDungeonSpawnerMob, rollChainmailBonus, rollDungeonChest, type LootStack } from './DungeonLoot';
 
 /**
  * Optional sink for generated dungeon contents. World generation runs before
@@ -107,6 +107,9 @@ export class WorldGenDungeons {
             // stream, so the draws must happen here even when no sink is
             // attached — otherwise later decoration shifts for this seed.
             const contents = rollDungeonChest(random);
+            // Project addition (dungeon-only Chainmail, separate RNG stream):
+            const chainmail = rollChainmailBonus(cx, y, cz);
+            if (chainmail !== null) contents.set(chainmail.slot, chainmail.stack);
             this.sink?.onDungeonChest(cx, y, cz, contents);
             break;
           }

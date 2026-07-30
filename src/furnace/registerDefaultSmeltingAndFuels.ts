@@ -60,8 +60,9 @@ export function registerDefaultSmeltingAndFuels(
   tryRegisterSmelting('iron_ore', BlockIds.IronOre, -1, new ItemStack('iron_ingot', 'item', 1, 0), 200);
   tryRegisterSmelting('gold_ore', BlockIds.GoldOre, -1, new ItemStack('gold_ingot', 'item', 1, 0), 200);
   tryRegisterSmelting('diamond_ore', BlockIds.DiamondOre, -1, new ItemStack('diamond', 'item', 1, 0), 200);
-  tryRegisterSmelting('coal_ore', BlockIds.CoalOre, -1, new ItemStack('coal', 'item', 1, 0), 200);
   tryRegisterSmelting('sand', BlockIds.Sand, -1, new ItemStack(BlockIds.Glass, 'block', 1, 0), 200);
+  // Beta smelts logs -> charcoal (coal metadata 1). Coal ore is NOT smeltable
+  // in Beta (it drops coal directly), so no coal_ore recipe is registered.
   tryRegisterSmelting('log_to_charcoal', BlockIds.Log, -1, new ItemStack('coal', 'item', 1, 1), 200);
   tryRegisterSmelting('spruce_log_to_charcoal', BlockIds.SpruceLog, -1, new ItemStack('coal', 'item', 1, 1), 200);
   tryRegisterSmelting('birch_log_to_charcoal', (BlockIds as any).BirchLog ?? 251, -1, new ItemStack('coal', 'item', 1, 1), 200);
@@ -97,18 +98,6 @@ export function registerDefaultSmeltingAndFuels(
   tryRegisterFuel('stick', 'stick', 100, -1);
   tryRegisterFuel('stick_num', 280, 100, -1);
   tryRegisterFuel('sapling', BlockIds.Sapling, 100, -1);
-
-  // Wooden tools/weapons (200 ticks = 10s = 1 item)
-  tryRegisterFuel('wood_pickaxe', 'wood_pickaxe', 200, -1);
-  tryRegisterFuel('wood_pickaxe_num', 270, 200, -1);
-  tryRegisterFuel('wood_axe', 'wood_axe', 200, -1);
-  tryRegisterFuel('wood_axe_num', 271, 200, -1);
-  tryRegisterFuel('wood_shovel', 'wood_shovel', 200, -1);
-  tryRegisterFuel('wood_shovel_num', 269, 200, -1);
-  tryRegisterFuel('wood_sword', 'wood_sword', 200, -1);
-  tryRegisterFuel('wood_sword_num', 268, 200, -1);
-  tryRegisterFuel('wood_hoe', 'wood_hoe', 200, -1);
-  tryRegisterFuel('wood_hoe_num', 290, 200, -1);
 
   // Lava bucket (20000 ticks = 1000s = 100 items -> leaves bucket_empty)
   tryRegisterFuel('bucket_lava', 'bucket_lava', 20000, -1);

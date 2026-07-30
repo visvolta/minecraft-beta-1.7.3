@@ -1,4 +1,4 @@
-import type { JavaRandom } from '../random/JavaRandom';
+import { JavaRandom } from '../random/JavaRandom';
 
 /**
  * Beta 1.7.3 dungeon chest contents.
@@ -63,6 +63,26 @@ export function pickDungeonLootItem(random: JavaRandom): LootStack | null {
     default:
       return null;
   }
+}
+
+/**
+ * Intentional project addition (NOT Beta 1.7.3): a rare Chainmail piece in a
+ * dungeon chest. Chainmail is dungeon-only in this project — it has full armor
+ * behaviour but NO crafting recipe — so it is obtained this way. Uses a SEPARATE
+ * RNG seeded from the chest position so the Beta loot/terrain RNG stream and its
+ * exact `nextInt` sequence are not perturbed at all (a shared-stream draw would
+ * shift every later decoration feature for that seed).
+ */
+const CHAINMAIL_PIECES = ['chainmail_helmet', 'chainmail_chestplate', 'chainmail_leggings', 'chainmail_boots'] as const;
+/** ~1 in this many placed chests receive a single Chainmail piece. */
+const CHAINMAIL_BONUS_CHANCE = 12;
+
+export function rollChainmailBonus(x: number, y: number, z: number): { readonly slot: number; readonly stack: LootStack } | null {
+  const seed = (BigInt(x) * 73856093n) ^ (BigInt(y) * 19349663n) ^ (BigInt(z) * 83492791n) ^ 0x434841494e4d41n;
+  const rng = new JavaRandom(seed);
+  if (rng.nextInt(CHAINMAIL_BONUS_CHANCE) !== 0) return null;
+  const piece = CHAINMAIL_PIECES[rng.nextInt(CHAINMAIL_PIECES.length)]!;
+  return { slot: rng.nextInt(DUNGEON_CHEST_SLOTS), stack: { id: piece, count: 1, metadata: 0 } };
 }
 
 /** Beta `pickMobSpawner`: zombie is twice as likely as skeleton or spider. */
