@@ -54,6 +54,7 @@ export interface WorldMetadata {
   readonly inventory?: (SerializedItemStack | null)[];
   readonly armour?: SerializedPlayerEquipment;
   readonly selectedHotbarSlot?: number;
+  readonly cheatsEnabled?: boolean;
   readonly furnaces?: SerializedFurnace[];
   readonly chests?: SerializedChest[];
   readonly signs?: SerializedSign[];
@@ -82,6 +83,7 @@ export function validateWorldMetadata(value: unknown): WorldMetadata {
   if(!('playerHealth'in data))data.playerHealth={health:20,maxHealth:20};const survival=data.playerHealth as Record<string,unknown>;if(!Number.isFinite(survival?.health)||!Number.isFinite(survival?.maxHealth)||(survival.maxHealth as number)<1)throw new Error('Player health metadata is invalid');survival.maxHealth=Math.max(1,Math.floor(survival.maxHealth as number));survival.health=Math.max(0,Math.min(survival.maxHealth as number,survival.health as number));if(!('playerFood'in data))data.playerFood={hunger:20,saturation:5,exhaustion:0};const food=data.playerFood as Record<string,unknown>;if(!Number.isFinite(food?.hunger)||!Number.isFinite(food?.saturation)||!Number.isFinite(food?.exhaustion))throw new Error('Player food metadata is invalid');food.hunger=Math.max(0,Math.min(20,food.hunger as number));food.saturation=Math.max(0,Math.min(food.hunger as number,food.saturation as number));food.exhaustion=Math.max(0,food.exhaustion as number);
   const player=data.player as Record<string,unknown>; const weather=req('weather') as Record<string,unknown>; const autosave=req('autosave') as Record<string,unknown>;
   for(const value of [spawn?.x,spawn?.y,spawn?.z,data.timeTicks,weather?.rainTime,weather?.thunderTime,data.lastPlayedMs,autosave?.intervalSeconds])if(typeof value!=='number'||!Number.isFinite(value))throw new Error('World metadata numeric field is invalid');
+  if (typeof data.cheatsEnabled !== 'boolean') data.cheatsEnabled = false;
   if(typeof weather?.raining!=='boolean'||typeof weather?.thundering!=='boolean'||typeof autosave?.enabled!=='boolean')throw new Error('World metadata state is invalid');
 
   const isValidPlayer = Number.isFinite(player?.x) && Number.isFinite(player?.y) && Number.isFinite(player?.z) && Number.isFinite(player?.yaw) && Number.isFinite(player?.pitch) && (player.y as number) > -100 && (player.y as number) < 300;
@@ -115,6 +117,7 @@ export function createDefaultMetadata(): WorldMetadata {
     timeTicks: 0,
     difficulty: Difficulty.Normal,
     weather: { raining: false, thundering: false, rainTime: 0, thunderTime: 0 },
+    cheatsEnabled: false,
     autosave: { enabled: true, intervalSeconds: 30 },
     lastPlayedMs: 0,
   };

@@ -1,4 +1,4 @@
-import { JavaRandom } from '../../world/generation/random/JavaRandom.ts';
+import { JavaRandom } from '../world/generation/random/JavaRandom';
 
 /**
  * Exact port of Beta 1.7.3 `Chunk.getRandomWithSeed(987234911L)` used by

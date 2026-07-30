@@ -19,6 +19,8 @@ import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import { FireballEntity } from '../entities/projectiles/FireballEntity';
 import { Inventory } from '../inventory/Inventory';
 import { InventoryTransferService } from '../inventory/InventoryTransferService';
+import { DEFAULT_SPAWN_EGG_DESCRIPTORS } from '../entities/SpawnEggDescriptor';
+import { EntityFactory } from '../entities/EntityFactory';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
 import { ArrowEntity } from '../entities/projectiles/ArrowEntity';
 import { FishingBobberEntity } from '../entities/projectiles/FishingBobberEntity';
@@ -464,6 +466,7 @@ export class InteractionController {
     if (definition.id === 'snowball') return this.throwItem('snowball');
     if (definition.id === 'egg') return this.throwItem('egg');
     if (definition.id === 'bucket_empty') return this.useEmptyBucket();
+    if (definition.id === 'spawn_egg') return this.useSpawnEgg();
     if (definition.id === 'bucket_water') return this.usePlacementBucket(BlockIds.WaterStill);
     if (definition.id === 'bucket_lava') return this.usePlacementBucket(BlockIds.LavaStill);
     return false;
@@ -474,6 +477,74 @@ export class InteractionController {
    * fluids, and if the hit cell is a water or lava **source** (metadata 0),
    * remove it and hand back the matching filled bucket.
    */
+  private useSpawnEgg(): boolean {
+    const stack = this.inventory.getStack(this.selectedSlotIndex);
+    if (stack === null || stack.identity.type !== 'item' || stack.identity.id !== 'spawn_egg') return false;
+    const descriptorId = this.getDescriptorFromMetadata(stack.metadata);
+    if (descriptorId === null) return false;
+
+    // Determine spawn position: use the current interaction target (block face or open air)
+    // or spawn near player if no specific target.
+    const hit = this.currentPlacementHit ?? this.currentHit;
+    let spawnX = this.player.position.x;
+    let spawnY = this.player.getEyeY();
+    let spawnZ = this.player.position.z;
+
+    if (hit !== undefined) {
+      spawnX = hit.blockPos.x + hit.face.x * 0.5 + 0.5;
+      spawnY = hit.blockPos.y + hit.face.y * 0.5;
+      spawnZ = hit.blockPos.z + hit.face.z * 0.5 + 0.5;
+    }
+
+    // Safe spawn check: don't spawn inside solid blocks
+    const half = 0.3; // approximate entity half-width for collision check
+    const spawnAABB = new AABB(spawnX - half, spawnY - half, spawnZ - half, spawnX + half, spawnY + half, spawnZ + half);
+    const blockRegistry = this.blockRegistry;
+    let blocked = false;
+    for (let bx = Math.floor(spawnAABB.minX); bx <= Math.floor(spawnAABB.maxX); bx++) {
+      for (let by = Math.floor(spawnAABB.minY); by <= Math.floor(spawnAABB.maxY); by++) {
+        for (let bz = Math.floor(spawnAABB.minZ); bz <= Math.floor(spawnAABB.maxZ); bz++) {
+          const id = this.blockUpdateWorld.getBlock(bx, by, bz);
+          const def = blockRegistry.getById(id);
+          if (def !== undefined && def.solid) {
+            blocked = true;
+            break;
+          }
+        }
+        if (blocked) break;
+      }
+      if (blocked) break;
+    }
+
+    if (blocked) return false;
+
+    const descriptor = DEFAULT_SPAWN_EGG_DESCRIPTORS[descriptorId];
+    if (!descriptor) return false;
+
+    const factory = new EntityFactory({ descriptors: DEFAULT_SPAWN_EGG_DESCRIPTORS });
+    const entity = factory.createByDescriptorId(descriptorId, this.entityManager.context, spawnX, spawnY, spawnZ);
+    if (entity === undefined) return false;
+
+    entity.yaw = this.betaYawDegrees();
+    this.entityManager.add(entity);
+
+    if (!this.player.isCreativeMode()) {
+      this.inventory.decrementSlot(this.selectedSlotIndex, 1);
+    }
+    return true;
+  }
+
+
+
+  private getDescriptorFromMetadata(metadata: number): string | null {
+    // Look up descriptor by numeric id
+    const descriptors = DEFAULT_SPAWN_EGG_DESCRIPTORS;
+    for (const [key, desc] of Object.entries(descriptors)) {
+      if (desc.entityNumericId === metadata) return key;
+    }
+    return null;
+  }
+
   private useEmptyBucket(): boolean {
     const hit = this.currentPlacementHit;
     if (hit === undefined) return false;

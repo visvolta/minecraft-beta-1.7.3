@@ -145,6 +145,10 @@ const GENERIC_ITEMS: readonly ItemDefinition[] = [
   { id: 'door_iron', numericId: 330, stackSize: 1, useAction: 'none', placeBlockId: 71, creativeVisible: true, creativeTab: 'decoration', creativeOrder: 330 },
   { id: 'bed', numericId: 355, stackSize: 1, useAction: 'none', placeBlockId: 26, creativeVisible: true, creativeTab: 'decoration', creativeOrder: 355 },
   { id: 'cake', numericId: 354, stackSize: 1, useAction: 'none', placeBlockId: 92, creativeVisible: true, creativeTab: 'food', creativeOrder: 354 },
+  // Spawn Egg — single generic item with entity identity in metadata
+  // Numeric id 383 is chosen to avoid Beta's item id range and future conflicts.
+  { id: 'spawn_egg', numericId: 383, stackSize: 64, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 383 },
+
   { id: 'redstone_repeater', numericId: 356, stackSize: 64, useAction: 'none', placeBlockId: 93, creativeVisible: true, creativeTab: 'redstone', creativeOrder: 356 },
   { id: 'redstone_torch', numericId: 76, stackSize: 64, useAction: 'none', placeBlockId: 76, creativeVisible: true, creativeTab: 'redstone' },
   { id: 'lever', numericId: 69, stackSize: 64, useAction: 'none', placeBlockId: 69, creativeVisible: true, creativeTab: 'redstone' },

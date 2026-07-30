@@ -4,6 +4,7 @@ import { ItemStack, getMaxStackSize } from './ItemStack';
 import { ItemIconResolver } from './ItemIconResolver';
 import { BlockIds } from '../blocks/BlockId';
 import { UNIMPLEMENTED_BEHAVIOUR } from '../items/ItemDefinitionRegistry';
+import { DEFAULT_SPAWN_EGG_DESCRIPTORS } from '../entities/SpawnEggDescriptor';
 
 const SLAB_BLOCK_ID: number = BlockIds.Slab;
 
@@ -133,5 +134,18 @@ export function buildCreativeInventoryEntries(blocks: BlockRegistry, items: Item
     };
     entries.set(entry.key, entry);
   }
+  // Spawn Eggs — one entry per spawnable living mob, using metadata for identity.
+  const descriptors = DEFAULT_SPAWN_EGG_DESCRIPTORS;
+  for (const [, desc] of Object.entries(descriptors)) {
+    const spawnStack = new ItemStack('spawn_egg', 'item', 1, desc.entityNumericId);
+    const entry: CreativeInventoryEntry = {
+      key: keyOf(spawnStack),
+      tab: 'misc',
+      order: 400 + desc.entityNumericId, // Grouped after standard misc items
+      stack: spawnStack,
+    };
+    entries.set(entry.key, entry);
+  }
+
   return [...entries.values()].sort((a, b) => a.tab.localeCompare(b.tab) || a.order - b.order || a.key.localeCompare(b.key));
 }

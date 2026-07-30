@@ -92,6 +92,12 @@ export class Input {
   private frameMouseDeltaX = 0;
   private frameMouseDeltaY = 0;
 
+  /** Whether chat input is currently focused (typing mode). */
+  private chatFocused = false;
+
+  /** The current input mode: gameplay (default), chat, or menu. */
+  private inputMode: 'gameplay' | 'chat' | 'menu' = 'gameplay';
+
   private pointerLocked = false;
   private pointerLockLostHandler: (() => void) | undefined;
 
@@ -266,6 +272,7 @@ export class Input {
   }
 
   public isActionActive(action: InputAction): boolean {
+    if (this.chatFocused) return false; // Suppress gameplay actions while typing
     const codes = this.bindings[action];
 
     for (const code of codes) {
@@ -303,6 +310,7 @@ export class Input {
    * True while the given mouse button is held down (continuous state).
    */
   public isMouseButtonPressed(button: MouseButton): boolean {
+    if (this.chatFocused) return false;
     return this.mouseButtonsDown.has(MOUSE_BUTTON_INDEX[button]);
   }
 
@@ -319,6 +327,7 @@ export class Input {
    * (edge-triggered, ignores OS key-repeat).
    */
   public isDigitKeyJustPressed(key: DigitKey): boolean {
+    if (this.chatFocused) return false;
     return this.frameKeyPresses.has(DIGIT_KEY_CODES[key]);
   }
 
@@ -329,6 +338,7 @@ export class Input {
    * of the InputAction binding table.
    */
   public isDebugKeyJustPressed(key: DebugKey): boolean {
+    if (this.chatFocused) return false;
     return this.frameKeyPresses.has(DEBUG_KEY_CODES[key]);
   }
 
@@ -337,6 +347,31 @@ export class Input {
    * held down. Not edge-triggered — used for continuous state like
    * "Shift held = move faster", not one-shot toggles.
    */
+  public focusChat(): void {
+    this.chatFocused = true;
+    this.inputMode = 'chat';
+    this.keysDown.clear();
+    this.clearMouseDeltas();
+  }
+
+  public unfocusChat(): void {
+    this.chatFocused = false;
+    this.inputMode = 'gameplay';
+  }
+
+  public isChatFocused(): boolean {
+    return this.chatFocused;
+  }
+
+  public getInputMode(): 'gameplay' | 'chat' | 'menu' {
+    return this.inputMode;
+  }
+
+  public setInputMode(mode: 'gameplay' | 'chat' | 'menu'): void {
+    this.inputMode = mode;
+    this.chatFocused = mode === 'chat';
+  }
+
   public isModifierKeyHeld(key: ModifierKey): boolean {
     for (const code of MODIFIER_KEY_CODES[key]) {
       if (this.keysDown.has(code)) {
