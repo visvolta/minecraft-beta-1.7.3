@@ -1,11 +1,24 @@
 /**
  * Panorama registry for main-menu background customization.
+ * Explicit face mapping with rotation per face.
  */
+
+export interface PanoramaFace {
+  readonly texture: string;
+  readonly rotation?: number; // degrees, clockwise, applied to texture
+}
 
 export interface PanoramaDefinition {
   readonly id: string;
-  readonly images: readonly string[]; // file names, ordered for cubemap mapping
-  readonly rotationSpeed?: number; // degrees per second, default 0.1
+  readonly faces: {
+    readonly left: PanoramaFace;
+    readonly right: PanoramaFace;
+    readonly front: PanoramaFace;
+    readonly back: PanoramaFace;
+    readonly top: PanoramaFace;
+    readonly bottom: PanoramaFace;
+  };
+  readonly rotationSpeed?: number; // degrees per second, default 0.05 (slow)
   readonly overlayOpacity?: number; // 0 to 1, default 0.35
 }
 
@@ -41,14 +54,14 @@ export class PanoramaRegistry {
 
 export const DEFAULT_PANORAMA: PanoramaDefinition = {
   id: 'default',
-  images: [
-    'panorama_0.png', // left
-    'panorama_1.png', // right
-    'panorama_2.png', // back
-    'panorama_3.png', // front
-    'panorama_4.png', // top / sky
-    'panorama_5.png', // bottom / ground
-  ],
-  rotationSpeed: 0.08,
+  faces: {
+    left: { texture: 'panorama_0.png', rotation: 0 },
+    right: { texture: 'panorama_1.png', rotation: 0 },
+    front: { texture: 'panorama_3.png', rotation: 180 },
+    back: { texture: 'panorama_2.png', rotation: 0 },
+    top: { texture: 'panorama_4.png', rotation: 90 },
+    bottom: { texture: 'panorama_5.png', rotation: 270 },
+  },
+  rotationSpeed: 0.05,
   overlayOpacity: 0.35,
 };

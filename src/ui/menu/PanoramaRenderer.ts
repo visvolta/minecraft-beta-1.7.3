@@ -1,7 +1,6 @@
 /**
  * Lightweight Three.js panorama renderer for main menu background.
- * Uses a cubemap approach with 6 textured planes (or cube geometry).
- * Pauses/reduces work when hidden.
+ * Uses explicit face definitions with rotations.
  */
 
 import * as THREE from 'three';
@@ -25,30 +24,55 @@ export class PanoramaRenderer {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.domElement.style.cssText = `
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      z-index: 0;
+      pointer-events: none;
+      display: block;
+    `;
+    container.style.position = 'relative';
+    container.style.overflow = 'hidden';
     container.appendChild(this.renderer.domElement);
   }
 
   public async loadPanorama(def: PanoramaDefinition): Promise<void> {
-    const imagePaths = def.images.map((file) => `/textures/gui/panoramas/${def.id}/${file}`);
     const loader = new THREE.TextureLoader();
-    const texturePromises = imagePaths.map((path) => loader.loadAsync(path));
+    const texturePromises = [
+      loader.loadAsync(`/textures/gui/panoramas/${def.id}/${def.faces.right.texture}`),
+      loader.loadAsync(`/textures/gui/panoramas/${def.id}/${def.faces.left.texture}`),
+      loader.loadAsync(`/textures/gui/panoramas/${def.id}/${def.faces.top.texture}`),
+      loader.loadAsync(`/textures/gui/panoramas/${def.id}/${def.faces.bottom.texture}`),
+      loader.loadAsync(`/textures/gui/panoramas/${def.id}/${def.faces.front.texture}`),
+      loader.loadAsync(`/textures/gui/panoramas/${def.id}/${def.faces.back.texture}`),
+    ];
     const textures = await Promise.all(texturePromises);
 
-    // Create a cube with textures on each face (standard cubemap mapping)
-    // Mapping: 0=left (+X), 1=right (-X), 2=back (+Z), 3=front (-Z), 4=top (+Y), 5=bottom (-Y)
-    // Note: actual image roles verified: 4=sky, 5=ground, 0-3=landscape sides
-    const materials = textures.map((tex) => {
+    const materials = textures.map((tex, idx) => {
       tex.colorSpace = THREE.SRGBColorSpace;
+      const rotation = this.faceRotation(def, idx);
       const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide });
+      // Apply rotation by rotating the texture using texture.repeat/offset is complex;
+      // Instead, we rotate the cube face geometry or apply via UV rotation.
+      // For simplicity with BackSide cube, we apply rotation through texture transform.
+      tex.center.set(0.5, 0.5);
+      tex.rotation = THREE.MathUtils.degToRad(rotation);
+      tex.needsUpdate = true;
       return mat;
     });
 
     const geometry = new THREE.BoxGeometry(50, 50, 50);
-    // We render inside the cube so the camera at (0,0,0) sees the interior surfaces
-    // Using BackSide ensures textures appear correctly oriented from inside
     this.cubeMesh = new THREE.Mesh(geometry, materials);
     this.scene.add(this.cubeMesh);
     this.texturesLoaded = true;
+  }
+
+  private faceRotation(def: PanoramaDefinition, index: number): number {
+    // Three.js BoxGeometry material index order: [right(+X), left(-X), top(+Y), bottom(-Y), front(+Z), back(-Z)]
+    const faceKeys = ['right', 'left', 'top', 'bottom', 'front', 'back'] as const;
+    const key = faceKeys[index];
+    if (!key) return 0;
+    return def.faces[key]?.rotation ?? 0;
   }
 
   public start(): void {
@@ -75,10 +99,16 @@ export class PanoramaRenderer {
     return this.active;
   }
 
-  private animate = (): void => {
+  private lastTime = 0;
+
+  private animate = (time?: number): void => {
     if (!this.active) return;
+    const now = time ?? performance.now();
+    const delta = this.lastTime ? Math.min((now - this.lastTime) / 1000, 0.05) : 0.016;
+    this.lastTime = now;
+    const speed = 0.05; // very slow rotation
+    this.rotationAngle += speed * delta;
     this.animationId = requestAnimationFrame(this.animate);
-    this.rotationAngle += 0.002; // Slow rotation
     if (this.cubeMesh) {
       this.cubeMesh.rotation.y = this.rotationAngle;
     }

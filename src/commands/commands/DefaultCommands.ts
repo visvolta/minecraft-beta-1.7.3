@@ -184,17 +184,21 @@ export function registerDefaultCommands(registry: CommandRegistry, cheats?: Chea
       if (ctx.args.length < 3) {
         return { success: false, message: 'Usage: /tp <x> <y> <z>' };
       }
-      const parseCoord = (arg: string): number | undefined => {
-        if (arg === '~') return 0; // relative to current (not fully implemented without context)
+      const parseCoord = (arg: string, base?: number): number | undefined => {
+        if (arg.startsWith('~')) {
+          const relStr = arg.slice(1);
+          const relValue = relStr === '' ? 0 : (Number(relStr) || 0);
+          return base !== undefined ? base + relValue : relValue;
+        }
         const val = Number(arg);
         if (isNaN(val) || !Number.isFinite(val)) return undefined;
         return val;
       };
-      const x = parseCoord(ctx.args[0]!);
-      const y = parseCoord(ctx.args[1]!);
-      const z = parseCoord(ctx.args[2]!);
+      const x = parseCoord(ctx.args[0]!, 0);
+      const y = parseCoord(ctx.args[1]!, 0);
+      const z = parseCoord(ctx.args[2]!, 0);
       if (x === undefined || y === undefined || z === undefined) {
-        return { success: false, message: 'Coordinates must be finite numbers.' };
+        return { success: false, message: 'Coordinates must be finite numbers or valid relative expressions (~, ~10, ~-3).' };
       }
       return { success: true, message: `Teleported to ${x}, ${y}, ${z}` };
     },

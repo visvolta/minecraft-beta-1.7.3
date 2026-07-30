@@ -19,6 +19,7 @@ export class ChatSystem {
   private readonly history: string[] = [];
   private historyIndex = -1;
   private readonly suggestionOverlay = document.createElement('div');
+  private tabCycleIndex = 0;
 
   public constructor(private readonly input: Input) {
     this.inputElement = document.createElement('input');
@@ -57,6 +58,11 @@ export class ChatSystem {
       display: none;
     `;
     document.body.appendChild(this.suggestionOverlay);
+
+    this.inputElement.addEventListener('input', () => {
+      this.tabCycleIndex = 0;
+      this.hideSuggestions();
+    });
 
     this.inputElement.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Tab') {
@@ -116,6 +122,10 @@ export class ChatSystem {
     this.registry = registry;
   }
 
+  public resetCycle(): void {
+    this.tabCycleIndex = 0;
+  }
+
   private handleTab(): void {
     const value = this.inputElement.value.trim();
     if (!this.registry) {
@@ -134,6 +144,7 @@ export class ChatSystem {
     const suggestions = this.registry.suggest(cmdName, args);
     if (suggestions.length === 0) {
       this.hideSuggestions();
+      this.tabCycleIndex = 0;
     } else if (suggestions.length === 1) {
       const completed = suggestions[0]!;
       if (args.length > 0 && args[args.length - 1] !== undefined) {
@@ -144,9 +155,19 @@ export class ChatSystem {
         this.inputElement.value = '/' + cmdName + ' ' + completed;
       }
       this.hideSuggestions();
+      this.tabCycleIndex = 0;
     } else {
-      // Show suggestions
-      this.suggestionOverlay.textContent = suggestions.slice(0, 5).join('  ');
+      // Show suggestions and cycle on repeated Tab
+      this.tabCycleIndex = (this.tabCycleIndex + 1) % suggestions.length;
+      const selected = suggestions[this.tabCycleIndex]!;
+      if (args.length > 0 && args[args.length - 1] !== undefined) {
+        const prevArgs = args.slice(0, -1);
+        const newArgs = [...prevArgs, selected];
+        this.inputElement.value = '/' + cmdName + ' ' + newArgs.join(' ');
+      } else {
+        this.inputElement.value = '/' + cmdName + ' ' + selected;
+      }
+      this.suggestionOverlay.textContent = suggestions.map((s, i) => (i === this.tabCycleIndex ? `> ${s}` : `  ${s}`)).join('  ');
       this.suggestionOverlay.style.display = 'block';
     }
   }
