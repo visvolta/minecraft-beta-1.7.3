@@ -82,6 +82,20 @@ export const MOB_SOUNDS = [
   sound('mob.ghast.death','/audio/sounds/mob/ghast/death.ogg','mob.ghast'),
   sound('mob.ghast.charge','/audio/sounds/mob/ghast/charge.ogg','mob.ghast'),
   sound('mob.ghast.fireball4','/audio/sounds/mob/ghast/fireball4.ogg','mob.ghast'),
+  // Slime sounds.
+  ...numbered('mob.slime.big','/audio/sounds/mob/slime/big',1,4,'mob.slime'),
+  ...numbered('mob.slime.small','/audio/sounds/mob/slime/small',1,5,'mob.slime'),
+  ...numbered('mob.slime.attack','/audio/sounds/mob/slime/attack',1,2,'mob.slime'),
+  // Wolf sounds.
+  ...numbered('mob.wolf.bark','/audio/sounds/mob/wolf/bark',1,3,'mob.wolf'),
+  ...numbered('mob.wolf.growl','/audio/sounds/mob/wolf/growl',1,3,'mob.wolf'),
+  ...numbered('mob.wolf.howl','/audio/sounds/mob/wolf/howl',1,2,'mob.wolf'),
+  ...numbered('mob.wolf.hurt','/audio/sounds/mob/wolf/hurt',1,3,'mob.wolf'),
+  sound('mob.wolf.death','/audio/sounds/mob/wolf/death.ogg','mob.wolf'),
+  sound('mob.wolf.panting','/audio/sounds/mob/wolf/panting.ogg','mob.wolf'),
+  sound('mob.wolf.whine','/audio/sounds/mob/wolf/whine.ogg','mob.wolf'),
+  sound('mob.wolf.shake','/audio/sounds/mob/wolf/shake.ogg','mob.wolf'),
+  ...numbered('mob.wolf.step','/audio/sounds/mob/wolf/step',1,5,'mob.wolf'),
 ];
 
 export const CAVE_SOUNDS = numbered('ambient.cave.cave','/audio/sounds/ambient/cave/cave',1,16,'ambient.cave');

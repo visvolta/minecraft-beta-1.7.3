@@ -18,6 +18,9 @@ import { BoatEntity } from './BoatEntity';
 import { SnowballEntity, ThrownEggEntity } from './projectiles/ThrownItemEntity';
 import { PaintingEntity } from './PaintingEntity';
 import { ZombiePigmanEntity } from './hostile/PigZombieEntity';
+import { SlimeEntity } from './hostile/SlimeEntity';
+import { SquidEntity } from './living/SquidEntity';
+import { WolfEntity } from './living/WolfEntity';
 import { GhastEntity } from './hostile/GhastEntity';
 
 /**
@@ -49,6 +52,9 @@ export function registerEntityTypes(registry: EntityTypeRegistry): void {
   registry.register(EntityTypeIds.PigZombie, 'PigZombie', ZombiePigmanEntity.deserialize);
   registry.register(EntityTypeIds.Ghast, 'Ghast', GhastEntity.deserialize);
   registry.register(EntityTypeIds.Fireball, 'Fireball', FireballEntity.deserialize);
+  registry.register(EntityTypeIds.Slime, 'Slime', SlimeEntity.deserialize);
+  registry.register(EntityTypeIds.Squid, 'Squid', SquidEntity.deserialize);
+  registry.register(EntityTypeIds.Wolf, 'Wolf', WolfEntity.deserialize);
   // FishingBobber is deliberately NOT registered: a bobber restored without
   // its angler is meaningless, so it is dropped on load rather than revived.
 }

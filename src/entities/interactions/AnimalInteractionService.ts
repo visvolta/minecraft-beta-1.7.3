@@ -5,6 +5,7 @@ import type { ItemEntityManager } from '../items/ItemEntityManager';
 import { AnimalEntity } from '../living/AnimalEntity';
 import { CowEntity } from '../living/CowEntity';
 import { SheepEntity } from '../living/SheepEntity';
+import { WolfEntity } from '../living/WolfEntity';
 
 export type AnimalInteractionResult = 'not-applicable' | 'consumed-success' | 'consumed-rejected';
 
@@ -44,6 +45,24 @@ export class AnimalInteractionService {
       // Empty buckets are non-stackable in this inventory, so replacement is atomic.
       this.inventory.setStack(selectedSlot, new ItemStack('bucket_milk', 'item', 1, 0));
       return 'consumed-success';
+    }
+
+    // Wolf interactions: bone taming + sit/stand toggle.
+    if (animal instanceof WolfEntity) {
+      if (animal.wolfTamed) {
+        // Right-click tamed wolf → toggle sitting.
+        animal.toggleSitting();
+        return 'consumed-success';
+      }
+      // Untamed wolf + bone → taming attempt (Beta: 1/3 chance per bone).
+      if (itemId === 'bone' && !animal.wolfAngry) {
+        this.inventory.decrementSlot(selectedSlot, 1);
+        if (animal.nextInt(3) === 0) {
+          animal.tame('player');
+        }
+        return 'consumed-success';
+      }
+      return 'not-applicable';
     }
 
     if (itemId !== animal.breedingItemId) return 'not-applicable';

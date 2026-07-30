@@ -314,6 +314,20 @@ export class AudioManager implements MobSoundSink {
     if (id === 'mob.ghast.death') return ['mob.ghast.death'];
     if (id === 'mob.ghast.charge') return ['mob.ghast.charge'];
     if (id === 'mob.ghast.fireball') return ['mob.ghast.fireball4'];
+    // Slime sounds: size-dependent (big for size>2, small for size<=2).
+    if (id === 'mob.slime') return ['mob.slime.big1','mob.slime.big2','mob.slime.big3','mob.slime.big4'];
+    if (id === 'mob.slimesmall') return ['mob.slime.small1','mob.slime.small2','mob.slime.small3','mob.slime.small4','mob.slime.small5'];
+    if (id === 'mob.slimeattack') return ['mob.slime.attack1','mob.slime.attack2'];
+    // Wolf sounds.
+    if (id === 'mob.wolf') return ['mob.wolf.bark1','mob.wolf.bark2','mob.wolf.bark3'];
+    if (id === 'mob.wolfgrowl') return ['mob.wolf.growl1','mob.wolf.growl2','mob.wolf.growl3'];
+    if (id === 'mob.wolfhowl') return ['mob.wolf.howl1','mob.wolf.howl2'];
+    if (id === 'mob.wolfhurt') return ['mob.wolf.hurt1','mob.wolf.hurt2','mob.wolf.hurt3'];
+    if (id === 'mob.wolfdeath') return ['mob.wolf.death'];
+    if (id === 'mob.wolf.panting') return ['mob.wolf.panting'];
+    if (id === 'mob.wolf.whine') return ['mob.wolf.whine'];
+    if (id === 'mob.wolf.shake') return ['mob.wolf.shake'];
+    if (id === 'mob.wolf.step') return ['mob.wolf.step1','mob.wolf.step2','mob.wolf.step3','mob.wolf.step4','mob.wolf.step5'];
     // Emitted by ItemBow release and EntitySkeleton's ranged attack.
     if (id === 'random.bow') return ['random.bow'];
     // Emitted by primed TNT and the creeper swell.

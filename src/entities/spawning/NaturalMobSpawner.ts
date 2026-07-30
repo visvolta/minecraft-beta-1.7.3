@@ -18,6 +18,7 @@ import { SkeletonEntity } from '../hostile/SkeletonEntity';
 import { SpiderEntity } from '../hostile/SpiderEntity';
 import { ZombieEntity } from '../hostile/ZombieEntity';
 import { ZombiePigmanEntity } from '../hostile/PigZombieEntity';
+import { SlimeEntity } from '../hostile/SlimeEntity';
 import { NaturalPassiveSpawner, PASSIVE_ELIGIBLE_CHUNK_RADIUS, PASSIVE_ATTEMPTS_PER_ROUND, PASSIVE_GROUP_ROUNDS, PASSIVE_MAX_GROUP_SIZE } from './NaturalPassiveSpawner';
 
 export const HOSTILE_CREATURE_CAP = 70;
@@ -53,7 +54,7 @@ export interface NaturalMobSpawnerOptions {
 
 const HOSTILE_DIMENSIONS: Readonly<Record<HostileMobKind, readonly [number, number]>> = {
   zombie: [0.6, 1.8], skeleton: [0.6, 1.8], spider: [1.4, 0.9], creeper: [0.6, 1.8],
-  pigzombie: [0.6, 1.8], ghast: [4, 4],
+  pigzombie: [0.6, 1.8], ghast: [4, 4], slime: [0.6, 0.6],
 };
 
 /** Beta `EntityGhast.getMaxSpawnedInChunk` — at most one Ghast per spawn attempt. */
@@ -256,5 +257,5 @@ export class NaturalMobSpawner {
     const key=`${chunkX},${chunkZ}`;const cached=this.biomeSpawnCache.get(key);if(cached)return cached;
     const climate=this.options.climateSampler.sampleRegion(originX,originZ,1,1)[0];const list=climate?selectBiome(climate).hostileSpawns:[];this.biomeSpawnCache.set(key,list);return list;
   }
-  private createEntity(kind:HostileMobKind,x:number,y:number,z:number):Entity{const ctx=this.options.entityManager.context;switch(kind){case'zombie':return new ZombieEntity(ctx,x,y,z);case'skeleton':return new SkeletonEntity(ctx,x,y,z);case'spider':return new SpiderEntity(ctx,x,y,z);case'creeper':return new CreeperEntity(ctx,x,y,z);case'pigzombie':return new ZombiePigmanEntity(ctx,x,y,z);case'ghast':return new GhastEntity(ctx,x,y,z);}}
+  private createEntity(kind:HostileMobKind,x:number,y:number,z:number):Entity{const ctx=this.options.entityManager.context;switch(kind){case'zombie':return new ZombieEntity(ctx,x,y,z);case'skeleton':return new SkeletonEntity(ctx,x,y,z);case'spider':return new SpiderEntity(ctx,x,y,z);case'creeper':return new CreeperEntity(ctx,x,y,z);case'pigzombie':return new ZombiePigmanEntity(ctx,x,y,z);case'ghast':return new GhastEntity(ctx,x,y,z);case'slime':return new SlimeEntity(ctx,x,y,z);}}
 }

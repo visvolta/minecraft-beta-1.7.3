@@ -54,7 +54,7 @@ export abstract class QuadrupedModel extends EntityModel {
   private readonly bodyMat: MeshBasicMaterial;
   private readonly swingAmplitude: number;
 
-  protected constructor(config: QuadrupedConfig) {
+  public constructor(config: QuadrupedConfig) {
     super();
     this.swingAmplitude = config.legSwingAmplitude ?? 1.4;
 
