@@ -105,6 +105,9 @@ export function resolveBlockDrops(blockId:number,blockMetadata=0,canHarvest=true
       // Beta: the repeater block drops the repeater item, not the block itself.
       return [{ type: 'item', id: 'repeater', count: 1, metadata: 0 }];
 
+    case BlockIds.PistonExtension:
+      return []; // Piston head drops nothing.
+
     case BlockIds.Cake:
       // Beta: cake drops nothing; it is eaten instead.
       return [];

@@ -1195,6 +1195,24 @@ export class InteractionController {
       if (support !== undefined) return wallControlMetadataFromSupport(support);
     }
 
+    // Piston direction: extends in the direction of the clicked face normal.
+    // 0=down, 1=up, 2=north(-Z), 3=south(+Z), 4=west(-X), 5=east(+X).
+    if (blockId === BlockIds.PistonBase || blockId === BlockIds.PistonStickyBase) {
+      const f = hit.face;
+      if (f.y === 1) return 1;
+      if (f.y === -1) return 0;
+      if (f.z === -1) return 2;
+      if (f.z === 1) return 3;
+      if (f.x === -1) return 4;
+      if (f.x === 1) return 5;
+      return 1;
+    }
+
+    // Beta BlockRedstoneRepeater.onBlockPlacedBy: ((floor(yaw*4/360+0.5) & 3) + 2) % 4
+    if (blockId === BlockIds.RedstoneRepeaterIdle) {
+      return ((Math.floor(this.betaYawDegrees() * 4 / 360 + 0.5) & 3) + 2) % 4;
+    }
+
     if (blockId === BlockIds.Trapdoor) {
       const support = supportDirectionFromHitFace(hit.face);
       if (support !== undefined) return trapdoorMetadataFromSupport(support);

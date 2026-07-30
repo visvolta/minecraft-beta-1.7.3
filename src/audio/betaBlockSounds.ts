@@ -57,6 +57,7 @@ export const BETA_BLOCK_SOUNDS: Readonly<Record<number, BlockSoundDefinition>> =
   [BlockIds.CobblestoneStairs]: STONE,
   // Functional blocks (Beta 1.7.3): stone sound for machinery, cloth for cake.
   [BlockIds.PistonBase]: STONE,
+  [BlockIds.PistonExtension]: STONE,
   [BlockIds.PistonStickyBase]: STONE,
   [BlockIds.Dispenser]: STONE,
   [BlockIds.NoteBlock]: STONE,

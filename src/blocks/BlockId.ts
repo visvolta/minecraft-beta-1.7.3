@@ -172,6 +172,7 @@ export const BlockIds = {
   NoteBlock: 25,
   PistonStickyBase: 29,
   PistonBase: 33,
+  PistonExtension: 34,
   Jukebox: 84,
   Cake: 92,
   RedstoneRepeaterIdle: 93,
