@@ -1,6 +1,8 @@
 import { BlockIds } from '../../blocks/BlockId';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
 import type { NeighbourUpdateEvent } from '../updates/BlockMutation';
+import { AABB } from '../../physics/AABB';
+import type { Entity } from '../../entities/core/Entity';
 
 /** Piston direction metadata (bits 0-2): 0=down, 1=up, 2=north(-Z), 3=south(+Z), 4=west(-X), 5=east(+X). */
 const DIRECTION_OFFSETS: readonly { readonly x: number; readonly y: number; readonly z: number }[] = [
@@ -110,11 +112,42 @@ export class PistonBaseBehaviour implements BlockBehaviour {
       ctx.world.setBlock(block.x, block.y, block.z, BlockIds.Air);
     }
 
+    // Beta: push entities intersecting the moved blocks.
+    this.pushEntities(ctx, chain, dx, dy, dz);
+
     // Place piston head at the head position.
     ctx.world.setBlock(x + dx, y + dy, z + dz, BlockIds.PistonExtension, { metadata: direction });
 
     // Set extended flag.
     ctx.world.setBlockMetadataWithNotify(x, y, z, direction | EXTENDED_BIT);
+  }
+
+  /**
+   * Beta: entities intersecting moved blocks are shoved along the push axis.
+   * Entities blocked by a solid block are not moved (no suffocation damage
+   * yet — Beta applies it via the moving-piston tile entity).
+   */
+  private pushEntities(ctx: BlockBehaviourContext, chain: { x: number; y: number; z: number }[], dx: number, dy: number, dz: number): void {
+    if (ctx.entities === undefined) return;
+    const pushed = new Set<Entity>();
+    for (const block of chain) {
+      const box = new AABB(block.x, block.y, block.z, block.x + 1, block.y + 1, block.z + 1);
+      const entities = ctx.entities.getEntitiesInAABB(box, (e): e is Entity => !pushed.has(e));
+      for (const entity of entities) {
+        pushed.add(entity);
+        const nx = entity.position.x + dx;
+        const ny = entity.position.y + dy;
+        const nz = entity.position.z + dz;
+        // Only move if the destination is air (prevents clipping into walls).
+        const destBlock = ctx.world.getBlock(Math.floor(nx), Math.floor(ny), Math.floor(nz));
+        if (destBlock === BlockIds.Air) {
+          entity.setPosition(nx, ny, nz);
+          entity.velocity.x += dx * 0.6;
+          entity.velocity.y += dy * 0.6;
+          entity.velocity.z += dz * 0.6;
+        }
+      }
+    }
   }
 
   /**

@@ -1195,6 +1195,18 @@ export class InteractionController {
       if (support !== undefined) return wallControlMetadataFromSupport(support);
     }
 
+    // Dispenser direction: faces the clicked face (same encoding as piston).
+    if (blockId === BlockIds.Dispenser) {
+      const f = hit.face;
+      if (f.y === 1) return 1;
+      if (f.y === -1) return 0;
+      if (f.z === -1) return 2;
+      if (f.z === 1) return 3;
+      if (f.x === -1) return 4;
+      if (f.x === 1) return 5;
+      return 3;
+    }
+
     // Piston direction: extends in the direction of the clicked face normal.
     // 0=down, 1=up, 2=north(-Z), 3=south(+Z), 4=west(-X), 5=east(+X).
     if (blockId === BlockIds.PistonBase || blockId === BlockIds.PistonStickyBase) {
