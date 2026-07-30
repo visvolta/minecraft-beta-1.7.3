@@ -55,6 +55,12 @@ export const BETA_BLOCK_SOUNDS: Readonly<Record<number, BlockSoundDefinition>> =
   [BlockIds.LapisBlock]: STONE,
   [BlockIds.BrickBlock]: STONE,
   [BlockIds.CobblestoneStairs]: STONE,
+  // Functional blocks (Beta 1.7.3): stone sound for machinery, cloth for cake.
+  [BlockIds.PistonBase]: STONE,
+  [BlockIds.PistonStickyBase]: STONE,
+  [BlockIds.Dispenser]: STONE,
+  [BlockIds.NoteBlock]: STONE,
+  [BlockIds.Jukebox]: STONE,
   [BlockIds.CoalOre]: STONE,
   [BlockIds.IronOre]: STONE,
   [BlockIds.GoldOre]: STONE,
@@ -124,6 +130,7 @@ export const BETA_BLOCK_SOUNDS: Readonly<Record<number, BlockSoundDefinition>> =
   [BlockIds.SoulSand]: SAND,
 
   [BlockIds.Wool]: CLOTH,
+  [BlockIds.Cake]: CLOTH,
   [BlockIds.Bed]: CLOTH,
   [BlockIds.Snow]: CLOTH,
   [BlockIds.SnowBlock]: CLOTH,

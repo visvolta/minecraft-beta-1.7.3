@@ -167,6 +167,15 @@ export const BlockIds = {
   SpruceDoor: 242,
   /** Project extension: birch door. */
   BirchDoor: 243,
+  // ---- Functional blocks (Beta 1.7.3) ----
+  Dispenser: 23,
+  NoteBlock: 25,
+  PistonStickyBase: 29,
+  PistonBase: 33,
+  Jukebox: 84,
+  Cake: 92,
+  RedstoneRepeaterIdle: 93,
+  RedstoneRepeaterActive: 94,
   /** Non-Beta extension (1.5+): Nether Quartz Ore — generates in the Nether. */
   NetherQuartzOre: 244,
   /** Non-Beta extension (1.5+): Quartz Block — crafted from 4 Nether Quartz. */

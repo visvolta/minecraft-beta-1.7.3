@@ -498,6 +498,32 @@ export function registerDefaultRecipes(
   tryRegisterShapeless('dye_red', [{ id: BlockIds.Rose }], new ItemStack('dye_powder_red', 'item', 2, 1));
   tryRegisterShapeless('dye_bonemeal', [{ id: 'bone' }], new ItemStack('dye_powder_white', 'item', 3, 15));
 
+  // Beta RecipesDyes: mixing recipes (12 shapeless combinations).
+  // Pink = red + white.
+  tryRegisterShapeless('dye_mix_pink', [{ id: 'dye_powder_red' }, { id: 'dye_powder_white' }], new ItemStack('dye_powder_pink', 'item', 2, 0));
+  // Orange = red + yellow.
+  tryRegisterShapeless('dye_mix_orange', [{ id: 'dye_powder_red' }, { id: 'dye_powder_yellow' }], new ItemStack('dye_powder_orange', 'item', 2, 0));
+  // Lime = green + white.
+  tryRegisterShapeless('dye_mix_lime', [{ id: 'dye_powder_green' }, { id: 'dye_powder_white' }], new ItemStack('dye_powder_lime', 'item', 2, 0));
+  // Gray = black + white.
+  tryRegisterShapeless('dye_mix_gray', [{ id: 'dye_powder_black' }, { id: 'dye_powder_white' }], new ItemStack('dye_powder_gray', 'item', 2, 0));
+  // Light gray (silver) = gray + white.
+  tryRegisterShapeless('dye_mix_silver', [{ id: 'dye_powder_gray' }, { id: 'dye_powder_white' }], new ItemStack('dye_powder_silver', 'item', 2, 0));
+  // Light gray = black + 2 white (3 output).
+  tryRegisterShapeless('dye_mix_silver2', [{ id: 'dye_powder_black' }, { id: 'dye_powder_white' }, { id: 'dye_powder_white' }], new ItemStack('dye_powder_silver', 'item', 3, 0));
+  // Light blue = blue + white.
+  tryRegisterShapeless('dye_mix_light_blue', [{ id: 'dye_powder_blue' }, { id: 'dye_powder_white' }], new ItemStack('dye_powder_light_blue', 'item', 2, 0));
+  // Cyan = blue + green.
+  tryRegisterShapeless('dye_mix_cyan', [{ id: 'dye_powder_blue' }, { id: 'dye_powder_green' }], new ItemStack('dye_powder_cyan', 'item', 2, 0));
+  // Purple = blue + red.
+  tryRegisterShapeless('dye_mix_purple', [{ id: 'dye_powder_blue' }, { id: 'dye_powder_red' }], new ItemStack('dye_powder_purple', 'item', 2, 0));
+  // Magenta = purple + pink.
+  tryRegisterShapeless('dye_mix_magenta', [{ id: 'dye_powder_purple' }, { id: 'dye_powder_pink' }], new ItemStack('dye_powder_magenta', 'item', 2, 0));
+  // Magenta = blue + red + pink (3 output).
+  tryRegisterShapeless('dye_mix_magenta2', [{ id: 'dye_powder_blue' }, { id: 'dye_powder_red' }, { id: 'dye_powder_pink' }], new ItemStack('dye_powder_magenta', 'item', 3, 0));
+  // Magenta = blue + 2 red + white (4 output).
+  tryRegisterShapeless('dye_mix_magenta3', [{ id: 'dye_powder_blue' }, { id: 'dye_powder_red' }, { id: 'dye_powder_red' }, { id: 'dye_powder_white' }], new ItemStack('dye_powder_magenta', 'item', 4, 0));
+
 
   // ------------------------------------------------- Beta storage blocks
   // RecipesIngots: 3x3 of the material packs into a block, and one block
@@ -560,5 +586,54 @@ export function registerDefaultRecipes(
     { id: 'stick' }, { id: BlockIds.Wool, metadata: -1 }, { id: 'stick' },
     { id: 'stick' }, { id: 'stick' }, { id: 'stick' },
   ], new ItemStack('painting', 'item', 1, 0), false);
+
+  // ---- Beta functional block recipes ----
+  // Piston: planks top, cobblestone+iron+cobblestone, cobblestone+redstone+cobblestone.
+  tryRegisterShaped('piston', 3, 3, [
+    { id: BlockIds.Planks }, { id: BlockIds.Planks }, { id: BlockIds.Planks },
+    { id: BlockIds.Cobblestone }, { id: 'iron_ingot' }, { id: BlockIds.Cobblestone },
+    { id: BlockIds.Cobblestone }, { id: 'redstone_dust' }, { id: BlockIds.Cobblestone },
+  ], new ItemStack(BlockIds.PistonBase, 'block', 1, 0), false);
+
+  // Sticky piston: slimeball over piston.
+  tryRegisterShaped('sticky_piston', 1, 2, [
+    { id: 'slimeball' },
+    { id: BlockIds.PistonBase },
+  ], new ItemStack(BlockIds.PistonStickyBase, 'block', 1, 0), false);
+
+  // Dispenser: cobblestone shell with bow and redstone.
+  tryRegisterShaped('dispenser', 3, 3, [
+    { id: BlockIds.Cobblestone }, { id: BlockIds.Cobblestone }, { id: BlockIds.Cobblestone },
+    { id: BlockIds.Cobblestone }, { id: 'bow' }, { id: BlockIds.Cobblestone },
+    { id: BlockIds.Cobblestone }, { id: 'redstone_dust' }, { id: BlockIds.Cobblestone },
+  ], new ItemStack(BlockIds.Dispenser, 'block', 1, 0), false);
+
+  // Note block: planks shell with redstone centre.
+  tryRegisterShaped('noteblock', 3, 3, [
+    { id: BlockIds.Planks }, { id: BlockIds.Planks }, { id: BlockIds.Planks },
+    { id: BlockIds.Planks }, { id: 'redstone_dust' }, { id: BlockIds.Planks },
+    { id: BlockIds.Planks }, { id: BlockIds.Planks }, { id: BlockIds.Planks },
+  ], new ItemStack(BlockIds.NoteBlock, 'block', 1, 0), false);
+
+  // Repeater: redstone torch + redstone + redstone Torch over three stone.
+  tryRegisterShaped('repeater', 3, 2, [
+    { id: 'redstone_torch' }, { id: 'redstone_dust' }, { id: 'redstone_torch' },
+    { id: BlockIds.Stone }, { id: BlockIds.Stone }, { id: BlockIds.Stone },
+  ], new ItemStack('redstone_repeater', 'item', 1, 0), false);
+
+  // Jukebox: planks shell with diamond centre.
+  tryRegisterShaped('jukebox', 3, 3, [
+    { id: BlockIds.Planks }, { id: BlockIds.Planks }, { id: BlockIds.Planks },
+    { id: BlockIds.Planks }, { id: 'diamond' }, { id: BlockIds.Planks },
+    { id: BlockIds.Planks }, { id: BlockIds.Planks }, { id: BlockIds.Planks },
+  ], new ItemStack(BlockIds.Jukebox, 'block', 1, 0), false);
+
+  // Cake: three milk, sugar+egg+sugar, three wheat. (Container returns handled
+  // by the recipe system's getContainerReturn for bucket_milk.)
+  tryRegisterShaped('cake', 3, 3, [
+    { id: 'bucket_milk' }, { id: 'bucket_milk' }, { id: 'bucket_milk' },
+    { id: 'sugar' }, { id: 'egg' }, { id: 'sugar' },
+    { id: 'wheat' }, { id: 'wheat' }, { id: 'wheat' },
+  ], new ItemStack('cake', 'item', 1, 0), false);
 
 }

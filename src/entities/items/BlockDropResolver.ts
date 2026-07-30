@@ -100,6 +100,15 @@ export function resolveBlockDrops(blockId:number,blockMetadata=0,canHarvest=true
     case BlockIds.WallSign:
       return [{ type: 'item', id: 'sign', count: 1, metadata: 0 }];
 
+    case BlockIds.RedstoneRepeaterIdle:
+    case BlockIds.RedstoneRepeaterActive:
+      // Beta: the repeater block drops the repeater item, not the block itself.
+      return [{ type: 'item', id: 'repeater', count: 1, metadata: 0 }];
+
+    case BlockIds.Cake:
+      // Beta: cake drops nothing; it is eaten instead.
+      return [];
+
     // Non-full blocks / Crops / Special drops
     case BlockIds.Crops:
       return [{ type: 'item', id: 'wheat', count: 1, metadata: 0 }];

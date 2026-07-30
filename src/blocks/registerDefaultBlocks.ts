@@ -681,6 +681,16 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
   registerSimple(BlockIds.Lever, 'lever', 'Lever', { all: 'lever' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.StonePressurePlate, 'stone_pressure_plate', 'Stone Pressure Plate', { all: 'stone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.WoodPressurePlate, 'wood_pressure_plate', 'Wood Pressure Plate', { all: 'planks_oak' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
+
+  // ---- Beta 1.7.3 functional blocks (placeable; redstone behaviour deferred) ----
+  registerSimple(BlockIds.PistonBase, 'piston', 'Piston', { top: 'piston_top_normal', bottom: 'piston_bottom', side: 'piston_side' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.PistonStickyBase, 'sticky_piston', 'Sticky Piston', { top: 'piston_top_sticky', bottom: 'piston_bottom', side: 'piston_side' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.Dispenser, 'dispenser', 'Dispenser', { top: 'furnace_top', bottom: 'furnace_top', side: 'furnace_top', front: 'dispenser_front_vertical' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.NoteBlock, 'noteblock', 'Note Block', { all: 'noteblock' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.RedstoneRepeaterIdle, 'repeater_off', 'Repeater', { top: 'repeater_off', bottom: 'stone', side: 'stone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
+  registerSimple(BlockIds.RedstoneRepeaterActive, 'repeater_on', 'Repeater', { top: 'repeater_on', bottom: 'stone', side: 'stone' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
+  registerSimple(BlockIds.Jukebox, 'jukebox', 'Jukebox', { top: 'jukebox_top', bottom: 'jukebox_side', side: 'jukebox_side' }, { solid: true, transparent: false, replaceable: false, renderType: 'opaque', blocksWeather: true });
+  registerSimple(BlockIds.Cake, 'cake', 'Cake', { top: 'cake_top', bottom: 'cake_bottom', side: 'cake_side' }, { solid: false, transparent: true, replaceable: false, renderType: 'cutout' });
   registerSimple(BlockIds.WoodDoor, 'wood_door', 'Wood Door', { all: 'door_wood_lower' }, { solid: true, transparent: true, replaceable: false, renderType: 'cutout' });
   // Project wood-door extensions. Identical shape/behaviour to the oak door;
   // only the texture differs, so they reuse DoorBehaviour and doorShape.
@@ -852,6 +862,13 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Lever]: 0.5,
     [BlockIds.StonePressurePlate]: 0.5,
     [BlockIds.WoodPressurePlate]: 0.5,
+    [BlockIds.PistonBase]: 0.5,
+    [BlockIds.PistonStickyBase]: 0.5,
+    [BlockIds.Dispenser]: 3.5,
+    [BlockIds.NoteBlock]: 0.8,
+    [BlockIds.Jukebox]: 2.0,
+    [BlockIds.Cake]: 0.5,
+    // Repeater is instant-break (hardness 0).
     [BlockIds.WoodDoor]: 3.0,
     [BlockIds.IronDoor]: 5.0,
     [BlockIds.Trapdoor]: 3.0,
@@ -903,9 +920,9 @@ export function registerDefaultBlocks(registry: BlockRegistry): void {
     [BlockIds.Netherrack]: false,
   };
 
-  const pickaxePreferred=new Set<number>([BlockIds.SandStone,BlockIds.LapisBlock,BlockIds.GoldBlock,BlockIds.IronBlock,BlockIds.DiamondBlock,BlockIds.BrickBlock,BlockIds.CobblestoneStairs,BlockIds.Glowstone,BlockIds.Cobblestone,BlockIds.DoubleSlab,BlockIds.Slab,BlockIds.Stone,BlockIds.MossyCobblestone,BlockIds.IronOre,BlockIds.CoalOre,BlockIds.GoldOre,BlockIds.DiamondOre,BlockIds.Ice,BlockIds.Netherrack,BlockIds.LapisOre,BlockIds.NetherQuartzOre,BlockIds.QuartzBlock,BlockIds.ChiseledQuartz,BlockIds.PillarQuartz]);
+  const pickaxePreferred=new Set<number>([BlockIds.SandStone,BlockIds.LapisBlock,BlockIds.GoldBlock,BlockIds.IronBlock,BlockIds.DiamondBlock,BlockIds.BrickBlock,BlockIds.CobblestoneStairs,BlockIds.Glowstone,BlockIds.Cobblestone,BlockIds.DoubleSlab,BlockIds.Slab,BlockIds.Stone,BlockIds.MossyCobblestone,BlockIds.IronOre,BlockIds.CoalOre,BlockIds.GoldOre,BlockIds.DiamondOre,BlockIds.Ice,BlockIds.Netherrack,BlockIds.LapisOre,BlockIds.NetherQuartzOre,BlockIds.QuartzBlock,BlockIds.ChiseledQuartz,BlockIds.PillarQuartz,BlockIds.PistonBase,BlockIds.PistonStickyBase,BlockIds.Dispenser,BlockIds.NoteBlock,BlockIds.Jukebox]);
   const axePreferred=new Set<number>([BlockIds.Planks,BlockIds.Bookshelf,BlockIds.Log,BlockIds.SpruceLog,251,BlockIds.Chest]);
   const shovelPreferred=new Set<number>([BlockIds.SoulSand,BlockIds.Grass,BlockIds.Dirt,BlockIds.Sand,BlockIds.Gravel,BlockIds.Snow,BlockIds.SnowBlock,BlockIds.Clay,BlockIds.Farmland]);
-  const pickRequirements=new Map<number,number>([[BlockIds.Stone,0],[BlockIds.Cobblestone,0],[BlockIds.MossyCobblestone,0],[BlockIds.CoalOre,0],[BlockIds.Furnace,0],[BlockIds.FurnaceBurning,0],[BlockIds.Netherrack,0],[BlockIds.Spawner,0],[BlockIds.IronDoor,0],[BlockIds.IronOre,1],[BlockIds.LapisOre,1],[BlockIds.GoldOre,2],[BlockIds.RedstoneOre,2],[BlockIds.DiamondOre,2],[BlockIds.LapisBlock,1],[BlockIds.IronBlock,1],[BlockIds.GoldBlock,2],[BlockIds.DiamondBlock,2],[BlockIds.SandStone,0],[BlockIds.BrickBlock,0],[BlockIds.CobblestoneStairs,0],[BlockIds.Obsidian,3],[BlockIds.NetherQuartzOre,0],[BlockIds.QuartzBlock,0],[BlockIds.ChiseledQuartz,0],[BlockIds.PillarQuartz,0]]);
+  const pickRequirements=new Map<number,number>([[BlockIds.Stone,0],[BlockIds.Cobblestone,0],[BlockIds.MossyCobblestone,0],[BlockIds.CoalOre,0],[BlockIds.Furnace,0],[BlockIds.FurnaceBurning,0],[BlockIds.Netherrack,0],[BlockIds.Spawner,0],[BlockIds.IronDoor,0],[BlockIds.IronOre,1],[BlockIds.LapisOre,1],[BlockIds.GoldOre,2],[BlockIds.RedstoneOre,2],[BlockIds.DiamondOre,2],[BlockIds.LapisBlock,1],[BlockIds.IronBlock,1],[BlockIds.GoldBlock,2],[BlockIds.DiamondBlock,2],[BlockIds.SandStone,0],[BlockIds.BrickBlock,0],[BlockIds.CobblestoneStairs,0],[BlockIds.Obsidian,3],[BlockIds.NetherQuartzOre,0],[BlockIds.QuartzBlock,0],[BlockIds.ChiseledQuartz,0],[BlockIds.PillarQuartz,0],[BlockIds.PistonBase,0],[BlockIds.PistonStickyBase,0],[BlockIds.Dispenser,0],[BlockIds.NoteBlock,0],[BlockIds.Jukebox,0]]);
   for(const def of registry.values()){const hardness=hardnessMap[def.id]??1,preferredToolClass=pickaxePreferred.has(def.id)?'pickaxe':axePreferred.has(def.id)?'axe':shovelPreferred.has(def.id)?'shovel':undefined,pickLevel=pickRequirements.get(def.id),snowTool=def.id===BlockIds.Snow||def.id===BlockIds.SnowBlock;registry.updateDefinition(def.id,{hardness,harvestableByHand:handHarvestableMap[def.id]??true,instantBreak:hardness===0,unbreakable:hardness<0,...(preferredToolClass?{preferredToolClass}:{}),...(pickLevel!==undefined?{requiresCorrectToolForDrops:true,minimumHarvestLevel:pickLevel,harvestToolClass:'pickaxe' as const}:snowTool?{requiresCorrectToolForDrops:true,minimumHarvestLevel:0,harvestToolClass:'shovel' as const}:{})});}
 }
