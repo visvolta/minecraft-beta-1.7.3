@@ -27,17 +27,17 @@ export class PersistenceErrorScreen extends Screen {
 
     const titleEl = document.createElement('div');
     titleEl.textContent = title;
-    titleEl.style.cssText = 'position:absolute;left:0;right:0;top:26px;text-align:center;font:18px Minecraft, monospace;color:white';
+    titleEl.style.cssText = 'position:absolute;left:0;right:0;top:26px;text-align:center;font:18px Minecraft;color:white';
 
     const summaryEl = document.createElement('div');
     summaryEl.textContent = summary;
-    summaryEl.style.cssText = 'position:absolute;left:8%;right:8%;top:56px;text-align:center;font:12px Minecraft, monospace;color:#ffd0d0';
+    summaryEl.style.cssText = 'position:absolute;left:8%;right:8%;top:56px;text-align:center;font:12px Minecraft;color:#ffd0d0';
 
     const box = document.createElement('textarea');
     box.value = diagnosticBlock;
     box.readOnly = true;
     box.spellcheck = false;
-    box.style.cssText = 'position:absolute;left:8%;right:8%;top:96px;height:170px;background:#000;color:#ff9090;font:12px Minecraft, monospace;border:1px solid #555;padding:6px;resize:none';
+    box.style.cssText = 'position:absolute;left:8%;right:8%;top:96px;height:170px;background:#000;color:#ff9090;font:12px Minecraft;border:1px solid #555;padding:6px;resize:none';
 
     this.root.append(titleEl, summaryEl, box);
 

@@ -3,12 +3,15 @@ import type { PlayerEquipment } from '../inventory/PlayerEquipment';
 import { ArmourHudRenderer } from './ArmourHudRenderer';
 import { HealthHudRenderer } from './HealthHudRenderer';
 import { HungerHudRenderer } from './HungerHudRenderer';
+import { AirHudRenderer } from './AirHudRenderer';
 import type { Player } from './Player';
 
 export class HudRenderer {
   public readonly health: HealthHudRenderer;
   public readonly armour: ArmourHudRenderer;
   public readonly hunger: HungerHudRenderer;
+  /** Beta air bubbles; only visible while the head is underwater. */
+  public readonly air: AirHudRenderer;
 
   public constructor(
     public readonly hotbar: HotbarHudRenderer,
@@ -18,6 +21,7 @@ export class HudRenderer {
     this.health = new HealthHudRenderer(player);
     this.armour = new ArmourHudRenderer(equipment);
     this.hunger = new HungerHudRenderer(player);
+    this.air = new AirHudRenderer(player);
   }
 
   public update(selected: number): void {
@@ -26,6 +30,7 @@ export class HudRenderer {
     this.health.update(layout);
     this.armour.update(layout);
     this.hunger.update(layout);
+    this.air.update(layout);
   }
 
   public render(): void {
@@ -36,6 +41,7 @@ export class HudRenderer {
     this.health.dispose();
     this.armour.dispose();
     this.hunger.dispose();
+    this.air.dispose();
     this.hotbar.dispose();
   }
 }

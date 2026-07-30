@@ -116,7 +116,44 @@ export class Input {
   /** Snapshot of pendingKeyPresses for this frame's consumers. */
   private readonly frameKeyPresses = new Set<string>();
 
+  /**
+   * Opens chat. Set by the engine; Beta binds T (open) and / (open prefilled
+   * with a slash). Chat is only offered when gameplay owns input.
+   */
+  private chatOpener: ((prefill?: string) => void) | undefined;
+
+  public setChatOpener(opener: (prefill?: string) => void): void {
+    this.chatOpener = opener;
+  }
+
   private readonly onKeyDown = (event: KeyboardEvent): void => {
+    // Chat keys are handled before gameplay actions and only while gameplay
+    // owns input, so typing never leaks movement and menus keep their keys.
+    if (!event.repeat && this.inputMode === 'gameplay' && this.chatOpener !== undefined) {
+      // preventDefault() stops the browser delivering this same keystroke to
+      // the chat input we are about to focus, which would otherwise type a
+      // stray "t" (or a second "/") as the first character.
+      if (event.code === 'KeyT') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.chatOpener('');
+        return;
+      }
+      if (event.code === 'Slash') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.chatOpener('/');
+        return;
+      }
+    }
+
+    // While chat or a menu owns input, gameplay must not observe keys at all
+    // and must not preventDefault() — doing so swallows the characters the
+    // focused text field needs.
+    if (this.inputMode !== 'gameplay') {
+      return;
+    }
+
     if (!event.repeat) {
       this.pendingKeyPresses.add(event.code);
     }
@@ -352,11 +389,20 @@ export class Input {
     this.inputMode = 'chat';
     this.keysDown.clear();
     this.clearMouseDeltas();
+    // Pointer lock must be released while typing: it keeps the canvas as the
+    // key target and forces preventDefault() on every keystroke.
+    if (typeof document !== 'undefined' && document.pointerLockElement !== null) {
+      document.exitPointerLock?.();
+    }
   }
 
   public unfocusChat(): void {
     this.chatFocused = false;
     this.inputMode = 'gameplay';
+    // Drop the keystroke that closed chat (Escape/Enter) so gameplay does not
+    // also act on it this frame — otherwise Escape would close chat AND open
+    // the pause menu.
+    this.clearTransientState();
   }
 
   public isChatFocused(): boolean {

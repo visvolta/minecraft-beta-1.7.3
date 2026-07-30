@@ -3,6 +3,7 @@ import type { GameSettings } from '../../settings/GameSettings';
 import { guiScaleLabel, nextGuiScale } from '../GuiScale';
 import { nextRenderDistance, renderDistanceLabel } from '../../settings/RenderDistance';
 import { nextPanoramaBlur, normalizePanoramaBlur, panoramaBlurLabel } from './PanoramaBlur';
+import { PANORAMA_REGISTRY } from './PanoramaRegistry';
 
 export class VideoSettingsScreen extends Screen {
   private settings: GameSettings;
@@ -12,10 +13,11 @@ export class VideoSettingsScreen extends Screen {
   private readonly scaleButton: GuiButton;
   private readonly renderDistanceButton: GuiButton;
   private readonly panoramaBlurButton: GuiButton;
+  private readonly panoramaButton: GuiButton;
   private readonly back: GuiButton;
   public constructor(settings: GameSettings, private readonly setSettings: (settings: GameSettings) => void, done: () => void) {
     super(); applyDirtBackground(this.root); this.settings = settings;
-    const title=document.createElement('div'); title.textContent='Video Settings'; title.style.cssText='position:absolute;left:0;right:0;top:20px;text-align:center;font:18px Minecraft, monospace;color:white';
+    const title=document.createElement('div'); title.textContent='Video Settings'; title.style.cssText='position:absolute;left:0;right:0;top:20px;text-align:center;font:18px Minecraft;color:white';
     this.viewBob=new GuiButton('',()=>this.update({...this.settings,video:{...this.settings.video,viewBobbing:!this.settings.video.viewBobbing}}),150,20);
     this.guiScaleButton=new GuiButton('',()=>this.update({...this.settings,video:{...this.settings.video,guiScale:nextGuiScale(this.settings.video.guiScale)}}),150,20);
     this.aaButton=new GuiButton('',()=>this.update({...this.settings,video:{...this.settings.video,aaMode:nextAa(this.settings.video.aaMode)}}),150,20);
@@ -25,8 +27,16 @@ export class VideoSettingsScreen extends Screen {
       const current=normalizePanoramaBlur(this.settings.panorama?.blur);
       this.update({...this.settings,panorama:{id:this.settings.panorama?.id??'default',blur:nextPanoramaBlur(current)}});
     },150,20);
+    // Lightweight cycler, not a gallery: matches Beta's option-button style.
+    this.panoramaButton=new GuiButton('',()=>{
+      const ids=PANORAMA_REGISTRY.listIds();
+      if(ids.length<=1)return;
+      const current=this.settings.panorama?.id??'default';
+      const next=ids[(Math.max(0,ids.indexOf(current))+1)%ids.length]??'default';
+      this.update({...this.settings,panorama:{id:next,blur:normalizePanoramaBlur(this.settings.panorama?.blur)}});
+    },150,20);
     this.back=new GuiButton('Done',done,200,20);
-    this.root.append(title,this.viewBob.element,this.guiScaleButton.element,this.aaButton.element,this.scaleButton.element,this.renderDistanceButton.element,this.panoramaBlurButton.element,this.back.element); this.refreshLabels(); this.layout();
+    this.root.append(title,this.viewBob.element,this.guiScaleButton.element,this.aaButton.element,this.scaleButton.element,this.renderDistanceButton.element,this.panoramaBlurButton.element,this.panoramaButton.element,this.back.element); this.refreshLabels(); this.layout();
   }
   protected override onResize(): void { this.layout(); }
   private update(settings: GameSettings): void { this.settings = settings; this.setSettings(settings); this.refreshLabels(); }
@@ -37,12 +47,17 @@ export class VideoSettingsScreen extends Screen {
     this.scaleButton.element.textContent=`Render Scale: ${this.settings.video.renderScale.toFixed(2)}`;
     this.renderDistanceButton.element.textContent=`Render Distance: ${renderDistanceLabel(this.settings.video.renderDistance)}`;
     this.panoramaBlurButton.element.textContent=`Menu Blur: ${panoramaBlurLabel(normalizePanoramaBlur(this.settings.panorama?.blur))}`;
+    const panoramaId=this.settings.panorama?.id??'default';
+    this.panoramaButton.element.textContent=`Panorama: ${panoramaId.charAt(0).toUpperCase()+panoramaId.slice(1)}`;
+    // Only one panorama is registered by default; don't offer a dead cycle.
+    this.panoramaButton.setDisabled(PANORAMA_REGISTRY.listIds().length<=1);
   }
   private layout(): void {
     const w=guiWidth(),h=guiHeight();
     this.viewBob.setPosition(w/2-155,70); this.guiScaleButton.setPosition(w/2+5,70);
     this.aaButton.setPosition(w/2-155,96); this.scaleButton.setPosition(w/2+5,96);
     this.renderDistanceButton.setPosition(w/2-155,122); this.panoramaBlurButton.setPosition(w/2+5,122);
+    this.panoramaButton.setPosition(w/2-155,148);
     this.back.setPosition(w/2-100,h-40);
   }
 }

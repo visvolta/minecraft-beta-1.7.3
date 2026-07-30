@@ -15,11 +15,11 @@ export class PanoramaPickerScreen extends Screen {
 
     const title = document.createElement('div');
     title.textContent = 'Panorama';
-    title.style.cssText = 'position:absolute;left:0;right:0;top:20px;text-align:center;font:18px Minecraft, monospace;color:white';
+    title.style.cssText = 'position:absolute;left:0;right:0;top:20px;text-align:center;font:18px Minecraft;color:white';
 
     this.label = document.createElement('div');
     this.label.textContent = 'Panorama: Default';
-    this.label.style.cssText = 'position:absolute;left:0;right:0;top:80px;text-align:center;font:16px Minecraft, monospace;color:white';
+    this.label.style.cssText = 'position:absolute;left:0;right:0;top:80px;text-align:center;font:16px Minecraft;color:white';
 
     const cycleBtn = new GuiButton('Next Panorama', () => this.cycle(), 200, 20);
     const doneBtn = new GuiButton('Done', () => this.onDone(this.currentId), 200, 20);

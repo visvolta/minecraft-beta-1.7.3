@@ -14,14 +14,14 @@ export class WorldSelectScreen extends Screen {
   private readonly back: GuiButton;
   public constructor(worlds: readonly WorldSummary[], actions: WorldSelectActions) {
     super(); applyDirtBackground(this.root);
-    const title=document.createElement('div'); title.textContent='Select World'; title.style.cssText='position:absolute;left:0;right:0;top:18px;text-align:center;font:18px Minecraft, monospace;color:white';
+    const title=document.createElement('div'); title.textContent='Select World'; title.style.cssText='position:absolute;left:0;right:0;top:18px;text-align:center;font:18px Minecraft;color:white';
     this.list.style.cssText='position:absolute;overflow:auto;color:white';
     this.play=new GuiButton('Play Selected World',()=>{if(this.selected)actions.play(this.selected);},150,20); this.create=new GuiButton('Create New World',actions.create,150,20); this.rename=new GuiButton('Rename',()=>{if(this.selected)actions.rename(this.selected);},70,20); this.del=new GuiButton('Delete',()=>{if(this.selected)actions.delete(this.selected);},70,20); this.back=new GuiButton('Cancel',actions.back,150,20);
     const updateButtons=()=>{const disabled=this.selected===undefined;this.play.setDisabled(disabled);this.rename.setDisabled(disabled);this.del.setDisabled(disabled);};
-    if(worlds.length===0){const empty=document.createElement('div');empty.textContent='No worlds found';empty.style.cssText='text-align:center;color:#aaa;margin-top:60px;font:14px Minecraft, monospace';this.list.append(empty);} else for(const world of worlds){const row=document.createElement('div');
+    if(worlds.length===0){const empty=document.createElement('div');empty.textContent='No worlds found';empty.style.cssText='text-align:center;color:#aaa;margin-top:60px;font:14px Minecraft';this.list.append(empty);} else for(const world of worlds){const row=document.createElement('div');
       // Beta-sized rows: 8px text on three tight lines. Long names and seeds
       // are ellipsised rather than allowed to wrap and break the layout.
-      row.style.cssText='height:34px;margin:2px 0;padding:2px 4px;box-sizing:border-box;background:#000;color:white;border:1px solid transparent;font:8px Minecraft, monospace;line-height:10px;cursor:pointer;overflow:hidden';
+      row.style.cssText='height:34px;margin:2px 0;padding:2px 4px;box-sizing:border-box;background:#000;color:white;border:1px solid transparent;font:8px Minecraft;line-height:10px;cursor:pointer;overflow:hidden';
       const clip='overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
       // Seed comes from the already-loaded world summary, so showing it costs
       // no chunk loads.

@@ -15,7 +15,7 @@ export class ControlsScreen extends Screen {
   private render(): void {
     const done = this.doneCallback!;
     this.root.replaceChildren();
-    const title=document.createElement('div'); title.textContent=this.capture===null?'Controls':'Press a key...'; title.style.cssText='position:absolute;left:0;right:0;top:16px;text-align:center;font:18px Minecraft, monospace;color:white'; this.root.append(title);
+    const title=document.createElement('div'); title.textContent=this.capture===null?'Controls':'Press a key...'; title.style.cssText='position:absolute;left:0;right:0;top:16px;text-align:center;font:18px Minecraft;color:white'; this.root.append(title);
     const w=guiWidth(), h=guiHeight(), x1=w/2-155, x2=w/2+5;
     for(let i=0;i<ACTIONS.length;i++){const action=ACTIONS[i]!;const x=i%2===0?x1:x2,y=48+Math.floor(i/2)*24;const key=this.settings.controls.bindings[action][0]??'Unbound';const conflict=this.hasConflict(action,key);const b=new GuiButton(`${LABELS[action]}: ${key}${conflict?' *':''}`,()=>{this.capture=action;this.render();},150,20);b.setPosition(x,y);this.root.append(b.element);} 
     const reset=new GuiButton('Reset Keys',()=>{this.settings={...this.settings,controls:{bindings:DEFAULT_KEY_BINDINGS}};this.setSettings(this.settings);this.render();},150,20); reset.setPosition(w/2-155,h-40);

@@ -18,7 +18,7 @@ export class OptionsScreen extends Screen {
 
   public constructor(settings: GameSettings, private readonly actions: { readonly done: () => void; readonly video: () => void; readonly controls: () => void; readonly setSettings: (settings: GameSettings) => void }) {
     super(); applyDirtBackground(this.root); this.settings = settings;
-    const title=document.createElement('div'); title.textContent='Options'; title.style.cssText='position:absolute;left:0;right:0;top:20px;text-align:center;font:18px Minecraft, monospace;color:white';
+    const title=document.createElement('div'); title.textContent='Options'; title.style.cssText='position:absolute;left:0;right:0;top:20px;text-align:center;font:18px Minecraft;color:white';
     this.master=new GuiButton('',()=>this.update({...this.settings,audio:{...this.settings.audio,master:nextVolume(this.settings.audio.master)}}),150,20);
     this.music=new GuiButton('',()=>this.update({...this.settings,audio:{...this.settings.audio,music:nextVolume(this.settings.audio.music)}}),150,20);
     this.sound=new GuiButton('',()=>this.update({...this.settings,audio:{...this.settings.audio,sound:nextVolume(this.settings.audio.sound)}}),150,20);

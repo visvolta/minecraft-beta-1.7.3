@@ -30,8 +30,10 @@ export function computeGuiScale(setting: GuiScaleSetting = currentGuiScaleSettin
   if (typeof window === 'undefined') return setting === 0 ? 3 : setting;
   const normalized = normalizeGuiScale(setting);
   if (normalized !== 0) return normalized;
+  // Beta caps auto GUI scale at 3 (`GameSettings.guiScale` 0 = Auto resolves to
+  // at most "Large"). Allowing 4 made menus noticeably larger than Beta on 4K.
   let scale = 1;
-  while (scale < 4 && window.innerWidth / (scale + 1) >= 320 && window.innerHeight / (scale + 1) >= 240) scale++;
+  while (scale < 3 && window.innerWidth / (scale + 1) >= 320 && window.innerHeight / (scale + 1) >= 240) scale++;
   return scale;
 }
 

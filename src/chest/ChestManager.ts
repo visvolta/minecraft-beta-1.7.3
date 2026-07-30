@@ -2,6 +2,7 @@ import { ChestContainer, type SerializedChest } from './ChestContainer';
 import { InventorySerializer } from '../inventory/InventorySerializer';
 import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
 import { BlockIds } from '../blocks/BlockId';
+import { DIMENSION_OVERWORLD, type DimensionId } from '../world/dimension/DimensionId';
 
 import { Chunk } from '../world/Chunk';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../world/chunkConstants';
@@ -19,13 +20,29 @@ export interface DoubleChestPair {
 export class ChestManager {
   private readonly containers = new Map<string, ChestContainer>();
 
+  /**
+   * Dimension these containers belong to. Keys are namespaced by it, so a
+   * chest at the same coordinates in the Overworld and the Nether are
+   * distinct records rather than one overwriting the other.
+   */
+  private dimension = DIMENSION_OVERWORLD;
+
   public constructor(
     private readonly blockUpdateWorld: BlockUpdateWorld,
     private readonly itemEntityManager: ItemEntityManager
   ) {}
 
+  /** Rebinds the manager to a dimension. Callers must re-hydrate afterwards. */
+  public setDimension(dimension: DimensionId): void {
+    this.dimension = dimension;
+  }
+
+  public getDimension(): DimensionId {
+    return this.dimension;
+  }
+
   public getOrCreate(x: number, y: number, z: number, facing = 3): ChestContainer {
-    const key = `${x},${y},${z}`;
+    const key = `${this.dimension}:${x},${y},${z}`;
     let c = this.containers.get(key);
     if (!c) {
       c = new ChestContainer(x, y, z, facing);
@@ -43,7 +60,7 @@ export class ChestManager {
           const blockId = chunk.getBlock(x, y, z);
           const worldX = chunkX * CHUNK_SIZE_X + x;
           const worldZ = chunkZ * CHUNK_SIZE_Z + z;
-          const key = `${worldX},${y},${worldZ}`;
+          const key = `${this.dimension}:${worldX},${y},${worldZ}`;
 
           if (blockId === BlockIds.Chest) {
             if (!this.containers.has(key)) {
@@ -196,7 +213,7 @@ export class ChestManager {
   }
 
   public breakChest(x: number, y: number, z: number): void {
-    const key = `${x},${y},${z}`;
+    const key = `${this.dimension}:${x},${y},${z}`;
     const container = this.containers.get(key);
     if (!container) return;
 
@@ -225,6 +242,7 @@ export class ChestManager {
         x: c.x,
         y: c.y,
         z: c.z,
+        dimension: this.dimension,
         facing: c.facing,
         inventory: s.inventory,
       });
@@ -232,14 +250,33 @@ export class ChestManager {
     return list;
   }
 
+  /**
+   * Rebuilds this dimension's containers from a saved list.
+   *
+   * Records carrying no `dimension` predate container dimension isolation and
+   * are treated as Overworld, which is where every pre-migration world's
+   * containers actually lived. Records belonging to other dimensions are
+   * ignored here — each dimension hydrates its own manager.
+   */
   public deserialize(data?: SerializedChest[]): void {
     this.containers.clear();
     if (!data) return;
 
     for (const d of data) {
+      const recordDimension = Number.isInteger(d.dimension) ? (d.dimension as number) : DIMENSION_OVERWORLD;
+      if (recordDimension !== this.dimension) continue;
       const c = new ChestContainer(d.x, d.y, d.z, d.facing ?? 3);
       InventorySerializer.deserialize(c.inventory, d.inventory);
-      this.containers.set(c.getPosKey(), c);
+      this.containers.set(`${this.dimension}:${c.x},${c.y},${c.z}`, c);
     }
+  }
+
+  /**
+   * Every container this manager owns, tagged with its dimension. Used by the
+   * engine to merge this dimension's records into the world-wide saved list
+   * without discarding other dimensions' containers.
+   */
+  public serializeForDimension(): { readonly dimension: DimensionId; readonly records: SerializedChest[] } {
+    return { dimension: this.dimension, records: this.serialize() };
   }
 }

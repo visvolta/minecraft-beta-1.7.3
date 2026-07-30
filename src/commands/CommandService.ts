@@ -8,13 +8,17 @@ import { CommandRegistry } from './CommandRegistry';
 import { parseCommand } from './CommandParser';
 import { registerDefaultCommands } from './commands/DefaultCommands';
 import { CheatsState } from './CheatsState';
+import type { CommandWorldBinding } from './CommandWorldBinding';
 
 export class CommandService {
   private readonly registry = new CommandRegistry();
   public readonly cheats = new CheatsState();
 
-  public constructor(private readonly chatDisplay?: ChatDisplay) {
-    registerDefaultCommands(this.registry, this.cheats);
+  public constructor(
+    private readonly chatDisplay?: ChatDisplay,
+    binding?: CommandWorldBinding,
+  ) {
+    registerDefaultCommands(this.registry, this.cheats, binding);
   }
 
   public handleMessage(text: string): void {

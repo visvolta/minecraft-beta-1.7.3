@@ -61,7 +61,7 @@ export class SignTextRenderer {
     ctx.fillRect(0, 0, 256, 128);
 
     ctx.fillStyle = '#000000';
-    ctx.font = 'bold 20px Minecraft, monospace';
+    ctx.font = 'bold 20px Minecraft';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
 

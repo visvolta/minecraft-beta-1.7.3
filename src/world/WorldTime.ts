@@ -168,6 +168,14 @@ export class WorldTime {
     return 'night';
   }
 
+  /**
+   * Sets the time of day within the current day, preserving the day number.
+   * Used by `/time set <value>` — Beta's `/time set` keeps the day count.
+   */
+  public setTimeOfDayTicks(targetTicks: number): void {
+    this.setTimeOfDay(((targetTicks % TICKS_PER_DAY) + TICKS_PER_DAY) % TICKS_PER_DAY);
+  }
+
   private setTimeOfDay(targetTicks: number): void {
     const day = this.getDayNumber();
     this.ticks = day * TICKS_PER_DAY + targetTicks;

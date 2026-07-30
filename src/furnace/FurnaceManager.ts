@@ -5,11 +5,17 @@ import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import { BlockIds } from '../blocks/BlockId';
 import { ItemStack } from '../inventory/ItemStack';
 import type { SerializedItemStack } from '../world/WorldMetadata';
+import { DIMENSION_OVERWORLD, type DimensionId } from '../world/dimension/DimensionId';
 
 export interface SerializedFurnace {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+  /**
+   * Dimension the furnace belongs to. Absent in pre-isolation saves, which
+   * load as the Overworld. Burn/smelt progress is preserved alongside it.
+   */
+  readonly dimension?: number;
   readonly facing?: number;
   readonly remainingBurnTime: number;
   readonly totalBurnTime: number;
@@ -25,8 +31,20 @@ export interface SerializedFurnace {
 export class FurnaceManager {
   private readonly containers = new Map<string, FurnaceContainer>();
 
+  /** Dimension owning these furnaces; namespaces every key. */
+  private dimension: DimensionId = DIMENSION_OVERWORLD;
+
+  /** Rebinds to a dimension. Callers must re-hydrate afterwards. */
+  public setDimension(dimension: DimensionId): void {
+    this.dimension = dimension;
+  }
+
+  public getDimension(): DimensionId {
+    return this.dimension;
+  }
+
   private key(x: number, y: number, z: number): string {
-    return `${x},${y},${z}`;
+    return `${this.dimension}:${x},${y},${z}`;
   }
 
   public getOrCreate(x: number, y: number, z: number, facing = 3): FurnaceContainer {
@@ -94,6 +112,7 @@ export class FurnaceManager {
       x: c.x,
       y: c.y,
       z: c.z,
+      dimension: this.dimension,
       facing: c.facing,
       remainingBurnTime: c.remainingBurnTime,
       totalBurnTime: c.totalBurnTime,
@@ -130,6 +149,9 @@ export class FurnaceManager {
     if (!data || !Array.isArray(data)) return;
 
     for (const d of data) {
+      // Pre-isolation records carry no dimension and belong to the Overworld.
+      const recordDimension = Number.isInteger(d.dimension) ? (d.dimension as number) : DIMENSION_OVERWORLD;
+      if (recordDimension !== this.dimension) continue;
       if (
         typeof d.x !== 'number' ||
         typeof d.y !== 'number' ||

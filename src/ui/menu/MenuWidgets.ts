@@ -15,7 +15,7 @@ export abstract class Screen {
   private mounted = false;
   private readonly resizeHandler = (): void => this.resize();
   protected constructor() {
-    this.root.style.cssText = 'position:fixed;left:0;top:0;z-index:2000;image-rendering:pixelated;font-family:Minecraft, monospace;color:white;user-select:none;transform-origin:top left;overflow:hidden';
+    this.root.style.cssText = 'position:fixed;left:0;top:0;z-index:2000;image-rendering:pixelated;font-family:Minecraft;color:white;user-select:none;transform-origin:top left;overflow:hidden';
     this.resize();
   }
   public mount(parent = document.body): void { this.mounted = true; parent.append(this.root); window.addEventListener('resize', this.resizeHandler); this.resize(); }
@@ -37,7 +37,7 @@ export class GuiButton {
   public constructor(label: string, onClick: () => void, width: number = BUTTON_PRIMARY.width, height: number = BUTTON_PRIMARY.height) {
     this.width = width;
     this.element.textContent = label;
-    this.element.style.cssText = `position:absolute;width:${width}px;height:${height}px;border:0;padding:0 4px;box-sizing:border-box;background:url('${GUI}button_normal.png') 0 0 / 100% 100%;color:white;font:${FONT_SIZE_PX}px Minecraft, monospace;line-height:1;display:flex;align-items:center;justify-content:center;text-align:center;white-space:nowrap;overflow:hidden;text-shadow:1px 1px #3f3f3f;image-rendering:pixelated;cursor:pointer`;
+    this.element.style.cssText = `position:absolute;width:${width}px;height:${height}px;border:0;padding:0 4px;box-sizing:border-box;background:url('${GUI}button_normal.png') 0 0 / 100% 100%;color:white;font:${FONT_SIZE_PX}px Minecraft;line-height:1;display:flex;align-items:center;justify-content:center;text-align:center;white-space:nowrap;overflow:hidden;text-shadow:1px 1px #3f3f3f;image-rendering:pixelated;cursor:pointer`;
     this.element.addEventListener('mouseenter', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_highlighted.png')`; });
     this.element.addEventListener('mouseleave', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_normal.png')`; });
     this.element.addEventListener('mousedown', () => { if (!this.element.disabled) this.element.style.backgroundImage = `url('${GUI}button_clicked.png')`; });

@@ -21,7 +21,7 @@ export class ChatDisplay {
       bottom: 12px;
       left: 12px;
       color: white;
-      font-family: 'Minecraft', monospace, sans-serif;
+      font-family: 'Minecraft';
       font-size: 14px;
       text-shadow: 1px 1px 1px rgba(0,0,0,0.8);
       pointer-events: none;
@@ -53,6 +53,22 @@ export class ChatDisplay {
   public isVisible(): boolean {
     return this.root.style.display !== 'none';
   }
+
+  /**
+   * Re-renders so messages fade out on time. Cheap: it only rebuilds when the
+   * visible set actually changes, so the idle HUD does no DOM work.
+   */
+  public update(): void {
+    const now = Date.now();
+    const visible = this.messages.filter(
+      (m) => now - m.timestamp < this.fadeMs || this.messages.length <= this.maxVisible,
+    ).length;
+    if (visible === this.lastVisibleCount) return;
+    this.lastVisibleCount = visible;
+    this.render();
+  }
+
+  private lastVisibleCount = -1;
 
   private render(): void {
     const now = Date.now();

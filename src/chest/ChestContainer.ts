@@ -4,6 +4,14 @@ export interface SerializedChest {
   x: number;
   y: number;
   z: number;
+  /**
+   * Dimension the chest belongs to. Absent in saves written before container
+   * dimension isolation existed; those records load as the Overworld (0).
+   *
+   * Without this, a chest at the same coordinates in the Overworld and the
+   * Nether shared one key and silently overwrote each other.
+   */
+  dimension?: number;
   facing: number;
   inventory?: any[]; // We will cast this
 }

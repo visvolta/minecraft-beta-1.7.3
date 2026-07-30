@@ -6,7 +6,7 @@ export class RenameWorldScreen extends Screen {
   private readonly back: GuiButton;
   public constructor(currentName: string, save: (name: string) => void, cancel: () => void) {
     super(); applyDirtBackground(this.root);
-    const title=document.createElement('div'); title.textContent='Rename World'; title.style.cssText='position:absolute;left:0;right:0;top:70px;text-align:center;font:18px Minecraft, monospace;color:white';
+    const title=document.createElement('div'); title.textContent='Rename World'; title.style.cssText='position:absolute;left:0;right:0;top:70px;text-align:center;font:18px Minecraft;color:white';
     this.box=new TextBox(currentName);
     this.done=new GuiButton('Save',()=>{const value=this.box.value.trim(); if(value.length>0) save(value);},120,20);
     this.back=new GuiButton('Cancel',cancel,120,20);

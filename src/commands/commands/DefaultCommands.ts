@@ -4,9 +4,10 @@
 
 import type { CommandRegistry } from '../CommandRegistry';
 import { validateNumeric } from '../CommandParser';
-import { DEFAULT_SPAWN_EGG_DESCRIPTORS } from '../../entities/SpawnEggDescriptor';
+import { DEFAULT_SPAWN_EGG_DESCRIPTORS, spawnEggDescriptorByNumericId } from '../../entities/SpawnEggDescriptor';
 import { DEFAULT_ITEM_DEFINITIONS } from '../../items/ItemDefinitionRegistry';
 import { CheatsState } from '../CheatsState';
+import type { CommandWorldBinding } from '../CommandWorldBinding';
 
 function getEntityNames(): string[] {
   return Object.values(DEFAULT_SPAWN_EGG_DESCRIPTORS).map((d) => d.displayName);
@@ -20,12 +21,50 @@ function getItemNames(): string[] {
     .sort();
 }
 
-export function registerDefaultCommands(registry: CommandRegistry, cheats?: CheatsState): void {
+/**
+ * Registers the built-in commands.
+ *
+ * `binding` is the live world/player surface. When it is absent (headless or
+ * validation contexts) commands parse and validate exactly as normal but
+ * report that no world is loaded instead of pretending to succeed.
+ */
+export function registerDefaultCommands(
+  registry: CommandRegistry,
+  cheats?: CheatsState,
+  binding?: CommandWorldBinding,
+): void {
   const checkCheats = (message?: string) => {
     if (!cheats || !cheats.isEnabled()) {
       return { success: false, message: message || 'Cheats are not enabled for this world.' };
     }
     return null;
+  };
+
+  /** Guard used by every command that must mutate the world. */
+  const requireWorld = (): CommandWorldBinding | { success: false; message: string } =>
+    binding ?? { success: false, message: 'No world is loaded.' };
+
+  const isFailure = (v: unknown): v is { success: false; message: string } =>
+    typeof v === 'object' && v !== null && 'success' in v;
+
+  /** Beta day/night presets used by `/time set day|night`. */
+  const TIME_DAY = 1000;
+  const TIME_NIGHT = 13000;
+  const TICKS_PER_DAY = 24000;
+
+  /**
+   * Parses a coordinate that may be absolute (`64`) or relative to a base
+   * (`~`, `~10`, `~-3`), matching Beta's tilde notation.
+   */
+  const resolveCoord = (arg: string, base: number): number | undefined => {
+    if (arg.startsWith('~')) {
+      const rest = arg.slice(1);
+      if (rest === '') return base;
+      const delta = Number(rest);
+      return Number.isFinite(delta) ? base + delta : undefined;
+    }
+    const value = Number(arg);
+    return Number.isFinite(value) ? value : undefined;
   };
 
   // /time
@@ -35,6 +74,10 @@ export function registerDefaultCommands(registry: CommandRegistry, cheats?: Chea
     usage: '/time set <value> | /time set day | /time set night | /time add <value>',
     description: 'Controls world time.',
     execute: (ctx: { args: string[]; raw: string }) => {
+      // Every world-mutating command is cheat-gated; /time was the last one
+      // missing the check, so it worked in worlds with cheats disabled.
+      const blocked = checkCheats('Cheats must be enabled to use /time.');
+      if (blocked) return blocked;
       if (ctx.args.length === 0) {
         return { success: false, message: 'Usage: /time set <value> | /time set day | /time set night | /time add <value>' };
       }
@@ -43,28 +86,37 @@ export function registerDefaultCommands(registry: CommandRegistry, cheats?: Chea
         if (ctx.args.length < 2) {
           return { success: false, message: 'Usage: /time set <value>' };
         }
+        const bound = requireWorld();
+        if (isFailure(bound)) return bound;
         const valueStr = ctx.args[1]!.toLowerCase();
         if (valueStr === 'day') {
-          return { success: true, message: 'Set time to 1000 (day)' };
+          bound.world.setTimeTicks(TIME_DAY);
+          return { success: true, message: `Set time to ${TIME_DAY} (day)` };
         }
         if (valueStr === 'night') {
-          return { success: true, message: 'Set time to 13000 (night)' };
+          bound.world.setTimeTicks(TIME_NIGHT);
+          return { success: true, message: `Set time to ${TIME_NIGHT} (night)` };
         }
         const value = validateNumeric(ctx.args[1]!, 'time');
-        if (value === undefined || value < 0 || value > 24000) {
+        if (value === undefined || value < 0 || value > TICKS_PER_DAY) {
           return { success: false, message: `Invalid time value: ${ctx.args[1]}` };
         }
-        return { success: true, message: `Set time to ${value}` };
+        bound.world.setTimeTicks(Math.floor(value));
+        return { success: true, message: `Set time to ${Math.floor(value)}` };
       }
       if (sub === 'add') {
         if (ctx.args.length < 2) {
           return { success: false, message: 'Usage: /time add <value>' };
         }
+        const bound = requireWorld();
+        if (isFailure(bound)) return bound;
         const value = validateNumeric(ctx.args[1]!, 'time');
         if (value === undefined) {
           return { success: false, message: `Invalid time value: ${ctx.args[1]}` };
         }
-        return { success: true, message: `Added ${value} ticks` };
+        const added = Math.floor(value);
+        bound.world.setTimeTicks(bound.world.getTimeTicks() + added);
+        return { success: true, message: `Added ${added} ticks` };
       }
       return { success: false, message: `Unknown /time subcommand: ${sub}` };
     },
@@ -94,11 +146,19 @@ export function registerDefaultCommands(registry: CommandRegistry, cheats?: Chea
       if (!match) {
         return { success: false, message: `Unknown entity: ${ctx.args[0]}` };
       }
-      let x = 0, y = 0, z = 0;
-      if (ctx.args.length > 1) x = validateNumeric(ctx.args[1]!, 'x') ?? 0;
-      if (ctx.args.length > 2) y = validateNumeric(ctx.args[2]!, 'y') ?? 0;
-      if (ctx.args.length > 3) z = validateNumeric(ctx.args[3]!, 'z') ?? 0;
-      return { success: true, message: `Summoned ${DEFAULT_SPAWN_EGG_DESCRIPTORS[match]?.displayName ?? match} at (${x}, ${y}, ${z})` };
+      const bound = requireWorld();
+      if (isFailure(bound)) return bound;
+      // Beta spawns at the player unless coordinates are supplied.
+      const at = bound.player.getPosition();
+      let x = at.x, y = at.y, z = at.z;
+      if (ctx.args.length > 1) x = resolveCoord(ctx.args[1]!, at.x) ?? at.x;
+      if (ctx.args.length > 2) y = resolveCoord(ctx.args[2]!, at.y) ?? at.y;
+      if (ctx.args.length > 3) z = resolveCoord(ctx.args[3]!, at.z) ?? at.z;
+      const name = DEFAULT_SPAWN_EGG_DESCRIPTORS[match]?.displayName ?? match;
+      if (!bound.world.summon(match, x, y, z)) {
+        return { success: false, message: `Could not summon ${name} there.` };
+      }
+      return { success: true, message: `Summoned ${name} at (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)})` };
     },
     suggest: (prevArgs, partial) => {
       if (prevArgs.length === 0) {
@@ -165,7 +225,16 @@ export function registerDefaultCommands(registry: CommandRegistry, cheats?: Chea
           count = ctx.args[2] ? (validateNumeric(ctx.args[2]!, 'count') ?? 1) : 1;
         }
       }
-      return { success: true, message: `Gave ${count} ${definition.displayName ?? definition.id}${metadata !== 0 ? ` (metadata: ${metadata})` : ''}` };
+      const bound = requireWorld();
+      if (isFailure(bound)) return bound;
+      // Spawn eggs are named from the entity descriptor, not the item table.
+      const label = definition.id === 'spawn_egg'
+        ? (spawnEggDescriptorByNumericId(metadata)?.itemName ?? 'Spawn Egg')
+        : (definition.displayName ?? definition.id);
+      const taken = bound.player.giveItem(definition.id, 'item', count, metadata);
+      if (taken <= 0) return { success: false, message: 'No room in inventory.' };
+      const partial = taken < count ? ` (${count - taken} did not fit)` : '';
+      return { success: true, message: `Gave ${taken} ${label}${partial}` };
     },
     suggest: (_prevArgs, partial) => {
       const candidates = getItemNames();
@@ -194,13 +263,18 @@ export function registerDefaultCommands(registry: CommandRegistry, cheats?: Chea
         if (isNaN(val) || !Number.isFinite(val)) return undefined;
         return val;
       };
-      const x = parseCoord(ctx.args[0]!, 0);
-      const y = parseCoord(ctx.args[1]!, 0);
-      const z = parseCoord(ctx.args[2]!, 0);
+      const bound = requireWorld();
+      if (isFailure(bound)) return bound;
+      // Relative coords are relative to the PLAYER, not the origin.
+      const at = bound.player.getPosition();
+      const x = parseCoord(ctx.args[0]!, at.x);
+      const y = parseCoord(ctx.args[1]!, at.y);
+      const z = parseCoord(ctx.args[2]!, at.z);
       if (x === undefined || y === undefined || z === undefined) {
         return { success: false, message: 'Coordinates must be finite numbers or valid relative expressions (~, ~10, ~-3).' };
       }
-      return { success: true, message: `Teleported to ${x}, ${y}, ${z}` };
+      bound.player.teleport(x, y, z);
+      return { success: true, message: `Teleported to ${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)}` };
     },
     suggest: () => [],
   });
@@ -211,6 +285,9 @@ export function registerDefaultCommands(registry: CommandRegistry, cheats?: Chea
     usage: '/weather <clear|rain|thunder> [duration]',
     description: 'Controls weather.',
     execute: (ctx: { args: string[]; raw: string }) => {
+      // Beta gates world-mutating commands behind cheats; /weather was missing it.
+      const blocked = checkCheats('Cheats must be enabled to use /weather.');
+      if (blocked) return blocked;
       if (ctx.args.length === 0) {
         return { success: false, message: 'Usage: /weather <clear|rain|thunder> [duration]' };
       }
@@ -219,13 +296,18 @@ export function registerDefaultCommands(registry: CommandRegistry, cheats?: Chea
       if (!valid.includes(type)) {
         return { success: false, message: `Unknown weather type: ${type}` };
       }
+      const bound = requireWorld();
+      if (isFailure(bound)) return bound;
+      let duration = 0;
       let durationMsg = '';
       if (ctx.args.length > 1) {
         const val = validateNumeric(ctx.args[1]!, 'duration');
-        if (val !== undefined) {
-          durationMsg = ` for ${val} ticks`;
+        if (val !== undefined && val > 0) {
+          duration = Math.floor(val);
+          durationMsg = ` for ${duration} ticks`;
         }
       }
+      bound.world.setWeather(type as 'clear' | 'rain' | 'thunder', duration);
       return { success: true, message: `Weather set to ${type}${durationMsg}` };
     },
     suggest: (_prevArgs, partial) => {

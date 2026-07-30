@@ -1,6 +1,7 @@
 import type { SerializedFurnace } from '../furnace/FurnaceManager';
 import type { SerializedChest } from '../chest/ChestContainer';
 import type { SerializedSign } from '../sign/SignManager';
+import type { SerializedDispenser } from '../dispenser/DispenserManager';
 import { Difficulty, isDifficulty } from './Difficulty';
 import { GameMode, parseGameMode } from '../player/GameMode';
 
@@ -58,6 +59,8 @@ export interface WorldMetadata {
   readonly furnaces?: SerializedFurnace[];
   readonly chests?: SerializedChest[];
   readonly signs?: SerializedSign[];
+  /** Dispenser inventories. Absent in older saves; they simply start empty. */
+  readonly dispensers?: SerializedDispenser[];
 }
 export function validateWorldMetadata(value: unknown): WorldMetadata {
   if (typeof value !== 'object' || value === null) throw new Error('World metadata must be an object');

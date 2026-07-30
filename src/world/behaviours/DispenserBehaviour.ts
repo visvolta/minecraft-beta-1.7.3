@@ -1,7 +1,8 @@
 import { BlockIds } from '../../blocks/BlockId';
 import type { BlockBehaviour, BlockBehaviourContext, BlockBehaviourRegistry } from '../BlockBehaviour';
 import type { NeighbourUpdateEvent } from '../updates/BlockMutation';
-import type { ItemStack } from '../../inventory/ItemStack';
+
+import type { DispenserManager } from '../../dispenser/DispenserManager';
 import { ArrowEntity } from '../../entities/projectiles/ArrowEntity';
 import { SnowballEntity, ThrownEggEntity } from '../../entities/projectiles/ThrownItemEntity';
 
@@ -33,15 +34,24 @@ const SLOTS = 9;
  */
 export class DispenserBehaviour implements BlockBehaviour {
   public readonly requiresNeighbourReconciliation = true;
-  /** Per-position 9-slot inventory (in-memory; persistence pending). */
-  private readonly inventories = new Map<string, (ItemStack | null)[]>();
   /** Per-position power tracking for edge-triggered dispense. */
   private readonly poweredSet = new Set<string>();
 
-  public onInteract(_ctx: BlockBehaviourContext, _x: number, _y: number, _z: number): boolean {
-    // GUI stub: consume the click so the block isn't treated as a placement
-    // surface. The full Dispenser UI (9 slots + player inventory) will be
-    // wired once DispenserManager + DispenserUi are built.
+  /**
+   * Opens the dispenser UI. Supplied by the engine; when absent (headless)
+   * the click is still consumed so the block is not treated as a placement
+   * surface.
+   */
+  private openUi: ((x: number, y: number, z: number) => void) | undefined;
+
+  public constructor(private readonly manager: DispenserManager) {}
+
+  public setUiOpener(open: (x: number, y: number, z: number) => void): void {
+    this.openUi = open;
+  }
+
+  public onInteract(_ctx: BlockBehaviourContext, x: number, y: number, z: number): boolean {
+    this.openUi?.(x, y, z);
     return true;
   }
 
@@ -63,9 +73,10 @@ export class DispenserBehaviour implements BlockBehaviour {
 
   /** Beta `dispense`: pick random occupied slot, process item. */
   private dispense(ctx: BlockBehaviourContext, x: number, y: number, z: number): void {
-    const key = `${x},${y},${z}`;
-    const inv = this.inventories.get(key) ?? Array.from({ length: SLOTS }, () => null);
-    this.inventories.set(key, inv);
+    // The manager owns the inventory so it persists with the world and is
+    // namespaced per dimension.
+    const inventory = this.manager.getOrCreate(x, y, z);
+    const inv = inventory.getSlots();
 
     // Beta: pick a random occupied slot.
     const occupied = [];
@@ -100,9 +111,11 @@ export class DispenserBehaviour implements BlockBehaviour {
       }
     }
 
-    // Consume one item from the slot.
+    // Consume one item from the slot, through the inventory so the change is
+    // recorded on the owning container rather than a detached array.
     stack.count -= 1;
-    if (stack.count <= 0) inv[slot] = null;
+    if (stack.count <= 0) inventory.setStack(slot, null);
+    else inventory.setStack(slot, stack);
   }
 
   /** Spawns an Arrow/Snowball/Egg projectile in the given direction. */
@@ -122,6 +135,11 @@ export class DispenserBehaviour implements BlockBehaviour {
   }
 }
 
-export function registerDispenserBehaviour(registry: BlockBehaviourRegistry): void {
-  registry.register(BlockIds.Dispenser, new DispenserBehaviour());
+export function registerDispenserBehaviour(
+  registry: BlockBehaviourRegistry,
+  manager: DispenserManager,
+): DispenserBehaviour {
+  const behaviour = new DispenserBehaviour(manager);
+  registry.register(BlockIds.Dispenser, behaviour);
+  return behaviour;
 }

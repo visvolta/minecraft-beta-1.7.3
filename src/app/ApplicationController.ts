@@ -353,6 +353,9 @@ export class ApplicationController {
         createdAt: now,
         lastPlayedAt: 0,
         gameMode: result.gameMode,
+        // Cheats are world state chosen at creation; global settings never
+        // change whether an existing world permits commands.
+        cheatsEnabled: result.cheatsEnabled,
         spawn,
         player: { x: spawn.x + 0.5, y: playerY, z: spawn.z + 0.5, yaw: 0, pitch: 0 },
       };

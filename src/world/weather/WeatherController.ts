@@ -56,6 +56,25 @@ export class WeatherController {
     return this.forced;
   }
 
+  /**
+   * Forces a weather mode (`/weather`). Passing `null` hands control back to
+   * Beta's random timers. `durationTicks > 0` schedules a return to automatic
+   * weather after that many ticks; 0 keeps it forced indefinitely.
+   *
+   * The strength ramps in `tickOnce` still run, so the transition is gradual
+   * exactly as it is for naturally-triggered weather.
+   */
+  public setForcedMode(mode: ForcedMode, durationTicks = 0): void {
+    this.forced = mode;
+    if (mode === null) return;
+    this.state.raining = mode === 'rain' || mode === 'thunder';
+    this.state.thundering = mode === 'thunder';
+    if (durationTicks > 0) {
+      this.state.rainTime = durationTicks;
+      this.state.thunderTime = durationTicks;
+    }
+  }
+
   public getState(): WeatherState {
     return this.state;
   }

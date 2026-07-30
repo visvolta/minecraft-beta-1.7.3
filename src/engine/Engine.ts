@@ -208,6 +208,17 @@ import {
 } from '../player/PlayerConstants';
 import { measureSaveSync, recordSaveEvent } from '../persistence2/debug/SavePipelineTrace';
 import { installEngineDebugHooks } from './EngineDebugHooks';
+import { DispenserManager } from '../dispenser/DispenserManager';
+import { DispenserUi } from '../dispenser/DispenserUi';
+import { DispenserController } from '../dispenser/DispenserController';
+import type { DispenserBehaviour } from '../world/behaviours/DispenserBehaviour';
+import { ChatSystem } from '../chat/ChatSystem';
+import { ChatDisplay } from '../chat/ChatDisplay';
+import { CommandService } from '../commands/CommandService';
+import { WorldCheatsService } from '../commands/WorldCheatsService';
+import { EntityFactory } from '../entities/EntityFactory';
+import { DEFAULT_SPAWN_EGG_DESCRIPTORS } from '../entities/SpawnEggDescriptor';
+import type { CommandWorldBinding } from '../commands/CommandWorldBinding';
 import type { Chunk } from '../world/Chunk';
 
 interface EntityLightingUniforms {
@@ -301,6 +312,16 @@ const PORTAL_ANCHOR_LOAD_TIMEOUT_MS = 4_000;
 export class Engine {
   private readonly renderer: Renderer;
   private readonly input: Input;
+  /** Chat input + command feedback. Constructed at the end of the constructor. */
+  /** Dispenser inventories; dimension-namespaced and persisted with the world. */
+  private readonly dispenserManager = new DispenserManager();
+  private readonly dispenserUi: DispenserUi;
+  private readonly dispenserController: DispenserController;
+  private readonly dispenserBehaviour: DispenserBehaviour;
+  private chatSystem: ChatSystem | undefined;
+  private chatDisplay: ChatDisplay | undefined;
+  private commandService: CommandService | undefined;
+  private worldCheats: WorldCheatsService | undefined;
   private readonly cameraController: CameraController;
   private readonly player: Player;
   private readonly playerController: PlayerController;
@@ -643,7 +664,9 @@ export class Engine {
     registerRedstoneRepeaterBehaviour(this.blockBehaviourRegistry);
     registerNoteBlockBehaviour(this.blockBehaviourRegistry);
     registerPistonBehaviour(this.blockBehaviourRegistry);
-    registerDispenserBehaviour(this.blockBehaviourRegistry);
+    this.dispenserManager.setDimension(this.activeDimensionId);
+    this.dispenserManager.deserialize(metadata.dispensers);
+    this.dispenserBehaviour = registerDispenserBehaviour(this.blockBehaviourRegistry, this.dispenserManager);
     registerJukeboxBehaviour(this.blockBehaviourRegistry);
     registerTntBehaviour(this.blockBehaviourRegistry);
     registerRailBehaviour(this.blockBehaviourRegistry);
@@ -888,6 +911,9 @@ export class Engine {
     this.craftingTableInputController = new CraftingTableInputController(this.craftingTableController, this.hotbarHudRenderer.getLayout());
 
     this.furnaceManager = new FurnaceManager();
+    // Bind before hydrating: deserialize() only accepts records for the bound
+    // dimension, so the Nether never loads Overworld containers and vice versa.
+    this.furnaceManager.setDimension(this.activeDimensionId);
     this.smeltingRegistry = new SmeltingRegistry();
     this.fuelRegistry = new FuelRegistry();
     registerDefaultSmeltingAndFuels(this.smeltingRegistry, this.fuelRegistry, blockRegistry, this.hotbarHudRenderer.getSlotContentRenderer()['itemIcons']);
@@ -895,12 +921,14 @@ export class Engine {
 
     this.entityLighting = new EntityLightingUpdater(this.blockUpdateWorld);
     this.chestManager = new ChestManager(this.blockUpdateWorld, this.itemEntityManager);
+    this.chestManager.setDimension(this.activeDimensionId);
     this.chestManager.setBlockSoundSink((id, x, y, z) => this.audioManager.play({ type: 'block.action', id, x, y, z }));
     this.chestManager.deserialize(metadata.chests);
 
     registerChestBehaviour(this.blockBehaviourRegistry, this.chestManager);
 
     this.signManager = new SignManager();
+    this.signManager.setDimension(this.activeDimensionId);
     this.signManager.deserialize(metadata.signs);
     registerSignBehaviour(this.blockBehaviourRegistry, this.signManager);
 
@@ -918,6 +946,31 @@ export class Engine {
       this.player
     );
     this.chestController.setDisplayNameResolver(displayNameResolver as any);
+
+    // Dispenser GUI: 3x3 + player inventory + hotbar, Beta geometry.
+    this.dispenserUi = new DispenserUi(this.hotbarHudRenderer.getSlotContentRenderer());
+    this.dispenserController = new DispenserController(
+      this.dispenserUi,
+      this.inventory,
+      this.inventoryTooltip,
+      this.cursorHeldRenderer,
+      this.hotbarHudRenderer.getSlotContentRenderer(),
+      this.itemEntityManager,
+      this.player
+    );
+    this.dispenserController.setDisplayNameResolver(displayNameResolver as any);
+    this.dispenserBehaviour.setUiOpener((x, y, z) => {
+      if (this.isPaused) return;
+      if (this.inventoryController.isOpen) this.inventoryController.close();
+      if (this.craftingTableController.isOpen) this.craftingTableController.close();
+      if (this.furnaceController.isOpen) this.furnaceController.close();
+      if (this.chestController.isOpen) this.chestController.close();
+      this.dispenserController.openAt(
+        this.dispenserManager.getOrCreate(x, y, z),
+        { x, y, z },
+        this.hotbarHudRenderer.getLayout().scale,
+      );
+    });
 
     this.furnaceUi = new FurnaceUi();
     this.furnaceController = new FurnaceController(
@@ -989,6 +1042,7 @@ export class Engine {
           if (this.inventoryController.isOpen) this.inventoryController.close();
           if (this.furnaceController.isOpen) this.furnaceController.close();
           if (this.chestController.isOpen) this.chestController.close();
+          if (this.dispenserController.isOpen) this.dispenserController.close();
           this.craftingTableController.open(this.hotbarHudRenderer.getLayout().scale);
         }
         return true;
@@ -998,6 +1052,7 @@ export class Engine {
           if (this.inventoryController.isOpen) this.inventoryController.close();
           if (this.craftingTableController.isOpen) this.craftingTableController.close();
           if (this.chestController.isOpen) this.chestController.close();
+          if (this.dispenserController.isOpen) this.dispenserController.close();
           const container = this.furnaceManager.getOrCreate(_x, _y, _z);
           this.furnaceController.openContainer(container, this.hotbarHudRenderer.getLayout().scale);
         }
@@ -1076,7 +1131,12 @@ export class Engine {
     // Seed the streamer with the persisted render-distance setting before any
     // streaming happens, so a saved value of 2 or 8 is honoured from frame one.
     this.chunkStreamer.setRenderDistance(settings.video.renderDistance);
-    this.deathScreen=new DeathScreen(()=>this.respawnController.request());
+    this.deathScreen=new DeathScreen({
+      respawn: () => this.respawnController.request(),
+      // Beta's "Title menu" routes through the same save-and-quit path as the
+      // pause menu, so dying can never bypass a save.
+      titleScreen: () => { this.deathScreen.close(); this.onPauseRequested?.(); },
+    });
     this.playerDeathController=new PlayerDeathController(this.player,this.inventory,this.itemEntityManager,worldRng,this.deathScreen,()=>{this.deathSavePending=true;});
     this.respawnController=new RespawnController(this.player,this.chunkManager,this.chunkStreamer,this.blockUpdateWorld,blockRegistry,metadata.spawn,this.deathScreen,this.playerDeathController,()=>{this.cameraHurtController.reset(this.renderer.camera);this.sprintFovController.reset(this.renderer.camera);this.foodUseController.cancel();void this.saveMetadata(true);});
 
@@ -1184,8 +1244,96 @@ export class Engine {
       countDirtyChunks: () => this.countDirtyChunks(),
     });
 
+    this.installChatAndCommands(metadata);
+
     this.updateHeldItemMesh();
   }
+
+  /**
+   * Builds the chat/command stack and binds it to this world.
+   *
+   * Commands receive a narrow {@link CommandWorldBinding} rather than the
+   * engine itself, so the command layer can only perform the operations listed
+   * on that interface. Cheats are read from world metadata (never global
+   * settings), so enabling them in one world cannot unlock another.
+   */
+  private installChatAndCommands(metadata: WorldMetadata): void {
+    if (typeof document === 'undefined') return;
+
+    const binding: CommandWorldBinding = {
+      player: {
+        getPosition: () => ({ x: this.player.position.x, y: this.player.position.y, z: this.player.position.z }),
+        teleport: (x, y, z) => {
+          this.player.position.x = x;
+          this.player.position.y = y;
+          this.player.position.z = z;
+          this.player.velocity.x = 0;
+          this.player.velocity.y = 0;
+          this.player.velocity.z = 0;
+        },
+        giveItem: (id, type, count, metadataValue) => this.inventory.insert(type, id, count, metadataValue, 0),
+      },
+      world: {
+        getTimeTicks: () => this.worldTime.getTotalTicks(),
+        setTimeTicks: (ticks) => this.worldTime.setTimeOfDayTicks(ticks),
+        setWeather: (weather, durationTicks) => {
+          this.weatherController.setForcedMode(weather === 'clear' ? 'clear' : weather, durationTicks);
+        },
+        summon: (entityStringId, x, y, z) => {
+          const factory = new EntityFactory({ descriptors: DEFAULT_SPAWN_EGG_DESCRIPTORS });
+          const entity = factory.createByDescriptorId(entityStringId, this.entityManager.context, x, y, z);
+          if (entity === undefined) return false;
+          this.entityManager.add(entity);
+          return true;
+        },
+        getDimension: () => this.activeDimensionId,
+      },
+    };
+
+    this.chatDisplay = new ChatDisplay();
+    this.chatSystem = new ChatSystem(this.input);
+    this.commandService = new CommandService(this.chatDisplay, binding);
+    this.chatSystem.setRegistry(this.commandService.getRegistry());
+    this.chatSystem.registerSubmitHandler((text) => this.commandService?.handleMessage(text));
+
+    // Cheats are world state: restore what this save recorded.
+    this.worldCheats = new WorldCheatsService(this.persistence, this.commandService.cheats);
+    this.commandService.cheats.setEnabled(metadata.cheatsEnabled === true);
+
+    this.input.setChatOpener(() => this.openChat());
+  }
+
+  /** Opens chat if no other UI owns input. */
+  private openChat(prefill = ''): void {
+    if (this.isPaused) return;
+    if (this.inventoryController.isOpen || this.creativeInventoryController.isOpen) return;
+    if (this.craftingTableController.isOpen || this.furnaceController.isOpen) return;
+    if (this.chestController.isOpen || this.dispenserController.isOpen || this.signController.isOpen) return;
+    if (this.deathScreen.isOpen) return;
+    this.chatSystem?.openChat(prefill);
+  }
+
+  /**
+   * Closes whichever screen currently owns input, innermost first.
+   * Returns true if something was closed, so Escape does not also pause.
+   */
+  private closeTopmostScreen(): boolean {
+    if (this.chatSystem?.isOpen() === true) { this.chatSystem.close(); return true; }
+    if (this.signController.isOpen) { this.signController.close(); return true; }
+    if (this.dispenserController.isOpen) { this.dispenserController.close(); return true; }
+    if (this.chestController.isOpen) { this.chestController.close(); return true; }
+    if (this.furnaceController.isOpen) { this.furnaceController.close(); return true; }
+    if (this.craftingTableController.isOpen) { this.craftingTableController.close(); return true; }
+    if (this.creativeInventoryController.isOpen) { this.creativeInventoryController.close(); return true; }
+    if (this.inventoryController.isOpen) { this.inventoryController.close(); return true; }
+    return false;
+  }
+
+  /** Chat display, for the render loop's fade update. */
+  public getChatDisplay(): ChatDisplay | undefined { return this.chatDisplay; }
+
+  /** Persists the world's cheats flag (called on save). */
+  public async saveCheatsState(): Promise<void> { await this.worldCheats?.saveToWorld(); }
 
   public register(system: IUpdatable): void { if (!this.updatables.includes(system)) this.updatables.push(system); }
   public unregister(system: IUpdatable): void { const index = this.updatables.indexOf(system); if (index !== -1) this.updatables.splice(index, 1); }
@@ -1289,9 +1437,30 @@ export class Engine {
   public freezeForSave(): void {
     if (this.quiescing) return;
     this.quiescing = true;
+    // Close any open container/inventory UI BEFORE freezing, so a stack held
+    // on the mouse cursor is returned to the inventory (or dropped) instead of
+    // being lost: the cursor stack lives only in the controller, so a snapshot
+    // taken mid-drag would silently delete it.
+    this.closeOpenContainerUis();
     this.setPaused(true);
     this.chunkStreamer.stopAccepting();
     this.chunkStreamer.cancelPendingReads();
+  }
+
+  /**
+   * Force-closes every screen that can hold a cursor stack or in-flight slot
+   * interaction. Each controller's `close()` already returns the cursor stack
+   * safely, so this is just the single place that guarantees all of them run
+   * before a save snapshot is captured.
+   */
+  private closeOpenContainerUis(): void {
+    this.chestController.close();
+    this.furnaceController.close();
+    this.dispenserController.close();
+    this.craftingTableController.close();
+    this.creativeInventoryController.close();
+    this.inventoryController.close();
+    this.signController.close();
   }
 
   /** Step 3a: settle accepted reads (correction 3) — never close while a detached read can reject unobserved. */
@@ -1540,8 +1709,14 @@ export class Engine {
 
     this.input.beginFrame();
     if (!this.simulationPaused && this.input.isActionJustPressed('pause')) {
-      this.onPauseRequested?.();
-      this.input.clearTransientState();
+      // Beta: Escape closes the focused screen first and only opens the game
+      // menu when nothing else owns input.
+      if (this.closeTopmostScreen()) {
+        this.input.clearTransientState();
+      } else {
+        this.onPauseRequested?.();
+        this.input.clearTransientState();
+      }
     }
     if (this.simulationPaused) {
       this.lastFrameTimeMs = timeMs;
@@ -1580,7 +1755,7 @@ export class Engine {
     const now = performance.now();
     if (now - this.lastChunkSavePumpMs >= CHUNK_SAVE_PUMP_INTERVAL_MS) { this.lastChunkSavePumpMs = now; void this.pumpChunkSaves(); }
     if (now - this.lastMetadataAutosaveMs >= METADATA_AUTOSAVE_MS) { this.lastMetadataAutosaveMs = now; void this.saveMetadata(false); }
-    this.chestManager.update(); this.chestRenderer.update(deltaSeconds); this.signTextRenderer.update(); this.furnaceManager.tick(this.blockUpdateWorld, this.smeltingRegistry, this.fuelRegistry);
+    this.chatDisplay?.update(); this.chestManager.update(); this.chestRenderer.update(deltaSeconds); this.signTextRenderer.update(); this.furnaceManager.tick(this.blockUpdateWorld, this.smeltingRegistry, this.fuelRegistry);
     
     for (const drop of this.worldEventQueue.drainBlockDrops()) {
       const drops = resolveBlockDrops(drop.blockId, drop.metadata);
@@ -1601,14 +1776,14 @@ export class Engine {
       this.animatedIconsDirty = false;
       this.refreshOpenContainerIcons();
     }
-    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen && !this.sleepController.isSleeping()) this.cameraController.update();
+    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.dispenserController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen && !this.sleepController.isSleeping()) this.cameraController.update();
     if(!this.player.isAlive()){this.player.wishVelocity.x=this.player.wishVelocity.z=0;}
     else {
       const chunkX = Math.floor(this.player.position.x / 16);
       const chunkZ = Math.floor(this.player.position.z / 16);
       if (this.chunkManager.hasChunk(chunkX, chunkZ)) {
         this.player.preTick();
-        if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
+        if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.dispenserController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen) {
           this.playerController.update(deltaSeconds);
         } else { this.player.wishVelocity.x = 0; this.player.wishVelocity.z = 0; }
         const movement=this.playerPhysics.update(this.player,deltaSeconds,this.input.isActionActive('jump'),this.input.isActionActive('sprint'));
@@ -1624,7 +1799,7 @@ export class Engine {
     const camera = this.renderer.camera;
     this.cameraModeController.applyTransform(camera, this.player, this.cameraController.getYaw(), this.cameraController.getPitch());
     this.cameraHurtController.update(camera,this.player,deltaSeconds);
-    const survivalUiSuppressed=this.inventoryController.isOpen||this.creativeInventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;
+    const survivalUiSuppressed=this.inventoryController.isOpen||this.creativeInventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.dispenserController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;
     if(survivalUiSuppressed){this.player.isSprinting=false;this.foodUseController.cancel();this.interactionController.breakingController.reset();}
     this.sprintFovController.update(camera,this.player,deltaSeconds,survivalUiSuppressed);
 
@@ -1723,7 +1898,7 @@ export class Engine {
     );
     this.performanceProfiler.recordChunkCounts(this.chunkManager.size, this.chunkRenderer.getVisibleMeshCount(), this.chunkManager.countDirtyChunks());
 
-    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen && !this.sleepController.isSleeping()) this.interactionController.update(deltaSeconds);
+    if (!this.inventoryController.isOpen && !this.creativeInventoryController.isOpen && !this.craftingTableController.isOpen && !this.furnaceController.isOpen && !this.chestController.isOpen && !this.dispenserController.isOpen && !this.signController.isOpen && this.player.isAlive() && !this.deathScreen.isOpen && !this.sleepController.isSleeping()) this.interactionController.update(deltaSeconds);
 
     const currentSlot = this.interactionController.getSelectedSlotIndex();
     const currentStack = this.inventory.getStack(currentSlot);
@@ -1988,9 +2163,35 @@ export class Engine {
     return metadata;
   }
 
+  /**
+   * Merges this dimension's live container records into the world-wide saved
+   * list.
+   *
+   * Only the active dimension is resident in memory, so serialising it alone
+   * and assigning the result would delete every other dimension's containers
+   * on each save — the Nether's chests would vanish the moment the player
+   * saved in the Overworld. Records for other dimensions are therefore carried
+   * over untouched from the previously saved metadata.
+   *
+   * Records with no `dimension` predate container dimension isolation and are
+   * treated as Overworld, matching how they are hydrated.
+   */
+  private mergeContainerRecords<T extends { readonly dimension?: number }>(
+    saved: readonly T[] | undefined,
+    live: readonly T[],
+  ): T[] {
+    const active = this.activeDimensionId;
+    const others = (saved ?? []).filter((record) => {
+      const dimension = Number.isInteger(record.dimension) ? (record.dimension as number) : DIMENSION_OVERWORLD;
+      return dimension !== active;
+    });
+    return [...others, ...live];
+  }
+
   private snapshotMetadata(): WorldMetadata {
     const weather = this.weatherController.getState(); const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);
-    return { ...this.currentMetadata(), player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, furnaces: this.furnaceManager.serialize(), chests: this.chestManager.serialize(), signs: this.signManager.serialize() };
+    const saved = this.currentMetadata();
+    return { ...saved, player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, cheatsEnabled: this.commandService?.cheats.isEnabled() ?? saved.cheatsEnabled ?? false, furnaces: this.mergeContainerRecords(saved.furnaces, this.furnaceManager.serialize()), chests: this.mergeContainerRecords(saved.chests, this.chestManager.serialize()), signs: this.mergeContainerRecords(saved.signs, this.signManager.serialize()), dispensers: this.mergeContainerRecords(saved.dispensers, this.dispenserManager.serialize()) };
   }
 
   /**
@@ -2543,6 +2744,24 @@ export class Engine {
     this.naturalMobSpawner.clearDimensionCaches();
     this.worldGenerator = destination.createGenerator(this.worldSeed);
     this.persistence.setDimension(dimensionId);
+
+    // Container managers are per dimension. Persist the departing dimension's
+    // records into metadata FIRST (merged, so nothing else is lost), then
+    // rebind and re-hydrate for the destination. Without this the Overworld's
+    // chests would remain resident while standing in the Nether, and the next
+    // save would write them under the Nether's dimension id.
+    // saveMetadata() caches the snapshot synchronously before the async write,
+    // so the re-hydrate below reads the departing dimension's merged records.
+    void this.persistence.saveMetadata(this.snapshotMetadata(), WRITE_PRIORITY_FORCED);
+    const rebound = this.persistence.getMetadata();
+    this.furnaceManager.setDimension(dimensionId);
+    this.chestManager.setDimension(dimensionId);
+    this.signManager.setDimension(dimensionId);
+    this.furnaceManager.deserialize(rebound?.furnaces);
+    this.chestManager.deserialize(rebound?.chests);
+    this.signManager.deserialize(rebound?.signs);
+    this.dispenserManager.setDimension(dimensionId);
+    this.dispenserManager.deserialize(rebound?.dispensers);
 
     const metadata = this.persistence.getMetadata();
     const trustPersistedLighting =

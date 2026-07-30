@@ -4,12 +4,22 @@ import type { InputAction } from '../input/Input';
 import { normalizeGuiScale, type GuiScaleSetting } from '../ui/GuiScale';
 import { normalizePanoramaBlur, type PanoramaBlur } from '../ui/menu/PanoramaBlur';
 
+/**
+ * GLOBAL settings only — these apply to the whole client, not to a save.
+ *
+ * World-scoped state (difficulty, cheats) lives in `WorldMetadata` so that
+ * changing a global option can never alter an existing world's rules. The
+ * `gameplay.difficulty` field below is retained purely so old settings blobs
+ * keep validating; the authoritative difficulty is `WorldMetadata.difficulty`
+ * and nothing reads this copy.
+ */
 export interface GameSettings {
   readonly version: 1;
   readonly audio: { readonly master: number; readonly music: number; readonly sound: number };
   readonly mouse: { readonly sensitivity: number; readonly invertY: boolean };
   readonly video: { readonly viewBobbing: boolean; readonly guiScale: GuiScaleSetting; readonly aaMode: 'smaa' | 'fxaa' | 'off'; readonly renderScale: number; readonly renderDistance: RenderDistance };
   readonly controls: { readonly bindings: Readonly<Record<InputAction, readonly string[]>> };
+  /** @deprecated World state. Authoritative value is `WorldMetadata.difficulty`. */
   readonly gameplay: { readonly difficulty: Difficulty };
   readonly panorama?: { readonly id: string; readonly blur: PanoramaBlur };
 }

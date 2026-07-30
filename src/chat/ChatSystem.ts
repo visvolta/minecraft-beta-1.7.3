@@ -30,7 +30,7 @@ export class ChatSystem {
       left: 220px;
       width: 400px;
       padding: 4px 6px;
-      font-family: 'Minecraft', monospace, sans-serif;
+      font-family: 'Minecraft';
       font-size: 14px;
       background: rgba(0,0,0,0.7);
       color: white;
@@ -48,7 +48,7 @@ export class ChatSystem {
       left: 220px;
       width: 400px;
       color: #aaa;
-      font-family: 'Minecraft', monospace, sans-serif;
+      font-family: 'Minecraft';
       font-size: 12px;
       pointer-events: none;
       z-index: 199;
@@ -78,7 +78,10 @@ export class ChatSystem {
         e.preventDefault();
         this.submit();
       } else if (e.key === 'Escape') {
+        // Stop here: without stopPropagation the same Escape also reaches the
+        // engine's pause handling and opens the game menu behind the chat.
         e.preventDefault();
+        e.stopPropagation();
         this.close();
       }
     });
@@ -90,8 +93,13 @@ export class ChatSystem {
     this.inputElement.value = prefill;
     this.inputElement.style.display = 'block';
     this.input.focusChat();
-    this.inputElement.focus();
     this.input.setInputMode('chat');
+    // Focus synchronously so no keystroke is dropped between opening and
+    // focusing. The opening key itself is suppressed by Input (preventDefault
+    // + stopPropagation), so it cannot leak into the field.
+    this.inputElement.focus();
+    const end = this.inputElement.value.length;
+    this.inputElement.setSelectionRange(end, end);
   }
 
   public close(): void {

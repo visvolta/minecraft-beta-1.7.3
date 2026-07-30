@@ -40,6 +40,11 @@ export class MenuInputRouter {
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
+    // Never consume keys while a text field owns input: the inventory key is
+    // "E", so intercepting it here swallowed every "e" typed into chat or a
+    // sign editor.
+    if (this.isTextEntryActive()) return;
+
     if (this.isAction(e, 'inventory')) {
       if (this.signController.isOpen) return; // Prevent E from closing inventory while typing on a sign
 
@@ -157,6 +162,18 @@ export class MenuInputRouter {
         }
       }
     }
+  }
+
+  /**
+   * True when a focused text field (chat, sign editor, world name/seed) should
+   * receive raw characters instead of the menu router.
+   */
+  private isTextEntryActive(): boolean {
+    if (typeof document === 'undefined') return false;
+    const active = document.activeElement;
+    if (active === null) return false;
+    const tag = active.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || (active as HTMLElement).isContentEditable === true;
   }
 
   private isAction(event: KeyboardEvent, action: InputAction): boolean {
