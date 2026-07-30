@@ -267,6 +267,15 @@ export abstract class Entity {
   }
 
   /**
+   * Extra collision margin (Beta `getCollisionBorderSize`) by which the
+   * entity's AABB is grown for hit-testing. Default 0; large projectiles such
+   * as the Ghast fireball override to 1.0 so they are easy to intercept.
+   */
+  public getCollisionBorderSize(): number {
+    return 0;
+  }
+
+  /**
    * Beta `applyEntityCollision`: a small, symmetric, horizontal-only push that
    * separates this entity from `other`. No vertical impulse, so entities are
    * never launched; terrain collision on the next physics step keeps pushes

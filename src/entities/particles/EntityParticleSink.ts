@@ -24,6 +24,10 @@ export interface ParticleOrigin {
  */
 export interface EntityParticleSink {
   death(origin: ParticleOrigin): void;
+  /** Optional sustained smoke trail (Beta `spawnParticle("smoke")`). */
+  smoke?(origin: ParticleOrigin): void;
+  /** Optional explosion burst (Beta `hugeexplosion`). */
+  explosion?(origin: ParticleOrigin): void;
   /** Optional per-frame advance; only visual sinks need it. */
   update?(deltaSeconds: number): void;
   /** Optional teardown. */
@@ -86,6 +90,16 @@ export class SimpleEntityParticleSink implements EntityParticleSink {
 
   public death(origin: ParticleOrigin): void {
     this.burst(origin, 20, 0.85, 0.85, 0.85);
+  }
+
+  /** Dark smoke puff for a fireball trail (a few pooled particles). */
+  public smoke(origin: ParticleOrigin): void {
+    this.burst(origin, 2, 0.18, 0.18, 0.18);
+  }
+
+  /** Orange/white explosion burst through the shared pooled points. */
+  public explosion(origin: ParticleOrigin): void {
+    this.burst(origin, 24, 1.0, 0.75, 0.25);
   }
 
   private burst(origin: ParticleOrigin, count: number, r: number, g: number, b: number): void {

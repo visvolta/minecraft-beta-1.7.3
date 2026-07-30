@@ -68,6 +68,20 @@ export const MOB_SOUNDS = [
   sound('mob.skeleton.death','/audio/sounds/mob/skeleton/death.ogg','mob.skeleton'), ...numbered('mob.skeleton.hurt','/audio/sounds/mob/skeleton/hurt',1,4,'mob.skeleton'), ...numbered('mob.skeleton.say','/audio/sounds/mob/skeleton/say',1,3,'mob.skeleton'), ...numbered('mob.skeleton.step','/audio/sounds/mob/skeleton/step',2,4,'mob.skeleton'),
   // Beta zombie ships a fifth step variant alongside the four already listed.
   sound('mob.zombie.step5','/audio/sounds/mob/zombie/step5.ogg','mob.zombie'),
+  // Beta `EntityPigZombie` sounds (assets ship under the `zombiepigman` folder).
+  ...numbered('mob.zombiepig.zpig','/audio/sounds/mob/zombiepigman/zpig',1,4,'mob.zombiepig'),
+  ...numbered('mob.zombiepig.zpigangry','/audio/sounds/mob/zombiepigman/zpigangry',1,4,'mob.zombiepig'),
+  ...numbered('mob.zombiepig.zpighurt','/audio/sounds/mob/zombiepigman/zpighurt',1,2,'mob.zombiepig'),
+  sound('mob.zombiepig.zpigdeath','/audio/sounds/mob/zombiepigman/zpigdeath.ogg','mob.zombiepig'),
+  // Beta `EntityGhast` sounds. The shipped scream set is 1,2,4,5 (no scream3).
+  ...numbered('mob.ghast.moan','/audio/sounds/mob/ghast/moan',1,7,'mob.ghast'),
+  sound('mob.ghast.scream1','/audio/sounds/mob/ghast/scream1.ogg','mob.ghast'),
+  sound('mob.ghast.scream2','/audio/sounds/mob/ghast/scream2.ogg','mob.ghast'),
+  sound('mob.ghast.scream4','/audio/sounds/mob/ghast/scream4.ogg','mob.ghast'),
+  sound('mob.ghast.scream5','/audio/sounds/mob/ghast/scream5.ogg','mob.ghast'),
+  sound('mob.ghast.death','/audio/sounds/mob/ghast/death.ogg','mob.ghast'),
+  sound('mob.ghast.charge','/audio/sounds/mob/ghast/charge.ogg','mob.ghast'),
+  sound('mob.ghast.fireball4','/audio/sounds/mob/ghast/fireball4.ogg','mob.ghast'),
 ];
 
 export const CAVE_SOUNDS = numbered('ambient.cave.cave','/audio/sounds/ambient/cave/cave',1,16,'ambient.cave');

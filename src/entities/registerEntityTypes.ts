@@ -11,11 +11,14 @@ import { SkeletonEntity } from './hostile/SkeletonEntity';
 import { SpiderEntity } from './hostile/SpiderEntity';
 import { CreeperEntity } from './hostile/CreeperEntity';
 import { ArrowEntity } from './projectiles/ArrowEntity';
+import { FireballEntity } from './projectiles/FireballEntity';
 import { PrimedTntEntity } from './PrimedTntEntity';
 import { MinecartEntity } from './MinecartEntity';
 import { BoatEntity } from './BoatEntity';
 import { SnowballEntity, ThrownEggEntity } from './projectiles/ThrownItemEntity';
 import { PaintingEntity } from './PaintingEntity';
+import { ZombiePigmanEntity } from './hostile/PigZombieEntity';
+import { GhastEntity } from './hostile/GhastEntity';
 
 /**
  * Registers every entity type's string id, numeric id and deserialiser with
@@ -43,6 +46,9 @@ export function registerEntityTypes(registry: EntityTypeRegistry): void {
   registry.register(EntityTypeIds.Painting, 'Painting', PaintingEntity.deserialize);
   registry.register(EntityTypeIds.Snowball, 'Snowball', SnowballEntity.deserialize);
   registry.register(EntityTypeIds.ThrownEgg, 'ThrownEgg', ThrownEggEntity.deserialize);
+  registry.register(EntityTypeIds.PigZombie, 'PigZombie', ZombiePigmanEntity.deserialize);
+  registry.register(EntityTypeIds.Ghast, 'Ghast', GhastEntity.deserialize);
+  registry.register(EntityTypeIds.Fireball, 'Fireball', FireballEntity.deserialize);
   // FishingBobber is deliberately NOT registered: a bobber restored without
   // its angler is meaningless, so it is dropped on load rather than revived.
 }

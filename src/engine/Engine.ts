@@ -258,15 +258,17 @@ const PORTAL_AMBIENCE_VOLUME = 0.15;
 /**
  * Maps a dimension definition's Beta entity id to an implemented spawner kind.
  *
- * A dimension may legitimately list entity types this project has not built
- * yet (the Nether's Ghast and PigZombie). Those ids are absent here, so they
- * are filtered out of the spawn table instead of being attempted and failing.
+ * The Nether's Ghast and PigZombie are now implemented, so the Nether roster is
+ * authoritative (PigZombie + Ghast only); any still-unimplemented id remains
+ * filtered out rather than attempted and failing.
  */
 const HOSTILE_KIND_BY_ENTITY_ID: Readonly<Record<string, HostileMobKind | undefined>> = {
   Zombie: 'zombie',
   Skeleton: 'skeleton',
   Spider: 'spider',
   Creeper: 'creeper',
+  PigZombie: 'pigzombie',
+  Ghast: 'ghast',
 };
 
 const PASSIVE_KIND_BY_ENTITY_ID: Readonly<Record<string, PassiveMobKind | undefined>> = {
@@ -587,7 +589,7 @@ export class Engine {
     this.minecartRenderSystem = new MinecartRenderSystem(this.entityManager, this.renderer.scene, this.entityTextures);
     this.boatRenderer = new BoatRenderer(this.renderer.scene, this.entityTextures.get('boat'));
     this.fishingLine = new FishingLineRenderer(this.renderer.scene);
-    this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng, (x, y, z) => this.audioManager.play({ type: 'random.explode', x, y, z }));
+    this.explosionService = new ExplosionService(this.blockUpdateWorld, blockRegistry, this.entityManager, this.player, worldRng, (x, y, z) => this.audioManager.play({ type: 'random.explode', x, y, z }), (x, y, z) => this.entityParticles.explosion({ x, y, z, width: 1, height: 1 }));
 
     this.persistence.setEntityHooks({
       serializeChunkEntities: (cx, cz) => this.entityManager.serializeChunkEntities(cx, cz),
@@ -2829,8 +2831,8 @@ export class Engine {
    *
    * The Overworld deliberately returns null so biome-driven spawning is
    * untouched. Any other dimension returns its own list with unimplemented
-   * entity types filtered out, which for the Nether today means an empty list
-   * — no spawning at all, rather than Overworld mobs or failed constructions.
+   * entity types filtered out. The Nether's implemented roster is PigZombie +
+   * Ghast; any not-yet-implemented id is dropped rather than attempted.
    */
   private dimensionHostileSpawnEntries(): readonly HostileSpawnEntry[] | null {
     if (this.activeDimensionId === DIMENSION_OVERWORLD) return null;

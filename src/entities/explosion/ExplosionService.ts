@@ -1,4 +1,5 @@
 import { AABB } from '../../physics/AABB';
+import { BlockIds } from '../../blocks/BlockId';
 import type { BlockRegistry } from '../../blocks/BlockRegistry';
 import type { BlockUpdateWorld } from '../../world/BlockUpdateWorld';
 import { CHUNK_SIZE_Y } from '../../world/chunkConstants';
@@ -20,10 +21,12 @@ export class ExplosionService {
     private readonly player: Player,
     private readonly rng: JavaRandom,
     private readonly onExplosionSound?: (x: number, y: number, z: number) => void,
+    private readonly onExplosionParticle?: (x: number, y: number, z: number) => void,
   ) {}
 
   public explode(source: Entity, x: number, y: number, z: number, strength: number, flaming = false): ExplosionResult {
     this.onExplosionSound?.(x, y, z);
+    this.onExplosionParticle?.(x, y, z);
     const affected = new Set<string>();
     const samples = 16;
     for (let ix = 0; ix < samples; ix++) for (let iy = 0; iy < samples; iy++) for (let iz = 0; iz < samples; iz++) {
@@ -73,8 +76,21 @@ export class ExplosionService {
         if (this.world.setBlock(bx, by, bz, 0, { reason: 'world' })) destroyedBlocks++;
       }
     }
-    // Fire placement is deliberately a reusable hook point; Creepers pass false.
-    void flaming;
+    // Beta `Explosion.doExplosionA` flaming pass: for each destroyed position,
+    // if it is now air above an opaque cube, with a 1-in-3 chance place fire.
+    // The fire decision lives in the shared service so the Ghast fireball
+    // (flaming) and any future flaming source reuse it without bespoke code.
+    if (flaming) {
+      for (const key of affected) {
+        const [bx, by, bz] = key.split(',').map(Number) as [number, number, number];
+        if (by < 1 || by >= CHUNK_SIZE_Y) continue;
+        if (this.world.getBlock(bx, by, bz) !== 0) continue;
+        const below = this.blocks.getById(this.world.getBlock(bx, by - 1, bz));
+        if (below !== undefined && below.solid && !below.transparent && below.renderType === 'opaque' && this.rng.nextInt(3) === 0) {
+          this.world.setBlock(bx, by, bz, BlockIds.Fire, { reason: 'world' });
+        }
+      }
+    }
     return { destroyedBlocks, damagedEntities };
   }
 

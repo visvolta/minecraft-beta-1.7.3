@@ -46,6 +46,11 @@ export const BETA_BLOCK_SOUNDS: Readonly<Record<number, BlockSoundDefinition>> =
   [BlockIds.Bedrock]: STONE,
   [BlockIds.Obsidian]: STONE,
   [BlockIds.Netherrack]: STONE,
+  // Non-Beta Nether Quartz extension (1.5+): ore + blocks share stone sounds.
+  [BlockIds.NetherQuartzOre]: STONE,
+  [BlockIds.QuartzBlock]: STONE,
+  [BlockIds.ChiseledQuartz]: STONE,
+  [BlockIds.PillarQuartz]: STONE,
   [BlockIds.SandStone]: STONE,
   [BlockIds.LapisBlock]: STONE,
   [BlockIds.BrickBlock]: STONE,

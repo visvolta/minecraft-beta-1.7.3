@@ -29,7 +29,7 @@ export const BETA_PASSIVE_SPAWNS: readonly PassiveSpawnEntry[] = [
   { kind: 'cow', weight: 8 },
 ];
 
-export type HostileMobKind = 'zombie' | 'skeleton' | 'spider' | 'creeper';
+export type HostileMobKind = 'zombie' | 'skeleton' | 'spider' | 'creeper' | 'pigzombie' | 'ghast';
 export interface HostileSpawnEntry { readonly kind: HostileMobKind; readonly weight: number; }
 /** Beta default monster list excluding out-of-scope Slime. */
 export const BETA_HOSTILE_SPAWNS: readonly HostileSpawnEntry[] = [

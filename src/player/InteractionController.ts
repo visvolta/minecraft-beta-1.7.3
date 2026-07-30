@@ -16,6 +16,7 @@ import { worldToChunkLocal } from '../world/worldToChunkCoords';
 import type { BlockUpdateWorld } from '../world/BlockUpdateWorld';
 import { BreakingController } from './BreakingController';
 import type { ItemEntityManager } from '../entities/items/ItemEntityManager';
+import { FireballEntity } from '../entities/projectiles/FireballEntity';
 import { Inventory } from '../inventory/Inventory';
 import { InventoryTransferService } from '../inventory/InventoryTransferService';
 import { DEFAULT_ITEM_DEFINITIONS } from '../items/ItemDefinitionRegistry';
@@ -221,7 +222,10 @@ export class InteractionController {
     ).expand(1, 1, 1);
     let best: { entity: Entity; distance: number } | undefined;
     for (const entity of this.entityManager.getEntitiesInAABB(sweepBox, (candidate) => candidate.canBeCollidedWith())) {
-      const hit = entity.getAABB().expand(0.1, 0.1, 0.1).intersectRay(eyeX, eyeY, eyeZ, lx, ly, lz);
+      // Beta `getCollisionBorderSize`: grow the hit-test box so large
+      // projectiles (the Ghast fireball) are easy to intercept.
+      const border = entity.getCollisionBorderSize();
+      const hit = entity.getAABB().expand(0.1 + border, 0.1 + border, 0.1 + border).intersectRay(eyeX, eyeY, eyeZ, lx, ly, lz);
       if (hit === undefined || hit.distance > reach) continue;
       if (best === undefined || hit.distance < best.distance) best = { entity, distance: hit.distance };
     }
@@ -311,6 +315,15 @@ export class InteractionController {
     if (this.input.isMouseButtonJustPressed('left') && this.targetedInteractEntity instanceof MinecartEntity) {
       this.player.swingItem();
       this.targetedInteractEntity.attackMinecart(PLAYER_MELEE_DAMAGE);
+      return;
+    }
+    // Beta `EntityFireball.attackEntityFrom`: a player left-click redirects the
+    // fireball along the player's look vector. The shooter reference is left
+    // unchanged (see FireballEntity.deflect), so a reflected ball can still
+    // kill its Ghast via the blast.
+    if (this.input.isMouseButtonJustPressed('left') && this.targetedInteractEntity instanceof FireballEntity) {
+      this.player.swingItem();
+      this.targetedInteractEntity.deflect(this.lookDirection.x, this.lookDirection.y, this.lookDirection.z);
       return;
     }
     if (this.input.isMouseButtonJustPressed('left') && this.targetedEntity !== undefined) {

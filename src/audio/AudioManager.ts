@@ -288,6 +288,18 @@ export class AudioManager implements MobSoundSink {
     if (id === 'mob.skeleton') return kind === 'death' ? ['mob.skeleton.hurt1','mob.skeleton.hurt2','mob.skeleton.hurt3','mob.skeleton.hurt4'] : ['mob.skeleton.say1','mob.skeleton.say2','mob.skeleton.say3'];
     if (id === 'mob.skeletonhurt') return ['mob.skeleton.hurt1','mob.skeleton.hurt2','mob.skeleton.hurt3','mob.skeleton.hurt4'];
     if (id === 'mob.skeletondeath') return ['mob.skeleton.death'];
+    // Beta `EntityPigZombie`.
+    if (id === 'mob.zombiepig.zpig') return ['mob.zombiepig.zpig1','mob.zombiepig.zpig2','mob.zombiepig.zpig3','mob.zombiepig.zpig4'];
+    if (id === 'mob.zombiepig.zpigangry') return ['mob.zombiepig.zpigangry1','mob.zombiepig.zpigangry2','mob.zombiepig.zpigangry3','mob.zombiepig.zpigangry4'];
+    if (id === 'mob.zombiepig.zpighurt') return ['mob.zombiepig.zpighurt1','mob.zombiepig.zpighurt2'];
+    if (id === 'mob.zombiepig.zpigdeath') return ['mob.zombiepig.zpigdeath'];
+    // Beta `EntityGhast`. Volume 10 (getSoundVolume) flows through unchanged;
+    // the range/gain translation happens in playPositional, not here.
+    if (id === 'mob.ghast.moan') return ['mob.ghast.moan1','mob.ghast.moan2','mob.ghast.moan3','mob.ghast.moan4','mob.ghast.moan5','mob.ghast.moan6','mob.ghast.moan7'];
+    if (id === 'mob.ghast.scream') return ['mob.ghast.scream1','mob.ghast.scream2','mob.ghast.scream4','mob.ghast.scream5'];
+    if (id === 'mob.ghast.death') return ['mob.ghast.death'];
+    if (id === 'mob.ghast.charge') return ['mob.ghast.charge'];
+    if (id === 'mob.ghast.fireball') return ['mob.ghast.fireball4'];
     // Emitted by ItemBow release and EntitySkeleton's ranged attack.
     if (id === 'random.bow') return ['random.bow'];
     // Emitted by primed TNT and the creeper swell.

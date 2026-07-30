@@ -19,6 +19,19 @@ export abstract class ProjectileEntity extends Entity {
    */
   protected onNonLivingImpact(_entity: Entity): boolean { return false; }
 
+  /**
+   * Ticks a freshly-spawned projectile must wait before it can collide with its
+   * owner/shooter (Beta `ticksInAir >= N`). Arrows/snowballs keep 5; the Ghast
+   * fireball overrides this to 25.
+   */
+  protected shooterGraceTicks(): number { return 5; }
+
+  /**
+   * Per-tick acceleration applied to velocity before drag (Beta fireball adds a
+   * constant acceleration vector). No-op for ballistic projectiles.
+   */
+  protected applyAcceleration(): void { /* ballistic projectiles: no acceleration */ }
+
   public launch(dx: number, dy: number, dz: number, speed: number, inaccuracy: number): void {
     const length = Math.hypot(dx, dy, dz) || 1;
     const spread = inaccuracy * 0.0075;
@@ -44,7 +57,7 @@ export abstract class ProjectileEntity extends Entity {
       // how an arrow knocks a painting off its wall.
       const struck = this.ctx.manager.getEntitiesInAABB(
         probe,
-        (e): e is Entity => e !== this && e.canBeCollidedWith() && (e !== this.owner || this.ticksInAir >= 5),
+        (e): e is Entity => e !== this && e.canBeCollidedWith() && (e !== this.owner || this.ticksInAir >= this.shooterGraceTicks()),
       );
       const living = struck.find((e): e is LivingEntity => e instanceof LivingEntity);
       if (living !== undefined) { this.setPosition(x, y, z); this.onEntityImpact(living); return; }
@@ -55,8 +68,31 @@ export abstract class ProjectileEntity extends Entity {
       }
       if (this.ctx.player && this.ctx.player.getAABB().intersects(probe)) { this.setPosition(x, y, z); this.onEntityImpact('player'); return; }
     }
+    this.integrateMotion();
+  }
+
+  /**
+   * Advances position by velocity, then applies forces (acceleration + drag +
+   * gravity) and updates facing. Split out so self-driven projectiles (the
+   * Ghast fireball) can override the force model without touching the swept
+   * collision loop above.
+   */
+  protected integrateMotion(): void {
     this.position.x += this.velocity.x; this.position.y += this.velocity.y; this.position.z += this.velocity.z;
-    this.velocity.x *= this.drag; this.velocity.y = this.velocity.y * this.drag - this.gravity; this.velocity.z *= this.drag;
+    this.applyForces();
+    this.updateRotation();
+  }
+
+  /** Acceleration hook + Beta ballistic drag/gravity (`y -= gravity`). */
+  protected applyForces(): void {
+    this.applyAcceleration();
+    this.velocity.x *= this.drag;
+    this.velocity.y = this.velocity.y * this.drag - this.gravity;
+    this.velocity.z *= this.drag;
+  }
+
+  /** Faces the projectile along its velocity (Beta rotation update). */
+  protected updateRotation(): void {
     this.yaw = Math.atan2(this.velocity.x, this.velocity.z) * 180 / Math.PI;
     this.pitch = Math.atan2(this.velocity.y, Math.hypot(this.velocity.x, this.velocity.z)) * 180 / Math.PI;
   }

@@ -13,9 +13,11 @@ import type { JavaRandom } from '../../world/generation/random/JavaRandom';
 import type { Entity } from '../core/Entity';
 import type { EntityManager } from '../core/EntityManager';
 import { CreeperEntity } from '../hostile/CreeperEntity';
+import { GhastEntity } from '../hostile/GhastEntity';
 import { SkeletonEntity } from '../hostile/SkeletonEntity';
 import { SpiderEntity } from '../hostile/SpiderEntity';
 import { ZombieEntity } from '../hostile/ZombieEntity';
+import { ZombiePigmanEntity } from '../hostile/PigZombieEntity';
 import { NaturalPassiveSpawner, PASSIVE_ELIGIBLE_CHUNK_RADIUS, PASSIVE_ATTEMPTS_PER_ROUND, PASSIVE_GROUP_ROUNDS, PASSIVE_MAX_GROUP_SIZE } from './NaturalPassiveSpawner';
 
 export const HOSTILE_CREATURE_CAP = 70;
@@ -51,7 +53,13 @@ export interface NaturalMobSpawnerOptions {
 
 const HOSTILE_DIMENSIONS: Readonly<Record<HostileMobKind, readonly [number, number]>> = {
   zombie: [0.6, 1.8], skeleton: [0.6, 1.8], spider: [1.4, 0.9], creeper: [0.6, 1.8],
+  pigzombie: [0.6, 1.8], ghast: [4, 4],
 };
+
+/** Beta `EntityGhast.getMaxSpawnedInChunk` — at most one Ghast per spawn attempt. */
+const GHAST_MAX_GROUP_SIZE = 1;
+/** Beta `EntityGhast.getCanSpawnHere` rarity gate: 1-in-20 per attempt. */
+const GHAST_RARITY = 20;
 
 export function scaledHostileCap(eligibleChunkCount: number): number {
   return Math.floor(HOSTILE_CREATURE_CAP * eligibleChunkCount / 256);
@@ -146,13 +154,19 @@ export class NaturalMobSpawner {
         if (!this.isValidSpawn(entry.kind, spawnX, y, spawnZ)) continue;
         const entity = this.createEntity(entry.kind, spawnX, y, spawnZ); this.acceptedThisPass.push(entity.getAABB());
         entity.yaw = this.options.rng.nextFloat() * 360; this.options.entityManager.add(entity); groupCount++;
-        if (groupCount >= PASSIVE_MAX_GROUP_SIZE) return groupCount;
+        // Beta `EntityGhast.getMaxSpawnedInChunk` = 1; other hostiles use the standard group cap.
+        const maxGroup = entry.kind === 'ghast' ? GHAST_MAX_GROUP_SIZE : PASSIVE_MAX_GROUP_SIZE;
+        if (groupCount >= maxGroup) return groupCount;
       }
     }
     return groupCount;
   }
 
   private isValidSpawn(kind: HostileMobKind, x: number, y: number, z: number): boolean {
+    // Ghasts are 4x4x4 flyers: they need a clear volume (no solid/liquid), not
+    // the humanoid solid-below + light rules. Beta `EntityGhast.getCanSpawnHere`
+    // = rarity 1/20, AABB clear, no liquid, difficulty > 0 (gated upstream).
+    if (kind === 'ghast') return this.isValidGhastSpawn(x, y, z);
     if (y < 1 || y >= CHUNK_SIZE_Y - 1) return false;
     const bx = Math.floor(x); const bz = Math.floor(z); if (!this.options.world.isLoaded(bx, bz)) return false;
     const below = this.options.blockRegistry.getById(this.options.world.getBlock(bx, y - 1, bz));
@@ -176,6 +190,26 @@ export class NaturalMobSpawner {
   private passesDistanceRules(x: number, y: number, z: number): boolean {
     const p = this.options.player.position; const pd = (x-p.x)**2 + (y-p.y)**2 + (z-p.z)**2; if (pd < 576) return false;
     const s = this.options.worldSpawn; return (x-s.x)**2 + (y-s.y)**2 + (z-s.z)**2 >= 576;
+  }
+
+  /**
+   * Ghast spawn validation: a 4x4x4 clear volume with no liquid, plus Beta's
+   * 1-in-20 rarity. No solid-floor requirement (it flies) and no light gate
+   * (the Nether has no sky; Beta's `EntityLiving.getCanSpawnHere` only checks
+   * AABB clearance and liquid).
+   */
+  private isValidGhastSpawn(x: number, y: number, z: number): boolean {
+    if (this.options.rng.nextInt(GHAST_RARITY) !== 0) return false;
+    if (y < 1 || y + 4 >= CHUNK_SIZE_Y) return false;
+    const bx = Math.floor(x); const bz = Math.floor(z);
+    if (!this.options.world.isLoaded(bx, bz)) return false;
+    if (!this.passesDistanceRules(x, y, z)) return false;
+    const [width, height] = HOSTILE_DIMENSIONS.ghast; const half = width / 2;
+    const box = new AABB(x - half, y, z - half, x + half, y + height, z + half);
+    if (!this.areAabbChunksLoaded(box) || this.hasBlockOrLiquidCollision(box)) return false;
+    if (this.options.entityManager.getEntitiesInAABB(box).length > 0 || box.intersects(this.options.player.getAABB())) return false;
+    for (const accepted of this.acceptedThisPass) if (box.intersects(accepted)) return false;
+    return true;
   }
   private areAabbChunksLoaded(box: AABB): boolean {
     for (let cx=Math.floor(box.minX/16);cx<=Math.floor((box.maxX-Number.EPSILON)/16);cx++) for(let cz=Math.floor(box.minZ/16);cz<=Math.floor((box.maxZ-Number.EPSILON)/16);cz++) if(!this.options.chunkManager.hasChunk(cx,cz))return false; return true;
@@ -201,5 +235,5 @@ export class NaturalMobSpawner {
     const key=`${chunkX},${chunkZ}`;const cached=this.biomeSpawnCache.get(key);if(cached)return cached;
     const climate=this.options.climateSampler.sampleRegion(originX,originZ,1,1)[0];const list=climate?selectBiome(climate).hostileSpawns:[];this.biomeSpawnCache.set(key,list);return list;
   }
-  private createEntity(kind:HostileMobKind,x:number,y:number,z:number):Entity{const ctx=this.options.entityManager.context;switch(kind){case'zombie':return new ZombieEntity(ctx,x,y,z);case'skeleton':return new SkeletonEntity(ctx,x,y,z);case'spider':return new SpiderEntity(ctx,x,y,z);case'creeper':return new CreeperEntity(ctx,x,y,z);}}
+  private createEntity(kind:HostileMobKind,x:number,y:number,z:number):Entity{const ctx=this.options.entityManager.context;switch(kind){case'zombie':return new ZombieEntity(ctx,x,y,z);case'skeleton':return new SkeletonEntity(ctx,x,y,z);case'spider':return new SpiderEntity(ctx,x,y,z);case'creeper':return new CreeperEntity(ctx,x,y,z);case'pigzombie':return new ZombiePigmanEntity(ctx,x,y,z);case'ghast':return new GhastEntity(ctx,x,y,z);}}
 }
