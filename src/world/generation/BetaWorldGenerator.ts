@@ -11,6 +11,7 @@ import { emptyGeneratedFeatures } from './decoration/GeneratedChunkFeatures';
 import { storeGeneratedFeatures } from './decoration/GeneratedFeaturesRegistry';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../chunkConstants';
 import type { GenerationStageTimings } from './GenerationStageTimings';
+import { EMPTY_GENERATION_STAGE_TIMINGS } from './GenerationStageTimings';
 
 export interface BetaWorldGeneratorOptions {
   readonly enableCaves?: boolean;
@@ -81,9 +82,11 @@ export class BetaWorldGenerator implements WorldGenerator {
    * Attribution only — nothing reads these for simulation. The generation
    * worker forwards them so the profiler can show which stage actually
    * dominates chunk cost instead of reporting one opaque `populate` number.
+   *
+   * Wave 1A adds detailed decoration buckets and neighbor-generation attribution.
    */
   public readonly lastStageTimings: GenerationStageTimings = {
-    terrainMs: 0, surfaceMs: 0, cavesMs: 0, decorationMs: 0, snowIceMs: 0, totalMs: 0,
+    ...EMPTY_GENERATION_STAGE_TIMINGS,
   };
 
   public populate(chunk: Chunk): void {
@@ -102,6 +105,9 @@ export class BetaWorldGenerator implements WorldGenerator {
 
     const metadata = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
 
+    // Reset to empty before decoration so partial failures don't leave stale data
+    Object.assign(t, EMPTY_GENERATION_STAGE_TIMINGS);
+
     if (this.enableTrees) {
       this.treeDecorator.decorate(chunk.chunkX, chunk.chunkZ, raw.blocks, metadata);
       const dungeons = this.treeDecorator.takePendingDungeons();
@@ -115,12 +121,62 @@ export class BetaWorldGenerator implements WorldGenerator {
     this.snowIceGenerator.apply(chunk.chunkX, chunk.chunkZ, raw.blocks, raw.climate);
     const t5 = performance.now();
 
+    // Base stages
     t.terrainMs = t1 - t0;
     t.surfaceMs = t2 - t1;
     t.cavesMs = t3 - t2;
-    t.decorationMs = t4 - t3;
+    // decorationMs will be overwritten by detailed instrumentation below, but keep fallback
+    const fallbackDecorationMs = t4 - t3;
     t.snowIceMs = t5 - t4;
     t.totalMs = t5 - t0;
+
+    // Merge detailed decoration instrumentation if available (Wave 1A)
+    const instr = this.treeDecorator.getLastInstrumentation();
+    if (instr !== undefined && instr !== null) {
+      const d = instr.timings;
+      t.decorationMs = d.decorationMs || fallbackDecorationMs;
+      t.lakeMs = d.lakeMs;
+      t.dungeonMs = d.dungeonMs;
+      t.clayMs = d.clayMs;
+      t.oreMs = d.oreMs;
+      t.treeMs = d.treeMs;
+      t.vegetationMs = d.vegetationMs;
+      t.springMs = d.springMs;
+      t.intentionalExtrasMs = d.intentionalExtrasMs;
+      t.decorationOverheadMs = d.decorationOverheadMs;
+
+      t.neighborBaseGenerationMs = d.neighborBaseGenerationMs;
+      t.neighborTerrainMs = d.neighborTerrainMs;
+      t.neighborSurfaceMs = d.neighborSurfaceMs;
+      t.neighborCavesMs = d.neighborCavesMs;
+      t.neighborChunksGenerated = d.neighborChunksGenerated;
+      t.neighborCacheHits = d.neighborCacheHits;
+      t.neighborCacheMisses = d.neighborCacheMisses;
+
+      t.blockReads = d.blockReads;
+      t.blockWrites = d.blockWrites;
+      t.chunkLookups = d.chunkLookups;
+      t.heightQueries = d.heightQueries;
+
+      t.treeCalls = d.treeCalls;
+      t.treeAttempts = d.treeAttempts;
+      t.treePlacements = d.treePlacements;
+
+      t.oreVeins = d.oreVeins;
+      t.clayVeins = d.clayVeins;
+      t.dungeonAttempts = d.dungeonAttempts;
+      t.dungeonPlacements = d.dungeonPlacements;
+      t.lakeAttempts = d.lakeAttempts;
+      t.lakePlacements = d.lakePlacements;
+      t.vegetationAttempts = d.vegetationAttempts;
+      t.springAttempts = d.springAttempts;
+    } else {
+      // Fallback – no instrumentation (e.g., enableTrees false)
+      t.decorationMs = fallbackDecorationMs;
+    }
+
+    // Ensure totalMs includes all
+    t.totalMs = t.terrainMs + t.surfaceMs + t.cavesMs + t.decorationMs + t.snowIceMs;
 
     if (!chunk.isTerrainPopulated()) {
       chunk.loadGeneratedBlocks(raw.blocks);

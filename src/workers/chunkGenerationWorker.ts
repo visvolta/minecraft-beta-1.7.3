@@ -7,29 +7,44 @@ import type { GeneratedChunkFeatures } from '../world/generation/decoration/Gene
 import { BlockRegistry } from '../blocks/BlockRegistry';
 import { registerDefaultBlocks } from '../blocks/registerDefaultBlocks';
 import { buildLightLookupTables, computeInitialChunkLight } from '../world/generation/lighting/initialChunkLight';
+import { getGlobalRawTerrainCache } from '../world/generation/RawTerrainCache';
 
 let generatorSeed: string | null = null;
 let generatorKind: string | null = null;
 let generator: WorldGenerator | null = null;
 
-// Opacity/emission LUTs are seed-independent, so they are built once per
-// worker and reused for every chunk.
 const lightRegistry = new BlockRegistry();
 registerDefaultBlocks(lightRegistry);
 const lightTables = buildLightLookupTables(lightRegistry);
 
-/**
- * Builds (and caches) the generator for a dimension. The job carries the
- * generator kind, so the worker needs no dimension conditionals beyond this
- * single factory.
- */
 function getGenerator(seed: string, kind: string): WorldGenerator {
+  const rawCache = kind === 'overworld' ? getGlobalRawTerrainCache() : null;
   if (generator === null || generatorSeed !== seed || generatorKind !== kind) {
     generatorSeed = seed;
     generatorKind = kind;
-    generator = kind === 'nether'
-      ? new NetherWorldGenerator(BigInt(seed))
-      : new BetaWorldGenerator(BigInt(seed));
+    if (kind === 'nether') {
+      generator = new NetherWorldGenerator(BigInt(seed));
+    } else {
+      generator = new BetaWorldGenerator(BigInt(seed), {
+        rawCache,
+        dimensionId: kind,
+        generationVersion: 2,
+        rawCacheEnabled: true,
+      });
+      rawCache?.ensureIdentity({
+        worldSeed: BigInt(seed),
+        dimensionId: kind,
+        enableCaves: true,
+        generationVersion: 2,
+      });
+    }
+  } else if (rawCache !== null) {
+    rawCache.ensureIdentity({
+      worldSeed: BigInt(seed),
+      dimensionId: kind,
+      enableCaves: true,
+      generationVersion: 2,
+    });
   }
   return generator;
 }
@@ -39,7 +54,7 @@ const workerSelf = self as unknown as {
   postMessage: (message: ChunkGenerationResult | ChunkWorkerError, transfer?: Transferable[]) => void;
 };
 
-workerSelf.onmessage = (event: MessageEvent<ChunkGenerationJob>): void => {
+workerSelf.onmessage = async (event: MessageEvent<ChunkGenerationJob>): Promise<void> => {
   const job = event.data;
   if (job.type !== 'generate') {
     return;
@@ -49,11 +64,14 @@ workerSelf.onmessage = (event: MessageEvent<ChunkGenerationJob>): void => {
     const start = performance.now();
     const chunk = new Chunk(job.chunkX, job.chunkZ);
     const gen = getGenerator(job.seed, job.generatorKind);
-    gen.populate(chunk);
+    // Wave 4: use async phased population with cooperative yields (8ms budget) to avoid 300-400ms monolith
+    if (gen instanceof BetaWorldGenerator) {
+      await gen.populateAsync(chunk, 8);
+    } else {
+      gen.populate(chunk);
+    }
     const blocks = chunk.copyBlocks();
     const metadata = chunk.copyMetadata();
-    // Initial lighting runs here, off the main thread, using the shared
-    // deterministic module. Border reconciliation stays on the main thread.
     const light = computeInitialChunkLight(blocks, lightTables, { hasSkyLight: job.hasSkyLight });
     const features = gen instanceof BetaWorldGenerator ? gen.getLastGeneratedFeatures() : undefined;
     const blockBuffer = blocks.buffer as ArrayBuffer;

@@ -23,6 +23,18 @@ import { WorldGenLiquids } from './WorldGenLiquids';
  * - clay + ores: origin + nextInt(16)   (NO +8)
  * - plants/springs: origin + nextInt(16) + 8
  */
+
+export interface BiomeDecoratorTimings {
+  clayMs: number;
+  oreMs: number;
+  vegetationMs: number;
+  springMs: number;
+  clayVeins: number;
+  oreVeins: number;
+  vegetationAttempts: number;
+  springAttempts: number;
+}
+
 export class BetaBiomeDecorator {
   private readonly clayGen = new WorldGenClay(32);
   private readonly dirtGen = new WorldGenMinable(BlockIds.Dirt, 32);
@@ -45,32 +57,93 @@ export class BetaBiomeDecorator {
   private readonly waterSpringGen = new WorldGenLiquids(BlockIds.WaterFlowing);
   private readonly lavaSpringGen = new WorldGenLiquids(BlockIds.LavaFlowing);
 
+  private _lastTimings: BiomeDecoratorTimings = {
+    clayMs: 0,
+    oreMs: 0,
+    vegetationMs: 0,
+    springMs: 0,
+    clayVeins: 0,
+    oreVeins: 0,
+    vegetationAttempts: 0,
+    springAttempts: 0,
+  };
+
+  public getLastTimings(): BiomeDecoratorTimings {
+    return { ...this._lastTimings };
+  }
+
+  public resetTimings(): void {
+    this._lastTimings = {
+      clayMs: 0,
+      oreMs: 0,
+      vegetationMs: 0,
+      springMs: 0,
+      clayVeins: 0,
+      oreVeins: 0,
+      vegetationAttempts: 0,
+      springAttempts: 0,
+    };
+  }
+
   /**
    * Clay + underground ores only — called before trees in the Beta stream.
    */
   public generateUnderground(world: TreeWorldAccessor, random: JavaRandom, originX: number, originZ: number): void {
+    let clayMs = 0;
+    let oreMs = 0;
+    let clayVeins = 0;
+    let oreVeins = 0;
+
     for (let i = 0; i < 10; i++) {
       const rx = originX + random.nextInt(16);
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16);
+      const t0 = performance.now();
       this.clayGen.generate(world, random, rx, ry, rz);
+      clayMs += performance.now() - t0;
+      clayVeins++;
     }
 
-    this.genStandardOre(world, random, 20, this.dirtGen, 0, 128, originX, originZ);
-    this.genStandardOre(world, random, 10, this.gravelGen, 0, 128, originX, originZ);
-    this.genStandardOre(world, random, 20, this.coalGen, 0, 128, originX, originZ);
-    this.genStandardOre(world, random, 20, this.ironGen, 0, 64, originX, originZ);
-    this.genStandardOre(world, random, 2, this.goldGen, 0, 32, originX, originZ);
-    this.genStandardOre(world, random, 8, this.redstoneGen, 0, 16, originX, originZ);
-    this.genStandardOre(world, random, 1, this.diamondGen, 0, 16, originX, originZ);
+    const genOre = (
+      count: number,
+      gen: WorldGenMinable,
+      minY: number,
+      maxY: number,
+    ): void => {
+      for (let i = 0; i < count; i++) {
+        const rx = originX + random.nextInt(16);
+        const ry = random.nextInt(maxY - minY) + minY;
+        const rz = originZ + random.nextInt(16);
+        const t0 = performance.now();
+        gen.generate(world, random, rx, ry, rz);
+        oreMs += performance.now() - t0;
+        oreVeins++;
+      }
+    };
+
+    genOre(20, this.dirtGen, 0, 128);
+    genOre(10, this.gravelGen, 0, 128);
+    genOre(20, this.coalGen, 0, 128);
+    genOre(20, this.ironGen, 0, 64);
+    genOre(2, this.goldGen, 0, 32);
+    genOre(8, this.redstoneGen, 0, 16);
+    genOre(1, this.diamondGen, 0, 16);
 
     // Lapis: nextInt(16) + nextInt(16) for Y (triangle around 16).
     for (let i = 0; i < 1; i++) {
       const rx = originX + random.nextInt(16);
       const ry = random.nextInt(16) + random.nextInt(16);
       const rz = originZ + random.nextInt(16);
+      const t0 = performance.now();
       this.lapisGen.generate(world, random, rx, ry, rz);
+      oreMs += performance.now() - t0;
+      oreVeins++;
     }
+
+    this._lastTimings.clayMs += clayMs;
+    this._lastTimings.oreMs += oreMs;
+    this._lastTimings.clayVeins += clayVeins;
+    this._lastTimings.oreVeins += oreVeins;
   }
 
   /**
@@ -83,6 +156,11 @@ export class BetaBiomeDecorator {
     originX: number,
     originZ: number,
   ): void {
+    let vegetationMs = 0;
+    let springMs = 0;
+    let vegetationAttempts = 0;
+    let springAttempts = 0;
+
     // Yellow flowers
     let yellowCount = 0;
     if (biomeId === 'forest') yellowCount = 2;
@@ -93,7 +171,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.yellowFlowerGen.generate(world, random, rx, ry, rz);
+      vegetationMs += performance.now() - t0;
+      vegetationAttempts++;
     }
 
     // Tall grass / fern
@@ -111,7 +192,11 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
+      // Wave 1A: keep allocation per call to preserve baseline cost
       new WorldGenTallGrass(BlockIds.TallGrass, meta).generate(world, random, rx, ry, rz);
+      vegetationMs += performance.now() - t0;
+      vegetationAttempts++;
     }
 
     // Dead bush (desert)
@@ -121,7 +206,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.deadBushGen.generate(world, random, rx, ry, rz);
+      vegetationMs += performance.now() - t0;
+      vegetationAttempts++;
     }
 
     // Red flower 1/2
@@ -129,7 +217,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.redFlowerGen.generate(world, random, rx, ry, rz);
+      vegetationMs += performance.now() - t0;
+      vegetationAttempts++;
     }
 
     // Brown mushroom 1/4
@@ -137,7 +228,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.brownMushroomGen.generate(world, random, rx, ry, rz);
+      vegetationMs += performance.now() - t0;
+      vegetationAttempts++;
     }
 
     // Red mushroom 1/8
@@ -145,7 +239,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.redMushroomGen.generate(world, random, rx, ry, rz);
+      vegetationMs += performance.now() - t0;
+      vegetationAttempts++;
     }
 
     // Reeds ×10
@@ -153,7 +250,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.reedGen.generate(world, random, rx, ry, rz);
+      vegetationMs += performance.now() - t0;
+      vegetationAttempts++;
     }
 
     // Pumpkin 1/32
@@ -161,7 +261,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.pumpkinGen.generate(world, random, rx, ry, rz);
+      vegetationMs += performance.now() - t0;
+      vegetationAttempts++;
     }
 
     // Cactus (desert +10)
@@ -171,7 +274,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(128);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.cactusGen.generate(world, random, rx, ry, rz);
+      vegetationMs += performance.now() - t0;
+      vegetationAttempts++;
     }
 
     // Water springs ×50
@@ -179,7 +285,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(random.nextInt(120) + 8);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.waterSpringGen.generate(world, random, rx, ry, rz);
+      springMs += performance.now() - t0;
+      springAttempts++;
     }
 
     // Lava springs ×20
@@ -187,8 +296,16 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16) + 8;
       const ry = random.nextInt(random.nextInt(random.nextInt(112) + 8) + 8);
       const rz = originZ + random.nextInt(16) + 8;
+      const t0 = performance.now();
       this.lavaSpringGen.generate(world, random, rx, ry, rz);
+      springMs += performance.now() - t0;
+      springAttempts++;
     }
+
+    this._lastTimings.vegetationMs += vegetationMs;
+    this._lastTimings.springMs += springMs;
+    this._lastTimings.vegetationAttempts += vegetationAttempts;
+    this._lastTimings.springAttempts += springAttempts;
   }
 
   private genStandardOre(
@@ -205,7 +322,10 @@ export class BetaBiomeDecorator {
       const rx = originX + random.nextInt(16);
       const ry = random.nextInt(maxY - minY) + minY;
       const rz = originZ + random.nextInt(16);
+      const t0 = performance.now();
       generator.generate(world, random, rx, ry, rz);
+      this._lastTimings.oreMs += performance.now() - t0;
+      this._lastTimings.oreVeins++;
     }
   }
 }
