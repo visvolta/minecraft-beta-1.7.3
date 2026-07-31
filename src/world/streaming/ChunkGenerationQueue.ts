@@ -44,6 +44,8 @@ export interface ChunkGenerationStats {
   readonly drainMs: number;
   readonly syncGenerationMs: number;
   readonly lastWorkerDurationMs: number;
+  /** Per-stage attribution from the most recent generated chunk (diagnostic). */
+  readonly lastStageTimings: GenerationStageTimings;
   readonly lastTransferBytes: number;
   readonly totalTransferBytes: number;
   readonly lastTransferLatencyMs: number;
@@ -57,6 +59,7 @@ export interface CompletedChunkGeneration {
 }
 
 import { chunkKey } from '../chunkKey';
+import { EMPTY_GENERATION_STAGE_TIMINGS, type GenerationStageTimings } from '../generation/GenerationStageTimings';
 
 /**
  * Owns desired chunk generation jobs. Worker buffers are worker-owned;
@@ -86,6 +89,7 @@ export class ChunkGenerationQueue {
   private lastDrainMs = 0;
   private lastSyncGenerationMs = 0;
   private lastWorkerDurationMs = 0;
+  private lastStageTimings: GenerationStageTimings = EMPTY_GENERATION_STAGE_TIMINGS;
   private lastTransferBytes = 0;
   private totalTransferBytes = 0;
   private lastTransferLatencyMs = 0;
@@ -259,6 +263,7 @@ export class ChunkGenerationQueue {
       drainMs: this.lastDrainMs,
       syncGenerationMs: this.lastSyncGenerationMs,
       lastWorkerDurationMs: this.lastWorkerDurationMs,
+      lastStageTimings: this.lastStageTimings,
       lastTransferBytes: this.lastTransferBytes,
       totalTransferBytes: this.totalTransferBytes,
       lastTransferLatencyMs: this.lastTransferLatencyMs,
@@ -379,6 +384,7 @@ export class ChunkGenerationQueue {
         this.lastTransferBytes += bytes;
         this.totalTransferBytes += bytes;
         this.lastWorkerDurationMs = result.durationMs;
+        if (result.stageTimings !== undefined) this.lastStageTimings = result.stageTimings;
         this.lastTransferLatencyMs = Math.max(0, performance.now() - active.sentAtMs - result.durationMs);
       }
       if (active === undefined || !desired.has(mapKey) || this.chunkManager.hasChunk(result.chunkX, result.chunkZ)) {

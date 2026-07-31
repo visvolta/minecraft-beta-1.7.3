@@ -1168,6 +1168,7 @@ export class Engine {
       weatherController: this.weatherController,
       precipitationSimulator: this.precipitationSimulator,
       blockUpdateWorld: this.blockUpdateWorld,
+      chestManager: this.chestManager,
       chunkRenderer: this.chunkRenderer,
       renderDistance: {
         getState: () => ({
@@ -1887,8 +1888,17 @@ export class Engine {
       borderReconcileMs: integrationStats.lastBorderReconcileMs,
       neighbourDirtyCount: integrationStats.lastNeighbourDirtyCount,
     });
+    this.performanceProfiler.recordGenerationStages(generationStats.lastStageTimings);
     const persistenceDiag = this.persistence.getDiagnostics();
     this.performanceProfiler.setPersistenceQueueDepth(
+      persistenceDiag.writeLane.active +
+      persistenceDiag.writeLane.pending +
+      persistenceDiag.readLane.active +
+      persistenceDiag.readLane.pending +
+      persistenceDiag.pendingUnloads +
+      persistenceDiag.inFlightChunks,
+    );
+    this.performanceProfiler.setPersistenceQueueDepthTracked(
       persistenceDiag.writeLane.active +
       persistenceDiag.writeLane.pending +
       persistenceDiag.readLane.active +
@@ -2108,14 +2118,24 @@ export class Engine {
     this.onPauseRequested?.();
   }
 
+  /**
+   * True when an in-game screen legitimately owns input.
+   *
+   * This gates `handlePointerLockLost`, which otherwise opens the pause menu.
+   * Chat and the dispenser both release pointer lock by design, so omitting
+   * them here made opening either one pause the world — chat is an overlay and
+   * containers are in-game screens; neither is a pause state.
+   */
   private isAnyMenuOpen(): boolean {
     return this.inventoryController.isOpen
       || this.creativeInventoryController.isOpen
       || this.craftingTableController.isOpen
       || this.furnaceController.isOpen
       || this.chestController.isOpen
+      || this.dispenserController.isOpen
       || this.signController.isOpen
-      || this.deathScreen.isOpen;
+      || this.deathScreen.isOpen
+      || this.chatSystem?.isOpen() === true;
   }
 
   /** Samples a 3x3 listener neighbourhood four times per second; no vertical world scans. */

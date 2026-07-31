@@ -8,6 +8,9 @@
  * frame pipeline.
  */
 
+import { QueueDrainTracker, type QueueDrainStats } from './QueueDrainTracker';
+import { EMPTY_GENERATION_STAGE_TIMINGS, type GenerationStageTimings } from '../world/generation/GenerationStageTimings';
+
 export interface QueueHistory {
   readonly current: number;
   readonly average: number;
@@ -197,6 +200,14 @@ export interface PerformanceSnapshot {
   readonly profilerOverhead: ProfilerOverheadStats;
   readonly longFrameCount: number;
   readonly longFrameThresholdMs: number;
+  /** Per-stage generation attribution from the most recent chunk. */
+  readonly generationStages: GenerationStageTimings;
+  /** Drain behaviour for each pipeline queue. */
+  readonly drain: {
+    readonly generation: QueueDrainStats;
+    readonly meshing: QueueDrainStats;
+    readonly persistence: QueueDrainStats;
+  };
   readonly activeCapture: PerformanceCaptureSummary | null;
 }
 
@@ -297,6 +308,10 @@ export class PerformanceProfiler {
   private readonly generationHistory = new RollingHistory();
   private readonly meshingHistory = new RollingHistory();
   private readonly lightingHistory = new RollingHistory();
+  private generationStages: GenerationStageTimings = EMPTY_GENERATION_STAGE_TIMINGS;
+  private readonly generationDrain = new QueueDrainTracker();
+  private readonly meshingDrain = new QueueDrainTracker();
+  private readonly persistenceDrain = new QueueDrainTracker();
   private readonly persistenceHistory = new RollingHistory();
 
   private generationTimings: GenerationSubTimings = { queueProcessMs: 0, workerDurationMs: 0, integrationMs: 0, chunksCompleted: 0, bytesReceived: 0, transferLatencyMs: 0, lightingInitMs: 0, borderReconcileMs: 0, neighbourDirtyCount: 0 };
@@ -362,6 +377,10 @@ export class PerformanceProfiler {
     this.oldestCriticalGenerationAgeMs = oldestCriticalGenerationAgeMs;
     this.generationHistory.record(generation);
     this.meshingHistory.record(meshing);
+    // Drain tracking rides the same per-frame call, so it can never disagree
+    // with the depths reported in the snapshot.
+    this.generationDrain.sample(generation);
+    this.meshingDrain.sample(meshing);
   }
 
   public setWorkerCounters(completed: number, stale: number, errors: number): void {
@@ -373,12 +392,21 @@ export class PerformanceProfiler {
 
   public setApproximateGeometryMemoryMb(value: number): void { if (this.enabled) this.approximateGeometryMemoryMb = value; }
   public setLightingQueueDepth(depth: number): void { if (this.enabled) this.lightingHistory.record(depth); }
+  public setPersistenceQueueDepthTracked(depth: number): void { if (this.enabled) this.persistenceDrain.sample(depth); }
   public setPersistenceQueueDepth(depth: number): void { if (this.enabled) this.persistenceHistory.record(depth); }
 
   public recordGenerationTimings(t: GenerationSubTimings): void { if (this.enabled) this.generationTimings = t; }
   public recordMeshingTimings(t: MeshingSubTimings): void { if (this.enabled) this.meshingTimings = t; }
   public recordWeatherTimings(t: WeatherSubTimings): void { if (this.enabled) this.weatherTimings = t; }
   public recordLightingTimings(t: LightingSubTimings): void { if (this.enabled) this.lightingTimings = t; }
+  public recordGenerationStages(t: GenerationStageTimings): void { if (this.enabled) this.generationStages = t; }
+
+  /** Resets drain tracking; call at the start of a benchmark leg. */
+  public resetDrainTracking(): void {
+    this.generationDrain.reset();
+    this.meshingDrain.reset();
+    this.persistenceDrain.reset();
+  }
   public recordRenderStats(t: RenderStats): void { if (this.enabled) this.renderStats = t; }
 
   public recordChunkCounts(loaded: number, visible: number, dirty: number): void {
@@ -506,6 +534,12 @@ export class PerformanceProfiler {
       },
       longFrameCount: this.longFrames.length,
       longFrameThresholdMs: this.longFrameThresholdMs,
+      generationStages: this.generationStages,
+      drain: {
+        generation: this.generationDrain.getStats(),
+        meshing: this.meshingDrain.getStats(),
+        persistence: this.persistenceDrain.getStats(),
+      },
       activeCapture: this.getActiveCaptureSummary(),
     };
     this.profilerSelfMs += performance.now() - overheadStart;

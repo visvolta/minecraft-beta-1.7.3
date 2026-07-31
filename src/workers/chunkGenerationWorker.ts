@@ -69,6 +69,7 @@ workerSelf.onmessage = (event: MessageEvent<ChunkGenerationJob>): void => {
       metadata: metadataBuffer,
       light: lightBuffer,
       durationMs: performance.now() - start,
+      ...(gen instanceof BetaWorldGenerator ? { stageTimings: { ...gen.lastStageTimings } } : {}),
       featuresJson: features === undefined ? '' : serializeFeatures(features),
     };
     workerSelf.postMessage(result, [blockBuffer, metadataBuffer, lightBuffer]);

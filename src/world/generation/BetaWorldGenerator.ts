@@ -10,6 +10,7 @@ import type { GeneratedChunkFeatures } from './decoration/GeneratedChunkFeatures
 import { emptyGeneratedFeatures } from './decoration/GeneratedChunkFeatures';
 import { storeGeneratedFeatures } from './decoration/GeneratedFeaturesRegistry';
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y, CHUNK_SIZE_Z } from '../chunkConstants';
+import type { GenerationStageTimings } from './GenerationStageTimings';
 
 export interface BetaWorldGeneratorOptions {
   readonly enableCaves?: boolean;
@@ -74,13 +75,30 @@ export class BetaWorldGenerator implements WorldGenerator {
     return { blockId: raw.blocks[blockIdx]!, height: y };
   }
 
+  /**
+   * Per-stage timings from the most recent {@link populate} call, in ms.
+   *
+   * Attribution only — nothing reads these for simulation. The generation
+   * worker forwards them so the profiler can show which stage actually
+   * dominates chunk cost instead of reporting one opaque `populate` number.
+   */
+  public readonly lastStageTimings: GenerationStageTimings = {
+    terrainMs: 0, surfaceMs: 0, cavesMs: 0, decorationMs: 0, snowIceMs: 0, totalMs: 0,
+  };
+
   public populate(chunk: Chunk): void {
+    const t = this.lastStageTimings as { -readonly [K in keyof GenerationStageTimings]: number };
+    const t0 = performance.now();
+
     const raw = this.terrainGenerator.generate(chunk.chunkX, chunk.chunkZ);
+    const t1 = performance.now();
     this.surfaceGenerator.apply(chunk.chunkX, chunk.chunkZ, raw.blocks, raw.climate);
+    const t2 = performance.now();
 
     if (this.enableCaves) {
       this.caveGenerator.carve(chunk.chunkX, chunk.chunkZ, raw.blocks);
     }
+    const t3 = performance.now();
 
     const metadata = new Uint8Array(CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z);
 
@@ -92,8 +110,17 @@ export class BetaWorldGenerator implements WorldGenerator {
     } else {
       this.lastFeatures = emptyGeneratedFeatures();
     }
+    const t4 = performance.now();
 
     this.snowIceGenerator.apply(chunk.chunkX, chunk.chunkZ, raw.blocks, raw.climate);
+    const t5 = performance.now();
+
+    t.terrainMs = t1 - t0;
+    t.surfaceMs = t2 - t1;
+    t.cavesMs = t3 - t2;
+    t.decorationMs = t4 - t3;
+    t.snowIceMs = t5 - t4;
+    t.totalMs = t5 - t0;
 
     if (!chunk.isTerrainPopulated()) {
       chunk.loadGeneratedBlocks(raw.blocks);

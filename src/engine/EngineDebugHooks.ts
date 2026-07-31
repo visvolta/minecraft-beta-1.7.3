@@ -46,6 +46,11 @@ export interface EngineDebugHookDependencies {
   readonly weatherController: WeatherController;
   readonly precipitationSimulator: PrecipitationSimulator;
   readonly blockUpdateWorld: BlockUpdateWorld;
+  /** Container lookup, for the chest render/interaction diagnostic. */
+  readonly chestManager: {
+    get(x: number, y: number, z: number): { readonly facing: number } | undefined;
+    getContainers(): ReadonlyArray<unknown>;
+  };
   readonly chunkRenderer: { getPassMeshCounts(): unknown; probeChunkMesh(x: number, z: number): unknown; getTerrainShaderInfo(): unknown };
   readonly renderDistance: {
     getState(): { renderDistance: number; unloadRadius: number };
@@ -109,6 +114,20 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
       return deps.blockUpdateWorld.getBlock(x, y, z);
     },
     getBlockAt: (x: number, y: number, z: number) => deps.blockUpdateWorld.getBlock(x, y, z),
+    /**
+     * Container-lookup diagnostic. A chest that exists as a block but cannot be
+     * resolved here is invisible AND non-interactive, because the renderer and
+     * the interaction raycast both resolve through the manager.
+     */
+    inspectChestAt: (x: number, y: number, z: number) => {
+      const container = deps.chestManager.get(x, y, z);
+      return {
+        blockId: deps.blockUpdateWorld.getBlock(x, y, z),
+        found: container !== undefined,
+        facing: container?.facing ?? null,
+        totalContainers: deps.chestManager.getContainers().length,
+      };
+    },
     /**
      * Portal/dimension diagnostics: active dimension, the Beta charge timer,
      * and the live transition readiness. Lets a browser test observe travel
@@ -189,6 +208,60 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
     endPerformanceCapture: () => deps.performanceProfiler.endCapture(),
     getActivePerformanceCapture: () => deps.performanceProfiler.getActiveCaptureSummary(),
     captureRawFrameTimes: (label = 'raw', durationMs = 60000) => captureRawFrameTimes(label, durationMs),
+    /** Clears queue-drain tracking; call at the start of a benchmark leg. */
+    resetDrainTracking: () => deps.performanceProfiler.resetDrainTracking(),
+    /**
+     * One-line-per-metric benchmark report for the current moment.
+     *
+     * Returns a plain object so a benchmark script can JSON it verbatim.
+     * Frame percentiles come from the profiler's rolling window, so run a leg
+     * for at least ~20s before reading it.
+     */
+    getBenchmarkReport: () => {
+      const s = deps.performanceProfiler.getSnapshot();
+      return {
+        frame: {
+          medianMs: s.averageFrameTimeMs,
+          p95Ms: s.p95FrameTimeMs,
+          p99Ms: s.p99FrameTimeMs,
+          worstMs: s.worstFrameTimeMs,
+          avgFps: s.averageFps,
+          onePercentLowFps: s.onePercentLowFps,
+          updateMs: s.updateTimeMs,
+          renderMs: s.renderTimeMs,
+          longFrames: s.longFrameCount,
+        },
+        queues: {
+          generation: s.generationQueue,
+          meshing: s.meshingQueue,
+          persistence: s.persistenceQueue,
+          lightingBfsMax: s.lightingQueue.maximum,
+        },
+        drain: s.drain,
+        generationStages: s.generationStages,
+        generation: s.generation,
+        meshing: s.meshing,
+        lighting: s.lighting,
+        meshUpload: s.meshUpload,
+        workers: {
+          active: s.activeWorkerCount,
+          completed: s.completedWorkerJobs,
+          stale: s.staleWorkerJobs,
+          errors: s.workerErrors,
+        },
+        render: s.renderStats,
+        chunks: {
+          loaded: s.loadedChunks,
+          visible: s.visibleChunks,
+          dirty: s.dirtyChunks,
+        },
+        memory: {
+          jsHeapUsedMb: s.jsHeapUsedMb,
+          jsHeapTotalMb: s.jsHeapTotalMb,
+          geometryMb: s.approximateGeometryMemoryMb,
+        },
+      };
+    },
   };
 
   const target = window as unknown as DebugWindow;

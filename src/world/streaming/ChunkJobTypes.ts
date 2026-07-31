@@ -7,6 +7,8 @@
  * identity does not match the live context are rejected rather than
  * integrated into the wrong world.
  */
+
+import type { GenerationStageTimings } from '../generation/GenerationStageTimings';
 export interface WorldContextIdentity {
   readonly worldId: string;
   readonly dimensionId: number;
@@ -44,6 +46,11 @@ export interface ChunkGenerationResult {
    */
   readonly light: ArrayBuffer;
   readonly durationMs: number;
+  /**
+   * Per-stage generation attribution (terrain/surface/caves/decoration/snow).
+   * Diagnostic only; absent for generators that do not report it.
+   */
+  readonly stageTimings?: GenerationStageTimings;
   /** JSON-serialized GeneratedChunkFeatures (optional for back-compat). */
   readonly featuresJson?: string;
 }

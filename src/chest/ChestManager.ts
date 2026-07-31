@@ -41,8 +41,21 @@ export class ChestManager {
     return this.dimension;
   }
 
+  /**
+   * The one place a container key is built.
+   *
+   * Every lookup MUST go through this. A previous change namespaced the write
+   * paths by dimension but left `get()` using the bare `x,y,z` key, so chests
+   * were created but never found again — which made them both invisible (the
+   * renderer resolves through `get()`) and non-interactive (so does the
+   * raycast). Centralising the format makes that divergence impossible.
+   */
+  private key(x: number, y: number, z: number): string {
+    return `${this.dimension}:${x},${y},${z}`;
+  }
+
   public getOrCreate(x: number, y: number, z: number, facing = 3): ChestContainer {
-    const key = `${this.dimension}:${x},${y},${z}`;
+    const key = this.key(x, y, z);
     let c = this.containers.get(key);
     if (!c) {
       c = new ChestContainer(x, y, z, facing);
@@ -60,7 +73,7 @@ export class ChestManager {
           const blockId = chunk.getBlock(x, y, z);
           const worldX = chunkX * CHUNK_SIZE_X + x;
           const worldZ = chunkZ * CHUNK_SIZE_Z + z;
-          const key = `${this.dimension}:${worldX},${y},${worldZ}`;
+          const key = this.key(worldX, y, worldZ);
 
           if (blockId === BlockIds.Chest) {
             if (!this.containers.has(key)) {
@@ -80,7 +93,7 @@ export class ChestManager {
   }
 
   public get(x: number, y: number, z: number): ChestContainer | undefined {
-    return this.containers.get(`${x},${y},${z}`);
+    return this.containers.get(this.key(x, y, z));
   }
 
   public getContainers(): ReadonlyArray<ChestContainer> {
@@ -213,7 +226,7 @@ export class ChestManager {
   }
 
   public breakChest(x: number, y: number, z: number): void {
-    const key = `${this.dimension}:${x},${y},${z}`;
+    const key = this.key(x, y, z);
     const container = this.containers.get(key);
     if (!container) return;
 
@@ -267,7 +280,7 @@ export class ChestManager {
       if (recordDimension !== this.dimension) continue;
       const c = new ChestContainer(d.x, d.y, d.z, d.facing ?? 3);
       InventorySerializer.deserialize(c.inventory, d.inventory);
-      this.containers.set(`${this.dimension}:${c.x},${c.y},${c.z}`, c);
+      this.containers.set(this.key(c.x, c.y, c.z), c);
     }
   }
 
