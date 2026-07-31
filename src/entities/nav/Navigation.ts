@@ -76,6 +76,11 @@ export class Navigation {
     this.path = null;
   }
 
+  /** Cancel any current path (e.g. on death or when stunned). */
+  public stop(): void {
+    this.clearPath();
+  }
+
   /** Advances along the path and steers the host for this tick. */
   public update(host: NavigationHost): void {
     if (this.recalcCooldown > 0) {

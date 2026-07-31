@@ -6,7 +6,10 @@ import { CreeperModel } from './models/CreeperModel';
 import { CreeperSwellTask } from '../ai/tasks/CreeperSwellTask';
 import type { Drop } from '../items/BlockDropResolver';
 import { wrapDegrees } from '../living/LivingAnimationMath';
-import { interpolateLivingBodyYaw } from '../../rendering/LivingRenderTransform';
+import { applyEntityModelVisualState, interpolateLivingBodyYaw } from '../../rendering/LivingRenderTransform';
+
+/** Hurt-flash duration (matches LivingEntity.MAX_HURT_TIME). */
+const MAX_HURT_TIME = 10;
 
 export class CreeperEntity extends HostileEntity {
   public readonly typeId = EntityTypeIds.Creeper;
@@ -37,8 +40,13 @@ export class CreeperEntity extends HostileEntity {
     super.updateRenderInterpolation(alpha); if (!this.model) return;
     const body=interpolateLivingBodyYaw(this.prevRenderYawOffset,this.renderYawOffset,alpha);const head=this.prevHeadYaw+wrapDegrees(this.headYaw-this.prevHeadYaw)*alpha;
     this.model.updatePose(this.prevLegYaw+(this.legYaw-this.prevLegYaw)*alpha,this.legSwing,wrapDegrees(head-body),this.headPitch);
-    this.model.setFuse((this.previousFuseTicks + (this.fuseTicks - this.previousFuseTicks) * alpha) / 28,this.isBurning());
-    this.model.root.rotation.z=this.isDead()?Math.min(this.deathTime/20,1)*Math.PI/2:0;
+    this.model.setFuse((this.previousFuseTicks + (this.fuseTicks - this.previousFuseTicks) * alpha) / 28,false);
+    applyEntityModelVisualState(this.model, this.model.root, {
+      hurtTime: this.hurtTime,
+      maxHurtTime: this.maxHurtTime > 0 ? this.maxHurtTime : MAX_HURT_TIME,
+      dead: this.isDead(),
+      deathTime: this.deathTime,
+    });
   }
   protected override disposeRender(): void { this.model?.dispose(); this.model = null; }
   public override onRestore(): void { this.buildModel(); }

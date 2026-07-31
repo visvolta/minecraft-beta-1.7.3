@@ -20,7 +20,7 @@ const TENTACLE_COUNT = 9;
  * browser (see manual checks) — geometry only cannot confirm skinning.
  */
 export class GhastModel extends EntityModel {
-  private readonly body = new Group();
+  readonly body = new Group();
   private readonly tentacles: Group[] = [];
   private readonly bodyMaterial = this.createMaterial(0xbbbbbb);
   private readonly normalTexture: Texture | undefined;

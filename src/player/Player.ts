@@ -140,6 +140,7 @@ export class Player extends Entity {
 
   public isAlive(): boolean { return this.health > 0; }
   public get isDead():boolean{return this.health<=0;}
+  public isBurning(): boolean { return this.fireTicks > 0; }
   public isCreativeMode(): boolean { return isCreativeMode(this.gameMode); }
   public isSurvivalMode(): boolean { return isSurvivalMode(this.gameMode); }
   public setGameMode(mode: GameMode): void { this.gameMode = mode; if (!this.isCreativeMode()) { this.isFlying = false; } this.fallDistance = 0; }

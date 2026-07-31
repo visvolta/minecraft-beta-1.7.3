@@ -47,7 +47,7 @@ export interface QuadrupedConfig {
  * and disposal automatically.
  */
 export abstract class QuadrupedModel extends EntityModel {
-  protected readonly bodyYawGroup = new Group();
+  readonly bodyYawGroup = new Group();
   protected readonly headGroup = new Group();
   protected readonly legGroups: Group[] = [];
 

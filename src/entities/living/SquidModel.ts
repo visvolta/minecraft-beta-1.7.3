@@ -33,7 +33,7 @@ export class SquidModel extends EntityModel {
    * Holds the swim orientation. Never write to `root` from here — the entity's
    * render interpolation owns world position and body yaw.
    */
-  private readonly pose = new Group();
+  readonly pose = new Group();
   private readonly tentacles: Group[] = [];
 
   public constructor(texture?: Texture) {

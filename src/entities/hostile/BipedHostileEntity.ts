@@ -2,7 +2,10 @@ import type { EntityWorldContext } from '../core/EntityContext';
 import { HostileEntity } from './HostileEntity';
 import { BipedModel } from './models/BipedModel';
 import { wrapDegrees } from '../living/LivingAnimationMath';
-import { interpolateLivingBodyYaw } from '../../rendering/LivingRenderTransform';
+import { applyEntityModelVisualState, interpolateLivingBodyYaw } from '../../rendering/LivingRenderTransform';
+
+/** Hurt-flash duration (matches LivingEntity.MAX_HURT_TIME). */
+const MAX_HURT_TIME = 10;
 
 export abstract class BipedHostileEntity extends HostileEntity {
   protected model: BipedModel | null = null;
@@ -20,9 +23,14 @@ export abstract class BipedHostileEntity extends HostileEntity {
     const head = this.prevHeadYaw + wrapDegrees(this.headYaw - this.prevHeadYaw) * alpha;
     const phase = this.prevLegYaw + (this.legYaw - this.prevLegYaw) * alpha;
     this.model.updatePose(phase,this.legSwing,wrapDegrees(head-body),this.headPitch,attack,this.usesRangedPose,this.rangedPoseProgress);
-    const flash=!this.isDead()&&this.maxHurtTime>0?this.hurtTime/this.maxHurtTime:0;
-    this.model.setHurtFlash(Math.max(flash,this.isBurning()?0.15:0));
-    this.model.root.rotation.z = this.isDead() ? Math.min(this.deathTime / 20, 1) * Math.PI / 2 : 0;
+    // Biped root IS the body group (parts are direct children of root), so it
+    // is the correct group to apply death tilt to.
+    applyEntityModelVisualState(this.model, this.model.root, {
+      hurtTime: this.hurtTime,
+      maxHurtTime: this.maxHurtTime > 0 ? this.maxHurtTime : MAX_HURT_TIME,
+      dead: this.isDead(),
+      deathTime: this.deathTime,
+    });
   }
   protected override disposeRender(): void { this.model?.dispose(); this.model = null; }
   public override onRestore(): void { this.rebuildModel(); }

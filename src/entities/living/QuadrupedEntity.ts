@@ -2,9 +2,10 @@ import type { EntityWorldContext } from '../core/EntityContext';
 import { AnimalEntity, BABY_SCALE } from './AnimalEntity';
 import type { QuadrupedModel } from './QuadrupedModel';
 import { wrapDegrees } from './LivingAnimationMath';
+import { applyEntityModelVisualState } from '../../rendering/LivingRenderTransform';
 
-/** Ticks over which the death-collapse animation plays (matches the linger). */
-const DEATH_ANIM_TICKS = 20;
+/** Hurt-flash duration (matches LivingEntity.MAX_HURT_TIME). */
+const MAX_HURT_TIME = 10;
 
 /**
  * Shared base for four-legged passive mobs (pig, cow, sheep). Owns the
@@ -49,9 +50,12 @@ export abstract class QuadrupedEntity extends AnimalEntity {
     const headPitch = this.prevHeadPitch + (this.headPitch - this.prevHeadPitch) * alpha;
     model.updatePose(legYaw, this.legSwing, bodyYaw, headYaw - bodyYaw, headPitch);
 
-    const flash = !this.isDead() && this.maxHurtTime > 0 ? this.hurtTime / this.maxHurtTime : 0;
-    model.setHurtFlash(Math.max(flash, this.isBurning() ? 0.15 : 0));
-    model.setDeathProgress(this.isDead() ? Math.min(this.deathTime / DEATH_ANIM_TICKS, 1) : 0);
+    applyEntityModelVisualState(model, model.bodyYawGroup, {
+      hurtTime: this.hurtTime,
+      maxHurtTime: this.maxHurtTime > 0 ? this.maxHurtTime : MAX_HURT_TIME,
+      dead: this.isDead(),
+      deathTime: this.deathTime,
+    });
   }
 
   protected override disposeRender(): void {

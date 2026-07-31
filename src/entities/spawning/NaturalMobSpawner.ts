@@ -19,6 +19,7 @@ import { SpiderEntity } from '../hostile/SpiderEntity';
 import { ZombieEntity } from '../hostile/ZombieEntity';
 import { ZombiePigmanEntity } from '../hostile/PigZombieEntity';
 import { SlimeEntity } from '../hostile/SlimeEntity';
+import { isSlimeChunk } from '../SlimeChunkTester';
 import { NaturalPassiveSpawner, PASSIVE_ELIGIBLE_CHUNK_RADIUS, PASSIVE_ATTEMPTS_PER_ROUND, PASSIVE_GROUP_ROUNDS, PASSIVE_MAX_GROUP_SIZE } from './NaturalPassiveSpawner';
 
 export const HOSTILE_CREATURE_CAP = 70;
@@ -30,6 +31,7 @@ export interface NaturalMobSpawnerOptions {
   readonly blockRegistry: BlockRegistry; readonly behaviourRegistry: BlockBehaviourRegistry;
   readonly world: BlockUpdateWorld; readonly climateSampler: ClimateSampler;
   readonly rng: JavaRandom; readonly player: Player;
+  readonly worldSeed: bigint;
   readonly worldSpawn: Readonly<{ x: number; y: number; z: number }>;
   readonly getSkylightSubtracted: () => number;
   readonly getDifficulty: () => Difficulty;
@@ -168,6 +170,10 @@ export class NaturalMobSpawner {
     // the humanoid solid-below + light rules. Beta `EntityGhast.getCanSpawnHere`
     // = rarity 1/20, AABB clear, no liquid, difficulty > 0 (gated upstream).
     if (kind === 'ghast') return this.isValidGhastSpawn(x, y, z);
+    // Slimes have a very specific Beta spawn rule (slime chunks only, Y<16,
+    // no light gate, difficulty gating size>1). The solid-floor check from
+    // canCreatureTypeSpawnAtLocation still applies.
+    if (kind === 'slime') return this.isValidSlimeSpawn(x, y, z);
     if (y < 1 || y >= CHUNK_SIZE_Y - 1) return false;
     const bx = Math.floor(x); const bz = Math.floor(z); if (!this.options.world.isLoaded(bx, bz)) return false;
     const below = this.options.blockRegistry.getById(this.options.world.getBlock(bx, y - 1, bz));
@@ -181,6 +187,41 @@ export class NaturalMobSpawner {
     const effective = Math.max(this.options.world.getBlocklight(bx, y, bz), sky - subtraction);
     if (effective > this.options.rng.nextInt(8)) return false;
     const [width, height] = HOSTILE_DIMENSIONS[kind]; const half = width / 2;
+    const box = new AABB(x - half, y, z - half, x + half, y + height, z + half);
+    if (!this.areAabbChunksLoaded(box) || this.hasBlockOrLiquidCollision(box)) return false;
+    if (this.options.entityManager.getEntitiesInAABB(box).length > 0 || box.intersects(this.options.player.getAABB())) return false;
+    for (const accepted of this.acceptedThisPass) if (box.intersects(accepted)) return false;
+    return true;
+  }
+
+  /**
+   * Beta `EntitySlime.getCanSpawnHere`:
+   *   (size==1 || difficulty>0) && rand.nextInt(10)==0 &&
+   *   chunk.getRandomWithSeed(987234911L).nextInt(10)==0 && posY < 16.0
+   * plus the standard canCreatureTypeSpawnAtLocation floor/air/liquid checks.
+   *
+   * Size of the slime is rolled LATER at construction (1 << rand.nextInt(3)),
+   * so the spawn predicate can only enforce "size==1 allowed any difficulty"
+   * — the per-spawn size roll decides if the slime is big/small. Large slimes
+   * are guarded against Peaceful by SlimeEntity.onTick.
+   */
+  private isValidSlimeSpawn(x: number, y: number, z: number): boolean {
+    if (y < 1 || y >= 16) return false; // Beta posY < 16.0
+    const bx = Math.floor(x); const bz = Math.floor(z); if (!this.options.world.isLoaded(bx, bz)) return false;
+    // Solid floor + air at feet/head (same as canCreatureTypeSpawnAtLocation).
+    const below = this.options.blockRegistry.getById(this.options.world.getBlock(bx, y - 1, bz));
+    const at = this.options.blockRegistry.getById(this.options.world.getBlock(bx, y, bz));
+    const above = this.options.blockRegistry.getById(this.options.world.getBlock(bx, y + 1, bz));
+    if (!below?.solid || at?.solid || at?.isLiquid || above?.solid) return false;
+    if (!this.passesDistanceRules(x, y, z)) return false;
+    // Beta rarity gates: 1/10 per-position AND 1/10 slime-chunk check.
+    if (this.options.rng.nextInt(10) !== 0) return false;
+    const chunkX = bx >> 4; const chunkZ = bz >> 4;
+    if (!isSlimeChunk(this.options.worldSeed, chunkX, chunkZ)) return false;
+    // Slime collision check (0.6×0.6 for size 1; bigger slimes will not spawn
+    // naturally via this path because size is rolled post-construction — but
+    // large slimes are the split children of larger ones, not natural spawns).
+    const [width, height] = HOSTILE_DIMENSIONS.slime; const half = width / 2;
     const box = new AABB(x - half, y, z - half, x + half, y + height, z + half);
     if (!this.areAabbChunksLoaded(box) || this.hasBlockOrLiquidCollision(box)) return false;
     if (this.options.entityManager.getEntitiesInAABB(box).length > 0 || box.intersects(this.options.player.getAABB())) return false;

@@ -43,7 +43,7 @@ export class WolfModel extends EntityModel {
    * entity's render interpolation (world position and body yaw); writing to it
    * from the model would pin the wolf to the world origin.
    */
-  private readonly pose = new Group();
+  readonly pose = new Group();
 
   private readonly head = new Group();
   private readonly rightEar = new Group();
@@ -131,8 +131,10 @@ export class WolfModel extends EntityModel {
    * Applies Beta `ModelWolf.setLivingAnimations` + `setRotationAngles`.
    *
    * `legYaw`/`legSwing` are Beta's limb-swing phase and amount; `headRelYawDeg`
-   * and `headPitchDeg` are the head look relative to the body. Never touches
-   * `root` — the entity owns that transform.
+   * and `headPitchDeg` are the head look relative to the body, ALREADY with the
+   * interested tilt added by the caller. `tailAngleRad` is Beta setTailRotation
+   * value in radians.
+   * Never touches `root` — the entity owns that transform.
    */
   public updatePose(
     tamed: boolean,
@@ -140,22 +142,30 @@ export class WolfModel extends EntityModel {
     sitting: boolean,
     legYaw: number,
     legSwing: number,
-    headRelYawDeg: number,
-    headPitchDeg: number,
+    headRelYawRad: number,
+    headPitchRad: number,
+    tailAngleRad: number,
+    timeShaking: number,
+    prevTimeShaking: number,
   ): void {
     this.collar.visible = tamed;
     this.applyStateTexture(tamed, angry);
 
-    // Head look (Beta divides by 57.295776 to convert degrees → radians).
-    const headYaw = -(headRelYawDeg * Math.PI) / 180;
-    const headPitch = (headPitchDeg * Math.PI) / 180;
+    // Head look (already in radians from the entity, with interested tilt added).
     for (const part of [this.head, this.rightEar, this.leftEar, this.snout]) {
-      part.rotation.y = headYaw;
-      part.rotation.x = headPitch;
+      part.rotation.y = -headRelYawRad; // negate for Y-up/Z-forward mapping
+      part.rotation.x = headPitchRad;
     }
 
-    // Tail yaw: still when angry, otherwise it wags with the walk cycle.
-    this.tail.rotation.y = angry ? 0 : -Math.cos(legYaw * 0.6662) * 1.4 * legSwing;
+    // Wet shake: shake the whole pose around Y while drying off.
+    if (timeShaking > 0) {
+      const shakeProg = (prevTimeShaking + (timeShaking - prevTimeShaking)) / 1.8;
+      const clamped = Math.max(0, Math.min(1, shakeProg));
+      const shakeAngle = Math.sin(clamped * Math.PI) * Math.sin(clamped * Math.PI * 11) * 0.15 * Math.PI;
+      this.pose.rotation.y = shakeAngle;
+    } else {
+      this.pose.rotation.y = 0;
+    }
 
     if (sitting) {
       // Beta sitting pose: body pitched back 45°, mane 72°, forelegs folded.
@@ -173,7 +183,7 @@ export class WolfModel extends EntityModel {
       this.legs[2]!.rotation.x = 5.811947;
       this.setPivot(this.legs[3]!, 0.51, 17, -4);
       this.legs[3]!.rotation.x = 5.811947;
-      this.tail.rotation.x = 0;
+      this.tail.rotation.x = tailAngleRad;
     } else {
       this.setPivot(this.body, 0, 14, 2);
       this.body.rotation.x = 1.5707964;
@@ -192,8 +202,11 @@ export class WolfModel extends EntityModel {
       this.legs[3]!.rotation.x = swing;
       this.legs[1]!.rotation.x = -swing;
       this.legs[2]!.rotation.x = -swing;
-      this.tail.rotation.x = 0;
+      this.tail.rotation.x = tailAngleRad;
     }
+
+    // Tail yaw wag: angry = no wag; otherwise wag with walk cycle.
+    this.tail.rotation.y = angry ? 0 : -Math.cos(legYaw * 0.6662) * 1.4 * legSwing;
   }
 
   /** Sets a part's pivot from Beta rotation-point pixels. */
@@ -209,10 +222,5 @@ export class WolfModel extends EntityModel {
       this.bodyMaterial.map = next;
       this.bodyMaterial.needsUpdate = true;
     }
-  }
-
-  /** Death collapse, applied to the pose group so world placement is untouched. */
-  public setDeathProgress(progress: number): void {
-    this.pose.rotation.z = Math.max(0, Math.min(1, progress)) * (Math.PI / 2);
   }
 }

@@ -9,6 +9,7 @@ import { AABB } from '../../physics/AABB';
 import type { Player } from '../../player/Player';
 import type { Drop } from '../items/BlockDropResolver';
 import { FireballEntity } from '../projectiles/FireballEntity';
+import { applyEntityModelVisualState } from '../../rendering/LivingRenderTransform';
 
 /** Beta `EntityGhast` constants. */
 const GHAST_HEALTH = 10;
@@ -217,6 +218,12 @@ export class GhastEntity extends FlyingEntity {
     model.applyChargeSquish(progress);
     model.setShooting(this.attackCounter > SHOOTING_STATE_THRESHOLD);
     model.updateTentacles(this.age + alpha);
+    applyEntityModelVisualState(model, model.body, {
+      hurtTime: this.hurtTime,
+      maxHurtTime: this.maxHurtTime > 0 ? this.maxHurtTime : 10,
+      dead: this.isDead(),
+      deathTime: this.deathTime,
+    });
   }
 
   protected rebuildModel(): void {

@@ -4,6 +4,10 @@ import type { NbtCompound, NbtTag } from '../../nbt/Nbt';
 import { WaterMobEntity } from './WaterMobEntity';
 import { SquidModel } from './SquidModel';
 import type { Drop } from '../items/BlockDropResolver';
+import { applyEntityModelVisualState } from '../../rendering/LivingRenderTransform';
+
+/** Hurt-flash duration (matches LivingEntity.MAX_HURT_TIME). */
+const MAX_HURT_TIME = 10;
 
 /**
  * Beta 1.7.3 `EntitySquid`. Random 3D swimming in water with tentacle
@@ -127,8 +131,12 @@ export class SquidEntity extends WaterMobEntity {
     const yaw = this.prevSquidYaw + (this.squidYaw - this.prevSquidYaw) * alpha;
     model.updatePose(tentacleAngle, pitch, yaw);
 
-    const flash = !this.isDead() && this.maxHurtTime > 0 ? this.hurtTime / this.maxHurtTime : 0;
-    model.setHurtFlash(flash);
+    applyEntityModelVisualState(model, model.pose, {
+      hurtTime: this.hurtTime,
+      maxHurtTime: this.maxHurtTime > 0 ? this.maxHurtTime : MAX_HURT_TIME,
+      dead: this.isDead(),
+      deathTime: this.deathTime,
+    });
   }
 
   protected rebuildModel(): void {

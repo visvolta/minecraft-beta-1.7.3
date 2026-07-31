@@ -35,30 +35,43 @@ export class AnimalInteractionService {
         drop.velocity.z += (animal.nextInt(201) - 100) / 1000;
       }
       this.inventory.damageItemInSlot(selectedSlot, 1);
-      // Beta `EntitySheep.shearWool` plays mob.sheep.shear at the animal.
       animal.emitShearSound();
       return 'consumed-success';
     }
 
     if (animal instanceof CowEntity && itemId === 'bucket_empty') {
       if (animal.isChild() || !animal.isAlive()) return 'consumed-rejected';
-      // Empty buckets are non-stackable in this inventory, so replacement is atomic.
       this.inventory.setStack(selectedSlot, new ItemStack('bucket_milk', 'item', 1, 0));
       return 'consumed-success';
     }
 
-    // Wolf interactions: bone taming + sit/stand toggle.
+    // ---- Wolf interactions (Beta EntityWolf.interact) ----
     if (animal instanceof WolfEntity) {
       if (animal.wolfTamed) {
-        // Right-click tamed wolf → toggle sitting.
+        // Beta: if owner right-clicks WITH favorite meat AND health<20 → heal (not implemented).
+        // Without food/bone in hand, owner right-click → toggle sitting.
+        if (itemId === 'bone' || this.isWolfFavoriteMeat(itemId)) {
+          // Food healing for tamed wolves — minimal: porkchop (raw/cooked) heals.
+          if (this.isWolfFavoriteMeat(itemId) && animal.health < 20) {
+            this.inventory.decrementSlot(selectedSlot, 1);
+            animal.heal(4);
+            return 'consumed-success';
+          }
+          // Bones do NOT toggle sit when tamed (Beta: bones only work on untamed, non-angry wolves).
+          return 'not-applicable';
+        }
+        // Owner right-click with empty/non-food hand → toggle sitting.
         animal.toggleSitting();
         return 'consumed-success';
       }
-      // Untamed wolf + bone → taming attempt (Beta: 1/3 chance per bone).
+      // Untamed wolf + bone (and NOT angry) → taming attempt.
       if (itemId === 'bone' && !animal.wolfAngry) {
         this.inventory.decrementSlot(selectedSlot, 1);
         if (animal.nextInt(3) === 0) {
           animal.tame('player');
+          animal.setHeartsAfterTame();
+        } else {
+          animal.setSmokeAfterFail();
         }
         return 'consumed-success';
       }
@@ -75,5 +88,10 @@ export class AnimalInteractionService {
     if (!animal.enterLoveMode()) return 'consumed-rejected';
     this.inventory.decrementSlot(selectedSlot, 1);
     return 'consumed-success';
+  }
+
+  /** Beta wolves' favorite meats: porkchop (raw/cooked) — minimal set. */
+  private isWolfFavoriteMeat(id: string | number): boolean {
+    return id === 'porkchop_raw' || id === 'porkchop_cooked';
   }
 }

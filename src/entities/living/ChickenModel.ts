@@ -16,7 +16,7 @@ function deg2rad(degrees: number): number {
  * box of Beta's 6×8×6 rotated 90° about X → effective 6×6×8). Faces +Z at yaw 0.
  */
 export class ChickenModel extends EntityModel {
-  private readonly bodyYawGroup = new Group();
+  readonly bodyYawGroup = new Group();
   private readonly headGroup = new Group();
   private readonly rightLeg = new Group();
   private readonly leftLeg = new Group();

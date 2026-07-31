@@ -120,6 +120,8 @@ import { registerShapedBlockBehaviours } from '../world/behaviours/ShapedBlockBe
 import { FallingBlockManager } from '../world/entities/FallingBlockManager';
 import { FluidAnimationSystem } from '../rendering/fluid/FluidAnimationSystem';
 import { FireAnimationSystem } from '../rendering/fire/FireAnimationSystem';
+import { EntityFireOverlayRenderer } from '../rendering/EntityFireOverlay';
+import { applyLivingVisualState } from '../rendering/LivingRenderTransform';
 import { PortalAnimationSystem } from '../rendering/portal/PortalAnimationSystem';
 import { PortalParticleSystem } from '../rendering/portal/PortalParticleSystem';
 import { PortalTravelState } from '../world/portal/PortalTravelState';
@@ -410,6 +412,7 @@ export class Engine {
   private readonly chunkRenderer: ChunkRenderer;
   private readonly fluidAnimationSystem: FluidAnimationSystem;
   private readonly fireAnimationSystem: FireAnimationSystem;
+  private readonly entityFireOverlay: EntityFireOverlayRenderer;
   private readonly portalAnimation = new PortalAnimationSystem();
   private portalParticles: PortalParticleSystem | undefined;
   /** Beta portal charge/cooldown state, ticked at the fixed 20 Hz rate. */
@@ -755,6 +758,7 @@ export class Engine {
       climateSampler: this.climateSampler,
       rng: worldRng,
       player: this.player,
+      worldSeed,
       worldSpawn: metadata.spawn,
       getSkylightSubtracted: () => this.worldTime.getSkylightSubtracted(),
       getDifficulty: () => metadata.difficulty,
@@ -1110,6 +1114,8 @@ export class Engine {
     this.contextMenuSuppressor = new ContextMenuSuppressor();
     this.fluidAnimationSystem = new FluidAnimationSystem();
     this.fireAnimationSystem = new FireAnimationSystem();
+    this.entityFireOverlay = new EntityFireOverlayRenderer(this.fireAnimationSystem);
+    this.renderer.scene.add(this.entityFireOverlay.object3D);
 
     this.portalParticles = new PortalParticleSystem(this.renderer.scene);
     this.chunkRenderer = new ChunkRenderer(this.renderer.scene, this.chunkManager, blockRegistry, this.atlas, this.fluidAnimationSystem, this.fireAnimationSystem, this.portalAnimation, worldSeed);
@@ -1688,6 +1694,7 @@ export class Engine {
       this.chunkRenderer.dispose();
       this.fluidAnimationSystem.dispose();
       this.fireAnimationSystem.dispose();
+      this.entityFireOverlay.dispose();
       this.armourMaterialCache.dispose();
       this.armourGeometryCache.dispose();
       this.firstPersonHeldBlockMesh.geometry.dispose();
@@ -1820,6 +1827,7 @@ export class Engine {
     this.cameraModeController.update();
     const camera = this.renderer.camera;
     this.cameraModeController.applyTransform(camera, this.player, this.cameraController.getYaw(), this.cameraController.getPitch());
+    const cameraPerspective = this.cameraModeController.getMode() === CameraMode.FIRST_PERSON ? 'first_person' as const : 'third_person' as const;
     this.cameraHurtController.update(camera,this.player,deltaSeconds);
     const survivalUiSuppressed=this.inventoryController.isOpen||this.creativeInventoryController.isOpen||this.craftingTableController.isOpen||this.furnaceController.isOpen||this.chestController.isOpen||this.dispenserController.isOpen||this.signController.isOpen||this.deathScreen.isOpen;
     if(survivalUiSuppressed){this.player.isSprinting=false;this.foodUseController.cancel();this.interactionController.breakingController.reset();}
@@ -2086,6 +2094,35 @@ export class Engine {
     this.activeMinecartAudioLoops.clear();
     for (const uuid of minecartAudioSeen) this.activeMinecartAudioLoops.add(uuid);
     this.boatRenderer.update(this.entityManager, entityAlpha);
+
+    // Shared player-model hurt flash + death rotation. Mobs apply this via
+    // applyEntityModelVisualState in their own updateRenderInterpolation; the
+    // player isn't managed by EntityManager so we drive it here.
+    const playerDead = this.player.health <= 0;
+    applyLivingVisualState(
+      (amount) => this.playerModel.setHurtFlash(amount),
+      this.playerModel.root,
+      {
+        hurtTime: this.player.hurtTime,
+        maxHurtTime: 10,
+        dead: playerDead,
+        deathTime: this.player.deathSequence * 20,
+      },
+    );
+
+    // Entity on-fire overlay: stacked crossed fire quads around every burning
+    // entity (mobs, player third-person, dropped items if they burn). One
+    // shared material/geometry, one draw call for all burning entities.
+    this.entityFireOverlay.beginFrame();
+    this.entityFireOverlay.setFrame(this.fireAnimationSystem.getFrame());
+    this.entityManager.forEachActive((entity) => {
+      this.entityFireOverlay.emit(entity, camera);
+    });
+    // Player third-person fire overlay (only shown while in third-person view).
+    if (cameraPerspective !== 'first_person') {
+      this.entityFireOverlay.emit(this.player, camera);
+    }
+    this.entityFireOverlay.endFrame();
     this.entityParticles.update(deltaSeconds);
     this.debugStatsCollector.recordFrame(deltaSeconds);
     if (this.debugOverlay.isVisible()) {

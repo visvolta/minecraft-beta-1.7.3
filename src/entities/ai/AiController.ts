@@ -49,4 +49,12 @@ export class AiController {
       this.running.add(task);
     }
   }
+
+  /** Immediately stop all running tasks (e.g. on death). */
+  public clear(entity?: LivingEntity): void {
+    for (const task of this.running) {
+      if (entity !== undefined) task.stop(entity);
+    }
+    this.running.clear();
+  }
 }

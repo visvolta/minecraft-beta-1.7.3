@@ -224,6 +224,23 @@ export class PlayerModel {
     }
   }
 
+  /**
+   * Tints the body material toward red for the hurt flash. `amount` is 0 (base
+   * skin colour) to 1 (full red). Called centrally from the engine so the
+   * player model participates in the same shared hurt-flash as every mob.
+   */
+  public setHurtFlash(amount: number): void {
+    const a = Math.max(0, Math.min(1, amount));
+    // Skin-coloured base (Steve-ish) blended toward pure red. When a texture
+    // is applied the color multiply still produces the classic Beta red flash
+    // without ever fully washing out the texture.
+    this.material.color.setRGB(
+      1,
+      1 - a,
+      1 - a,
+    );
+  }
+
   public dispose(): void {
     this.root.removeFromParent();
     for (const geometry of [

@@ -123,6 +123,15 @@ export abstract class Entity {
     this.yOffset = height / 2;
   }
 
+  /**
+   * Whether the entity is currently on fire. LivingEntity overrides this with
+   * its burn-timer logic; non-living entities never burn by default. The fire
+   * overlay renderer calls this to decide whether to draw flame quads.
+   */
+  public isBurning(): boolean {
+    return false;
+  }
+
   /** Moves the entity and aligns its previous position + owner chunk. */
   public setPosition(x: number, y: number, z: number): void {
     this.position.x = x;

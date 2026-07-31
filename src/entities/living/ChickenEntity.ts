@@ -10,8 +10,10 @@ import { LookAtPlayerTask } from '../ai/tasks/LookAtPlayerTask';
 import { DroppedItemEntity } from '../items/DroppedItemEntity';
 import type { Drop } from '../items/BlockDropResolver';
 import { wrapDegrees } from './LivingAnimationMath';
+import { applyEntityModelVisualState } from '../../rendering/LivingRenderTransform';
 
-const DEATH_ANIM_TICKS = 20;
+/** Hurt-flash duration (matches LivingEntity.MAX_HURT_TIME). */
+const MAX_HURT_TIME = 10;
 
 /**
  * A chicken (Beta `EntityChicken`), a small bird built directly on
@@ -161,9 +163,12 @@ export class ChickenEntity extends AnimalEntity {
     const headPitch = Math.max(0, Math.sin(peckPhase)) * 35;
     model.updatePose(legYaw, this.legSwing, bodyYaw, headYaw - bodyYaw, headPitch, wingRotation, wingSpread);
 
-    const flash = !this.isDead() && this.maxHurtTime > 0 ? this.hurtTime / this.maxHurtTime : 0;
-    model.setHurtFlash(Math.max(flash, this.isBurning() ? 0.15 : 0));
-    model.setDeathProgress(this.isDead() ? Math.min(this.deathTime / DEATH_ANIM_TICKS, 1) : 0);
+    applyEntityModelVisualState(model, model.bodyYawGroup, {
+      hurtTime: this.hurtTime,
+      maxHurtTime: this.maxHurtTime > 0 ? this.maxHurtTime : MAX_HURT_TIME,
+      dead: this.isDead(),
+      deathTime: this.deathTime,
+    });
   }
 
   protected override disposeRender(): void {

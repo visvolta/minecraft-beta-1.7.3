@@ -33,7 +33,7 @@ export class SkeletonEntity extends BipedHostileEntity {
     const arrow = new ArrowEntity(this.ctx, this, this.position.x, this.position.y + 1, this.position.z);
     const dx = this.target.position.x - arrow.position.x; const dz = this.target.position.z - arrow.position.z;
     const horizontal = Math.hypot(dx, dz); const dy = this.target.getEyeY() - 0.2 - arrow.position.y + horizontal * 0.2;
-    arrow.launch(dx, dy, dz, 0.6, 12); this.ctx.manager.add(arrow); this.attackTime = 10; this.emitSound('random.bow', 'bow', 1);
+    arrow.launch(dx, dy, dz, 0.6, 12); this.ctx.manager.add(arrow); this.attackTime = 30; this.emitSound('random.bow', 'bow', 1);
     const targetYaw=Math.atan2(dz,dx)*180/Math.PI-90;this.yaw=targetYaw;this.setHeadLookIntent(targetYaw);this.rangedDrawTicks=0;return true;
   }
   public override onTick(ctx: EntityTickContext): void {

@@ -236,14 +236,28 @@ export abstract class LivingEntity extends Entity {
   public onTick(ctx: EntityTickContext): void {
     this.age += 1;
 
-    if (this.health <= 0) {
-      this.onDeathTick();
-      return;
-    }
-
     if (this.hurtTime > 0) this.hurtTime -= 1;
     if (this.hurtResistantTime > 0) this.hurtResistantTime -= 1;
     if (this.attackTime > 0) this.attackTime -= 1;
+
+    if (this.health <= 0) {
+      // Per Beta EntityLiving.onEntityUpdate: death does NOT zero motion
+      // immediately; corpses continue falling/sliding while the animation plays
+      // so the knockback from the killing blow is visible. Only AI/navigation
+      // and active movement intent stop.
+      this.detectEnvironment(ctx);
+      this.moveStrafing = 0;
+      this.moveForward = 0;
+      this.isJumping = false;
+      this.aiController.clear();
+      this.navigation.stop();
+      // Allow gravity / existing velocity to continue, but clamp the motion so
+      // corpses don't fly across the map.
+      this.moveLiving(ctx, 0, 0);
+      this.applyEnvironmentDamage(ctx);
+      this.onDeathTick();
+      return;
+    }
 
     if (this.nextInt(1000) < this.livingSoundTime++) {
       this.livingSoundTime = -this.getTalkInterval();
