@@ -170,36 +170,23 @@ export class BetaTreeDecorator {
         dungeonMs += performance.now() - dungeonStart;
 
         // ---- Underground (clay + ores) ----
-        const undergroundStart = performance.now();
-        const beforeUnderground = this.biomeDecorator.getLastTimings();
         this.biomeDecorator.generateUnderground(scratch, this.random, originX, originZ);
-        const afterUnderground = this.biomeDecorator.getLastTimings();
-        const undergroundDeltaMs = performance.now() - undergroundStart;
         // generateUnderground already accumulated into decorator's internal timings;
-        // we attribute its wall time to clay+ore buckets via decorator's own per-feature timers,
-        // but also keep overall for overhead sanity. The decorator's per-feature timers are more precise.
+        // we attribute its wall time to clay+ore buckets via decorator's own per-feature timers.
         // For Wave1A we trust decorator's internal split.
-        void undergroundDeltaMs;
 
         // ---- Trees ----
         const treeStart = performance.now();
-        const treesBefore = treeCalls;
         this.placeBiomeTreesInstrumented(scratch, biomeId, originX, originZ, (calls, attempts, placements) => {
           treeCalls += calls;
           treeAttempts += attempts;
           treePlacements += placements;
         });
         treeMs += performance.now() - treeStart;
-        void treesBefore;
 
         // ---- Surface (vegetation + springs) ----
         // generateSurface internal timing splits vegetation vs springs via its own _lastTimings
-        const surfaceStart = performance.now();
-        const beforeSurface = this.biomeDecorator.getLastTimings();
-        this.biomeDecorator.generateSurface(scratch, biomeId, originX, originZ);
-        const afterSurface = this.biomeDecorator.getLastTimings();
-        void beforeSurface;
-        void afterSurface;
+        this.biomeDecorator.generateSurface(scratch, this.random, biomeId, originX, originZ);
         // surface overall time will be accounted via decorator's vegetationMs+springMs, not here
 
         // ---- Intentional extras ----
@@ -303,41 +290,6 @@ export class BetaTreeDecorator {
     return metadata;
   }
 
-  private placeBiomeTrees(
-    scratch: ScratchTreeWorld,
-    biomeId: BiomeId,
-    originX: number,
-    originZ: number,
-  ): void {
-    // Legacy plain version – not used in instrumented path, kept for reference
-    const noise = this.terrainGenerator.treeCountNoise.sample2D(originX * 0.5, originZ * 0.5);
-    const noiseTrees = Math.trunc((noise / 8 + this.random.nextDouble() * 4 + 4) / 3);
-
-    let count = 0;
-    if (this.random.nextInt(10) === 0) count++;
-
-    if (biomeId === 'forest' || biomeId === 'rainforest' || biomeId === 'seasonalForest' || biomeId === 'taiga') {
-      count += noiseTrees;
-    }
-
-    if (biomeId === 'forest') count += 5;
-    if (biomeId === 'rainforest') count += 5;
-    if (biomeId === 'seasonalForest') count += 2;
-    if (biomeId === 'taiga') count += 5;
-    if (biomeId === 'desert') count -= 20;
-    if (biomeId === 'tundra') count -= 20;
-    if (biomeId === 'plains') count -= 20;
-
-    if (count <= 0) return;
-
-    for (let i = 0; i < count; i++) {
-      const x = originX + this.random.nextInt(CHUNK_SIZE_X) + 8;
-      const z = originZ + this.random.nextInt(CHUNK_SIZE_Z) + 8;
-      const y = scratch.getHeight(x, z);
-      this.generateTreeForBiome(scratch, biomeId, x, y, z);
-    }
-  }
-
   private placeBiomeTreesInstrumented(
     scratch: ScratchTreeWorld,
     biomeId: BiomeId,
@@ -379,54 +331,6 @@ export class BetaTreeDecorator {
       if (placed) placements++;
     }
     onCounts(1, attempts, placements);
-  }
-
-  private generateTreeForBiome(
-    scratch: ScratchTreeWorld,
-    biomeId: BiomeId,
-    x: number,
-    y: number,
-    z: number,
-  ): void {
-    if (biomeId === 'forest') {
-      if (this.random.nextInt(5) === 0) {
-        this.birchTree.generate(scratch, this.random, x, y, z);
-        return;
-      }
-      if (this.random.nextInt(3) === 0) {
-        const big = new BigTreeGenerator();
-        big.configure(1, 1, 1);
-        big.generate(scratch, this.random, x, y, z);
-        return;
-      }
-      this.treeGenerator.generate(scratch, this.random, x, y, z);
-      return;
-    }
-
-    if (biomeId === 'taiga') {
-      if (this.random.nextInt(3) === 0) this.taigaTree1.generate(scratch, this.random, x, y, z);
-      else this.taigaTree2.generate(scratch, this.random, x, y, z);
-      return;
-    }
-
-    if (biomeId === 'rainforest') {
-      if (this.random.nextInt(3) === 0) {
-        const big = new BigTreeGenerator();
-        big.configure(1, 1, 1);
-        big.generate(scratch, this.random, x, y, z);
-      } else {
-        this.treeGenerator.generate(scratch, this.random, x, y, z);
-      }
-      return;
-    }
-
-    if (this.random.nextInt(10) === 0) {
-      const big = new BigTreeGenerator();
-      big.configure(1, 1, 1);
-      big.generate(scratch, this.random, x, y, z);
-    } else {
-      this.treeGenerator.generate(scratch, this.random, x, y, z);
-    }
   }
 
   private generateTreeForBiomeWithResult(

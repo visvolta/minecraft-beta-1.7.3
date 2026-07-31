@@ -307,25 +307,4 @@ export class BetaBiomeDecorator {
     this._lastTimings.vegetationAttempts += vegetationAttempts;
     this._lastTimings.springAttempts += springAttempts;
   }
-
-  private genStandardOre(
-    world: TreeWorldAccessor,
-    random: JavaRandom,
-    veinsCount: number,
-    generator: WorldGenMinable,
-    minY: number,
-    maxY: number,
-    originX: number,
-    originZ: number,
-  ): void {
-    for (let i = 0; i < veinsCount; i++) {
-      const rx = originX + random.nextInt(16);
-      const ry = random.nextInt(maxY - minY) + minY;
-      const rz = originZ + random.nextInt(16);
-      const t0 = performance.now();
-      generator.generate(world, random, rx, ry, rz);
-      this._lastTimings.oreMs += performance.now() - t0;
-      this._lastTimings.oreVeins++;
-    }
-  }
 }

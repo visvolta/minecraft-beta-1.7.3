@@ -7,7 +7,6 @@ import type { GeneratedChunkFeatures } from '../world/generation/decoration/Gene
 import { BlockRegistry } from '../blocks/BlockRegistry';
 import { registerDefaultBlocks } from '../blocks/registerDefaultBlocks';
 import { buildLightLookupTables, computeInitialChunkLight } from '../world/generation/lighting/initialChunkLight';
-import { getGlobalRawTerrainCache } from '../world/generation/RawTerrainCache';
 
 let generatorSeed: string | null = null;
 let generatorKind: string | null = null;
@@ -18,7 +17,6 @@ registerDefaultBlocks(lightRegistry);
 const lightTables = buildLightLookupTables(lightRegistry);
 
 function getGenerator(seed: string, kind: string): WorldGenerator {
-  const rawCache = kind === 'overworld' ? getGlobalRawTerrainCache() : null;
   if (generator === null || generatorSeed !== seed || generatorKind !== kind) {
     generatorSeed = seed;
     generatorKind = kind;
@@ -26,25 +24,11 @@ function getGenerator(seed: string, kind: string): WorldGenerator {
       generator = new NetherWorldGenerator(BigInt(seed));
     } else {
       generator = new BetaWorldGenerator(BigInt(seed), {
-        rawCache,
-        dimensionId: kind,
-        generationVersion: 2,
-        rawCacheEnabled: true,
-      });
-      rawCache?.ensureIdentity({
-        worldSeed: BigInt(seed),
-        dimensionId: kind,
         enableCaves: true,
-        generationVersion: 2,
+        enableTrees: true,
+        enableIntentionalExtras: true,
       });
     }
-  } else if (rawCache !== null) {
-    rawCache.ensureIdentity({
-      worldSeed: BigInt(seed),
-      dimensionId: kind,
-      enableCaves: true,
-      generationVersion: 2,
-    });
   }
   return generator;
 }
@@ -64,12 +48,7 @@ workerSelf.onmessage = async (event: MessageEvent<ChunkGenerationJob>): Promise<
     const start = performance.now();
     const chunk = new Chunk(job.chunkX, job.chunkZ);
     const gen = getGenerator(job.seed, job.generatorKind);
-    // Wave 4: use async phased population with cooperative yields (8ms budget) to avoid 300-400ms monolith
-    if (gen instanceof BetaWorldGenerator) {
-      await gen.populateAsync(chunk, 8);
-    } else {
-      gen.populate(chunk);
-    }
+    gen.populate(chunk);
     const blocks = chunk.copyBlocks();
     const metadata = chunk.copyMetadata();
     const light = computeInitialChunkLight(blocks, lightTables, { hasSkyLight: job.hasSkyLight });
