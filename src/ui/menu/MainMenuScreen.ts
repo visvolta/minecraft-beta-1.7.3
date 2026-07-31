@@ -40,7 +40,7 @@ export class MainMenuScreen extends Screen {
       this.panoramaRenderer = undefined;
     });
 
-    const version = document.createElement('div'); version.textContent='Minecraft Beta 1.7.3'; version.style.cssText='position:absolute;left:4px;top:4px;color:#888;z-index:1;font:10px Minecraft';
+    const version = document.createElement('div'); version.textContent='Minecraft Beta 1.7.3'; version.style.cssText='position:absolute;left:4px;bottom:4px;color:#ffffff;z-index:1;font:9px Minecraft';
     this.logo.src='/textures/gui/minecraft_title_logo.png'; this.logo.draggable=false; this.logo.style.cssText='position:absolute;width:256px;height:64px;image-rendering:pixelated;z-index:1';
     this.buttons=[new GuiButton('Singleplayer',actions.singleplayer,200,20),new GuiButton('Options...',actions.options,200,20),new GuiButton('Quit Game',actions.quit,200,20)];
     // Every control sits above the panorama canvas (which is z-index 0 and
