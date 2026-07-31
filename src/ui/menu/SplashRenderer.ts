@@ -30,7 +30,7 @@ const ROTATION_DEG = -20;
 
 /** Beta's base scale and pulse amplitude. */
 const BASE_SCALE = 1.8;
-const PULSE_AMPLITUDE = 0.1;
+const PULSE_AMPLITUDE = 0.00001;
 const PULSE_PERIOD_MS = 1000;
 
 /** Beta's auto-shrink: `scale * 100 / (stringWidth + 32)`. */
@@ -72,7 +72,6 @@ export class SplashRenderer {
       'left:0',
       'top:0',
       `color:${SPLASH_COLOR}`,
-      'text-shadow:2px 2px #3f3f3f',
       'white-space:nowrap',
       'pointer-events:none',
       'transform-origin:center center',
