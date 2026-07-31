@@ -1,0 +1,1115 @@
+{
+ "A": {
+  "frame": {
+   "medianMs": 20.02624999980132,
+   "p95Ms": 34.5,
+   "p99Ms": 42.40000009536743,
+   "worstMs": 54.40000009536743,
+   "avgFps": 49.934461020406765,
+   "onePercentLowFps": 20.554984593834924,
+   "updateMs": 1,
+   "renderMs": 11.100000143051147,
+   "longFrames": 11
+  },
+  "queues": {
+   "generation": {
+    "current": 3,
+    "average": 6.266666666666667,
+    "maximum": 140
+   },
+   "meshing": {
+    "current": 13,
+    "average": 11.783333333333333,
+    "maximum": 31
+   },
+   "persistence": {
+    "current": 0,
+    "average": 0.3333333333333333,
+    "maximum": 171
+   },
+   "lightingBfsMax": 4653
+  },
+  "drain": {
+   "generation": {
+    "peakDepth": 100,
+    "lastDrainMs": 0,
+    "currentDepth": 3,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": true,
+    "episodes": 0
+   },
+   "meshing": {
+    "peakDepth": 31,
+    "lastDrainMs": 0,
+    "currentDepth": 13,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": true,
+    "episodes": 0
+   },
+   "persistence": {
+    "peakDepth": 58,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": true,
+    "episodes": 0
+   }
+  },
+  "generationStages": {
+   "terrainMs": 1.7999999523162842,
+   "surfaceMs": 5,
+   "cavesMs": 3.5999999046325684,
+   "decorationMs": 426.2000000476837,
+   "snowIceMs": 0,
+   "totalMs": 436.59999990463257
+  },
+  "lightingCumulative": {
+   "propagationMs": 202.69999885559082,
+   "initializationMs": 0,
+   "borderReconcileMs": 129.6999990940094,
+   "localRelightMs": 645.2000072002411,
+   "propagationCalls": 5862,
+   "nodesProcessed": 429483,
+   "remeshFanOutChunks": 348,
+   "maximumBfsQueueSize": 4653
+  },
+  "streamBudget": {
+   "smoothedFrameMs": 18.88888075379476,
+   "integrations": 1,
+   "integrationMs": 1.5,
+   "lightingMs": 1,
+   "reason": "high-frame+backlog"
+  },
+  "generation": {
+   "queueProcessMs": 0,
+   "workerDurationMs": 438.09999990463257,
+   "integrationMs": 16.200000047683716,
+   "chunksCompleted": 141,
+   "bytesReceived": 0,
+   "transferLatencyMs": 0,
+   "lightingInitMs": 0,
+   "borderReconcileMs": 1.1999998092651367,
+   "neighbourDirtyCount": 2
+  },
+  "meshing": {
+   "jobBuildMs": 0,
+   "dispatchMs": 3,
+   "resultDrainMs": 0,
+   "workerDurationMs": 14,
+   "geometryCreationMs": 0.10000014305114746,
+   "sceneInsertionMs": 0.09999990463256836,
+   "bytesCopied": 0,
+   "bytesTransferred": 0,
+   "bytesReturned": 0,
+   "transferLatencyMs": 0
+  },
+  "lighting": {
+   "propagationMs": 0,
+   "averageBfsQueueSize": 0,
+   "maximumBfsQueueSize": 0,
+   "propagationCalls": 0,
+   "nodesProcessed": 0,
+   "initializationMs": 0,
+   "borderReconcileMs": 0,
+   "localRelightMs": 0,
+   "blockReads": 1,
+   "lightReads": 2,
+   "lightWrites": 0,
+   "opacityQueries": 0,
+   "emissionQueries": 0,
+   "coordinateConversions": 3,
+   "chunkLookups": 3,
+   "missingChunkLookups": 0,
+   "boundaryTraversals": 0,
+   "queuePushes": 0,
+   "removeQueuePushes": 0,
+   "queueNodeAllocations": 0,
+   "remeshFanOutChunks": 0
+  },
+  "meshUpload": {
+   "gpuBufferUploadMs": 0.10000014305114746,
+   "sceneInsertionMs": 0.09999990463256836,
+   "totalUploadMs": 0.20000004768371582,
+   "uploadsThisFrame": 6
+  },
+  "workers": {
+   "active": 0,
+   "completed": 141,
+   "stale": 0,
+   "errors": 0
+  },
+  "render": {
+   "drawCalls": 909,
+   "triangles": 965038,
+   "geometries": 517,
+   "textures": 27
+  },
+  "chunks": {
+   "loaded": 166,
+   "visible": 538,
+   "dirty": 13
+  },
+  "memory": {
+   "jsHeapUsedMb": 226.73119926452637,
+   "jsHeapTotalMb": 264.67078590393066,
+   "geometryMb": 119.16878509521484
+  }
+ },
+ "B": {
+  "frame": {
+   "medianMs": 11.061249999205272,
+   "p95Ms": 14.200000047683716,
+   "p99Ms": 17.40000009536743,
+   "worstMs": 17.899999856948853,
+   "avgFps": 90.40569556531567,
+   "onePercentLowFps": 56.33802854738121,
+   "updateMs": 2.5999999046325684,
+   "renderMs": 9.799999952316284,
+   "longFrames": 11
+  },
+  "queues": {
+   "generation": {
+    "current": 0,
+    "average": 0,
+    "maximum": 140
+   },
+   "meshing": {
+    "current": 0,
+    "average": 0.03333333333333333,
+    "maximum": 31
+   },
+   "persistence": {
+    "current": 0,
+    "average": 0.23333333333333334,
+    "maximum": 171
+   },
+   "lightingBfsMax": 4653
+  },
+  "drain": {
+   "generation": {
+    "peakDepth": 21,
+    "lastDrainMs": 3206.199999809265,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": false,
+    "notDraining": false,
+    "episodes": 4
+   },
+   "meshing": {
+    "peakDepth": 12,
+    "lastDrainMs": 5666.899999856949,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": false,
+    "notDraining": false,
+    "episodes": 6
+   },
+   "persistence": {
+    "peakDepth": 32,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": true,
+    "episodes": 0
+   }
+  },
+  "generationStages": {
+   "terrainMs": 2.1000001430511475,
+   "surfaceMs": 4.5,
+   "cavesMs": 4.199999809265137,
+   "decorationMs": 385.10000014305115,
+   "snowIceMs": 0,
+   "totalMs": 395.90000009536743
+  },
+  "lightingCumulative": {
+   "propagationMs": 123.79999876022339,
+   "initializationMs": 0,
+   "borderReconcileMs": 93.50000166893005,
+   "localRelightMs": 291.3999969959259,
+   "propagationCalls": 3486,
+   "nodesProcessed": 289923,
+   "remeshFanOutChunks": 171,
+   "maximumBfsQueueSize": 3687
+  },
+  "streamBudget": {
+   "smoothedFrameMs": 10.94161975219948,
+   "integrations": 2,
+   "integrationMs": 2.9764749467863383,
+   "lightingMs": 1.984316631190892,
+   "reason": "idle-normalise"
+  },
+  "generation": {
+   "queueProcessMs": 0,
+   "workerDurationMs": 396.7000000476837,
+   "integrationMs": 16.200000047683716,
+   "chunksCompleted": 219,
+   "bytesReceived": 0,
+   "transferLatencyMs": 0,
+   "lightingInitMs": 0,
+   "borderReconcileMs": 1.4000000953674316,
+   "neighbourDirtyCount": 2
+  },
+  "meshing": {
+   "jobBuildMs": 0,
+   "dispatchMs": 2.700000047683716,
+   "resultDrainMs": 0,
+   "workerDurationMs": 21.09999990463257,
+   "geometryCreationMs": 0,
+   "sceneInsertionMs": 0,
+   "bytesCopied": 0,
+   "bytesTransferred": 0,
+   "bytesReturned": 0,
+   "transferLatencyMs": 0
+  },
+  "lighting": {
+   "propagationMs": 0,
+   "averageBfsQueueSize": 0,
+   "maximumBfsQueueSize": 0,
+   "propagationCalls": 0,
+   "nodesProcessed": 0,
+   "initializationMs": 0,
+   "borderReconcileMs": 0,
+   "localRelightMs": 0,
+   "blockReads": 1,
+   "lightReads": 346,
+   "lightWrites": 0,
+   "opacityQueries": 0,
+   "emissionQueries": 0,
+   "coordinateConversions": 347,
+   "chunkLookups": 347,
+   "missingChunkLookups": 0,
+   "boundaryTraversals": 0,
+   "queuePushes": 0,
+   "removeQueuePushes": 0,
+   "queueNodeAllocations": 0,
+   "remeshFanOutChunks": 0
+  },
+  "meshUpload": {
+   "gpuBufferUploadMs": 0,
+   "sceneInsertionMs": 0,
+   "totalUploadMs": 0,
+   "uploadsThisFrame": 0
+  },
+  "workers": {
+   "active": 0,
+   "completed": 219,
+   "stale": 1,
+   "errors": 0
+  },
+  "render": {
+   "drawCalls": 837,
+   "triangles": 666884,
+   "geometries": 877,
+   "textures": 30
+  },
+  "chunks": {
+   "loaded": 194,
+   "visible": 563,
+   "dirty": 0
+  },
+  "memory": {
+   "jsHeapUsedMb": 162.3904266357422,
+   "jsHeapTotalMb": 232.27981185913086,
+   "geometryMb": 112.51836776733398
+  }
+ },
+ "B_settle": {
+  "frame": {
+   "medianMs": 16.613333332538605,
+   "p95Ms": 32.40000009536743,
+   "p99Ms": 42.700000047683716,
+   "worstMs": 50.09999990463257,
+   "avgFps": 60.19261637527107,
+   "onePercentLowFps": 21.48227714338034,
+   "updateMs": 3.200000047683716,
+   "renderMs": 9.200000047683716,
+   "longFrames": 13
+  },
+  "queues": {
+   "generation": {
+    "current": 0,
+    "average": 2.658333333333333,
+    "maximum": 140
+   },
+   "meshing": {
+    "current": 0,
+    "average": 1.8083333333333333,
+    "maximum": 31
+   },
+   "persistence": {
+    "current": 0,
+    "average": 0.26666666666666666,
+    "maximum": 171
+   },
+   "lightingBfsMax": 4653
+  },
+  "drain": {
+   "generation": {
+    "peakDepth": 11,
+    "lastDrainMs": 1352.2000000476837,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": false,
+    "notDraining": false,
+    "episodes": 8
+   },
+   "meshing": {
+    "peakDepth": 12,
+    "lastDrainMs": 26.40000009536743,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": false,
+    "episodes": 11
+   },
+   "persistence": {
+    "peakDepth": 32,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": true,
+    "episodes": 0
+   }
+  },
+  "generationStages": {
+   "terrainMs": 1.5,
+   "surfaceMs": 4.3999998569488525,
+   "cavesMs": 1.2999999523162842,
+   "decorationMs": 298.2000000476837,
+   "snowIceMs": 0,
+   "totalMs": 305.39999985694885
+  },
+  "lightingCumulative": {
+   "propagationMs": 200.89999890327454,
+   "initializationMs": 0,
+   "borderReconcileMs": 162.8000009059906,
+   "localRelightMs": 380.09999442100525,
+   "propagationCalls": 4226,
+   "nodesProcessed": 468756,
+   "remeshFanOutChunks": 206,
+   "maximumBfsQueueSize": 3687
+  },
+  "streamBudget": {
+   "smoothedFrameMs": 11.76720638519561,
+   "integrations": 1,
+   "integrationMs": 1.5,
+   "lightingMs": 1,
+   "reason": "high-frame"
+  },
+  "generation": {
+   "queueProcessMs": 0,
+   "workerDurationMs": 306,
+   "integrationMs": 16.200000047683716,
+   "chunksCompleted": 271,
+   "bytesReceived": 0,
+   "transferLatencyMs": 0,
+   "lightingInitMs": 0,
+   "borderReconcileMs": 1.3000001907348633,
+   "neighbourDirtyCount": 2
+  },
+  "meshing": {
+   "jobBuildMs": 0,
+   "dispatchMs": 2.200000047683716,
+   "resultDrainMs": 0,
+   "workerDurationMs": 14.200000047683716,
+   "geometryCreationMs": 0,
+   "sceneInsertionMs": 0,
+   "bytesCopied": 0,
+   "bytesTransferred": 0,
+   "bytesReturned": 0,
+   "transferLatencyMs": 0
+  },
+  "lighting": {
+   "propagationMs": 0,
+   "averageBfsQueueSize": 0,
+   "maximumBfsQueueSize": 0,
+   "propagationCalls": 0,
+   "nodesProcessed": 0,
+   "initializationMs": 0,
+   "borderReconcileMs": 0,
+   "localRelightMs": 0,
+   "blockReads": 1,
+   "lightReads": 344,
+   "lightWrites": 0,
+   "opacityQueries": 0,
+   "emissionQueries": 0,
+   "coordinateConversions": 345,
+   "chunkLookups": 345,
+   "missingChunkLookups": 4,
+   "boundaryTraversals": 0,
+   "queuePushes": 0,
+   "removeQueuePushes": 0,
+   "queueNodeAllocations": 0,
+   "remeshFanOutChunks": 0
+  },
+  "meshUpload": {
+   "gpuBufferUploadMs": 0,
+   "sceneInsertionMs": 0,
+   "totalUploadMs": 0,
+   "uploadsThisFrame": 0
+  },
+  "workers": {
+   "active": 0,
+   "completed": 271,
+   "stale": 1,
+   "errors": 0
+  },
+  "render": {
+   "drawCalls": 728,
+   "triangles": 687314,
+   "geometries": 859,
+   "textures": 30
+  },
+  "chunks": {
+   "loaded": 191,
+   "visible": 527,
+   "dirty": 0
+  },
+  "memory": {
+   "jsHeapUsedMb": 186.41569900512695,
+   "jsHeapTotalMb": 243.1225128173828,
+   "geometryMb": 107.47906112670898
+  }
+ },
+ "C": {
+  "frame": {
+   "medianMs": 18.33166667521,
+   "p95Ms": 33.60000014305115,
+   "p99Ms": 43.60000014305115,
+   "worstMs": 46.799999952316284,
+   "avgFps": 54.55041364854756,
+   "onePercentLowFps": 22.05071669466197,
+   "updateMs": 0.9000000953674316,
+   "renderMs": 11.699999809265137,
+   "longFrames": 15
+  },
+  "queues": {
+   "generation": {
+    "current": 0,
+    "average": 4.708333333333333,
+    "maximum": 140
+   },
+   "meshing": {
+    "current": 0,
+    "average": 7.633333333333334,
+    "maximum": 31
+   },
+   "persistence": {
+    "current": 0,
+    "average": 0.775,
+    "maximum": 171
+   },
+   "lightingBfsMax": 4653
+  },
+  "drain": {
+   "generation": {
+    "peakDepth": 21,
+    "lastDrainMs": 6229.600000143051,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": false,
+    "notDraining": false,
+    "episodes": 7
+   },
+   "meshing": {
+    "peakDepth": 20,
+    "lastDrainMs": 609.3000001907349,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": false,
+    "episodes": 12
+   },
+   "persistence": {
+    "peakDepth": 42,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": true,
+    "episodes": 0
+   }
+  },
+  "generationStages": {
+   "terrainMs": 1.9000000953674316,
+   "surfaceMs": 5.099999904632568,
+   "cavesMs": 2.6000001430511475,
+   "decorationMs": 411.7000000476837,
+   "snowIceMs": 0,
+   "totalMs": 421.30000019073486
+  },
+  "lightingCumulative": {
+   "propagationMs": 134.19999980926514,
+   "initializationMs": 0,
+   "borderReconcileMs": 135.2999985218048,
+   "localRelightMs": 118.000004529953,
+   "propagationCalls": 1439,
+   "nodesProcessed": 318790,
+   "remeshFanOutChunks": 139,
+   "maximumBfsQueueSize": 3825
+  },
+  "streamBudget": {
+   "smoothedFrameMs": 17.56259735626038,
+   "integrations": 1,
+   "integrationMs": 1.5,
+   "lightingMs": 1,
+   "reason": "high-frame"
+  },
+  "generation": {
+   "queueProcessMs": 0,
+   "workerDurationMs": 422.2999999523163,
+   "integrationMs": 16.200000047683716,
+   "chunksCompleted": 384,
+   "bytesReceived": 0,
+   "transferLatencyMs": 0,
+   "lightingInitMs": 0,
+   "borderReconcileMs": 1.0999999046325684,
+   "neighbourDirtyCount": 2
+  },
+  "meshing": {
+   "jobBuildMs": 0,
+   "dispatchMs": 1.7999999523162842,
+   "resultDrainMs": 0,
+   "workerDurationMs": 10.099999904632568,
+   "geometryCreationMs": 0,
+   "sceneInsertionMs": 0,
+   "bytesCopied": 0,
+   "bytesTransferred": 0,
+   "bytesReturned": 0,
+   "transferLatencyMs": 0
+  },
+  "lighting": {
+   "propagationMs": 0,
+   "averageBfsQueueSize": 0,
+   "maximumBfsQueueSize": 0,
+   "propagationCalls": 0,
+   "nodesProcessed": 0,
+   "initializationMs": 0,
+   "borderReconcileMs": 0,
+   "localRelightMs": 0,
+   "blockReads": 1,
+   "lightReads": 2,
+   "lightWrites": 0,
+   "opacityQueries": 0,
+   "emissionQueries": 0,
+   "coordinateConversions": 3,
+   "chunkLookups": 3,
+   "missingChunkLookups": 0,
+   "boundaryTraversals": 0,
+   "queuePushes": 0,
+   "removeQueuePushes": 0,
+   "queueNodeAllocations": 0,
+   "remeshFanOutChunks": 0
+  },
+  "meshUpload": {
+   "gpuBufferUploadMs": 0,
+   "sceneInsertionMs": 0,
+   "totalUploadMs": 0,
+   "uploadsThisFrame": 0
+  },
+  "workers": {
+   "active": 2,
+   "completed": 384,
+   "stale": 2,
+   "errors": 0
+  },
+  "render": {
+   "drawCalls": 797,
+   "triangles": 628888,
+   "geometries": 724,
+   "textures": 30
+  },
+  "chunks": {
+   "loaded": 191,
+   "visible": 546,
+   "dirty": 0
+  },
+  "memory": {
+   "jsHeapUsedMb": 185.61621189117432,
+   "jsHeapTotalMb": 233.4744577407837,
+   "geometryMb": 92.31299209594727
+  }
+ },
+ "D": {
+  "frame": {
+   "medianMs": 10.902083332339922,
+   "p95Ms": 12.799999952316284,
+   "p99Ms": 14.700000047683716,
+   "worstMs": 18.199999809265137,
+   "avgFps": 91.72558762540382,
+   "onePercentLowFps": 58.30903838724051,
+   "updateMs": 0.5999999046325684,
+   "renderMs": 9.299999952316284,
+   "longFrames": 26
+  },
+  "queues": {
+   "generation": {
+    "current": 0,
+    "average": 0,
+    "maximum": 140
+   },
+   "meshing": {
+    "current": 0,
+    "average": 0,
+    "maximum": 96
+   },
+   "persistence": {
+    "current": 0,
+    "average": 0.2,
+    "maximum": 398
+   },
+   "lightingBfsMax": 4653
+  },
+  "drain": {
+   "generation": {
+    "peakDepth": 58,
+    "lastDrainMs": 9204.400000095367,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": false,
+    "notDraining": false,
+    "episodes": 1
+   },
+   "meshing": {
+    "peakDepth": 3,
+    "lastDrainMs": 12.299999952316284,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": false,
+    "notDraining": false,
+    "episodes": 4
+   },
+   "persistence": {
+    "peakDepth": 363,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": false,
+    "episodes": 0
+   }
+  },
+  "generationStages": {
+   "terrainMs": 1.7000000476837158,
+   "surfaceMs": 4.3999998569488525,
+   "cavesMs": 1.1000001430511475,
+   "decorationMs": 283.7000000476837,
+   "snowIceMs": 0,
+   "totalMs": 290.90000009536743
+  },
+  "lightingCumulative": {
+   "propagationMs": 139.59999918937683,
+   "initializationMs": 0,
+   "borderReconcileMs": 142.70000076293945,
+   "localRelightMs": 107.89999961853027,
+   "propagationCalls": 1058,
+   "nodesProcessed": 352376,
+   "remeshFanOutChunks": 151,
+   "maximumBfsQueueSize": 3598
+  },
+  "streamBudget": {
+   "smoothedFrameMs": 10.755993653047057,
+   "integrations": 2,
+   "integrationMs": 2.9764749467863383,
+   "lightingMs": 1.984316631190892,
+   "reason": "idle-normalise"
+  },
+  "generation": {
+   "queueProcessMs": 0,
+   "workerDurationMs": 291.2999999523163,
+   "integrationMs": 12.700000047683716,
+   "chunksCompleted": 445,
+   "bytesReceived": 0,
+   "transferLatencyMs": 0,
+   "lightingInitMs": 0,
+   "borderReconcileMs": 1.2999999523162842,
+   "neighbourDirtyCount": 2
+  },
+  "meshing": {
+   "jobBuildMs": 0,
+   "dispatchMs": 1.8999998569488525,
+   "resultDrainMs": 0,
+   "workerDurationMs": 11.700000047683716,
+   "geometryCreationMs": 0,
+   "sceneInsertionMs": 0,
+   "bytesCopied": 0,
+   "bytesTransferred": 0,
+   "bytesReturned": 0,
+   "transferLatencyMs": 0
+  },
+  "lighting": {
+   "propagationMs": 0,
+   "averageBfsQueueSize": 0,
+   "maximumBfsQueueSize": 0,
+   "propagationCalls": 0,
+   "nodesProcessed": 0,
+   "initializationMs": 0,
+   "borderReconcileMs": 0,
+   "localRelightMs": 0,
+   "blockReads": 1,
+   "lightReads": 2,
+   "lightWrites": 0,
+   "opacityQueries": 0,
+   "emissionQueries": 0,
+   "coordinateConversions": 3,
+   "chunkLookups": 3,
+   "missingChunkLookups": 0,
+   "boundaryTraversals": 0,
+   "queuePushes": 0,
+   "removeQueuePushes": 0,
+   "queueNodeAllocations": 0,
+   "remeshFanOutChunks": 0
+  },
+  "meshUpload": {
+   "gpuBufferUploadMs": 0,
+   "sceneInsertionMs": 0,
+   "totalUploadMs": 0,
+   "uploadsThisFrame": 0
+  },
+  "workers": {
+   "active": 0,
+   "completed": 445,
+   "stale": 2,
+   "errors": 0
+  },
+  "render": {
+   "drawCalls": 975,
+   "triangles": 520408,
+   "geometries": 770,
+   "textures": 30
+  },
+  "chunks": {
+   "loaded": 171,
+   "visible": 466,
+   "dirty": 0
+  },
+  "memory": {
+   "jsHeapUsedMb": 136.3950777053833,
+   "jsHeapTotalMb": 183.42493534088135,
+   "geometryMb": 72.59823226928711
+  }
+ },
+ "E": {
+  "frame": {
+   "medianMs": 12.019999998807908,
+   "p95Ms": 14.200000047683716,
+   "p99Ms": 14.899999856948853,
+   "worstMs": 15.400000095367432,
+   "avgFps": 83.19467554901628,
+   "onePercentLowFps": 65.57377049180327,
+   "updateMs": 2.799999952316284,
+   "renderMs": 9.700000047683716,
+   "longFrames": 26
+  },
+  "queues": {
+   "generation": {
+    "current": 0,
+    "average": 0,
+    "maximum": 140
+   },
+   "meshing": {
+    "current": 0,
+    "average": 0,
+    "maximum": 96
+   },
+   "persistence": {
+    "current": 0,
+    "average": 0.2,
+    "maximum": 398
+   },
+   "lightingBfsMax": 4653
+  },
+  "drain": {
+   "generation": {
+    "peakDepth": 0,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": false,
+    "notDraining": false,
+    "episodes": 0
+   },
+   "meshing": {
+    "peakDepth": 0,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": false,
+    "notDraining": false,
+    "episodes": 0
+   },
+   "persistence": {
+    "peakDepth": 4,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": true,
+    "episodes": 0
+   }
+  },
+  "generationStages": {
+   "terrainMs": 1.7000000476837158,
+   "surfaceMs": 4.3999998569488525,
+   "cavesMs": 1.1000001430511475,
+   "decorationMs": 283.7000000476837,
+   "snowIceMs": 0,
+   "totalMs": 290.90000009536743
+  },
+  "lightingCumulative": {
+   "propagationMs": 0,
+   "initializationMs": 0,
+   "borderReconcileMs": 0,
+   "localRelightMs": 2.59999942779541,
+   "propagationCalls": 0,
+   "nodesProcessed": 0,
+   "remeshFanOutChunks": 0,
+   "maximumBfsQueueSize": 0
+  },
+  "streamBudget": {
+   "smoothedFrameMs": 11.61655785127996,
+   "integrations": 2,
+   "integrationMs": 2.9764749467863383,
+   "lightingMs": 1.984316631190892,
+   "reason": "idle-normalise"
+  },
+  "generation": {
+   "queueProcessMs": 0,
+   "workerDurationMs": 291.2999999523163,
+   "integrationMs": 12.700000047683716,
+   "chunksCompleted": 445,
+   "bytesReceived": 0,
+   "transferLatencyMs": 0,
+   "lightingInitMs": 0,
+   "borderReconcileMs": 1.2999999523162842,
+   "neighbourDirtyCount": 2
+  },
+  "meshing": {
+   "jobBuildMs": 0,
+   "dispatchMs": 1.8999998569488525,
+   "resultDrainMs": 0,
+   "workerDurationMs": 10.799999952316284,
+   "geometryCreationMs": 0,
+   "sceneInsertionMs": 0,
+   "bytesCopied": 0,
+   "bytesTransferred": 0,
+   "bytesReturned": 0,
+   "transferLatencyMs": 0
+  },
+  "lighting": {
+   "propagationMs": 0,
+   "averageBfsQueueSize": 0,
+   "maximumBfsQueueSize": 0,
+   "propagationCalls": 0,
+   "nodesProcessed": 0,
+   "initializationMs": 0,
+   "borderReconcileMs": 0,
+   "localRelightMs": 0,
+   "blockReads": 1,
+   "lightReads": 348,
+   "lightWrites": 0,
+   "opacityQueries": 0,
+   "emissionQueries": 0,
+   "coordinateConversions": 345,
+   "chunkLookups": 345,
+   "missingChunkLookups": 0,
+   "boundaryTraversals": 0,
+   "queuePushes": 0,
+   "removeQueuePushes": 0,
+   "queueNodeAllocations": 0,
+   "remeshFanOutChunks": 0
+  },
+  "meshUpload": {
+   "gpuBufferUploadMs": 0,
+   "sceneInsertionMs": 0,
+   "totalUploadMs": 0,
+   "uploadsThisFrame": 0
+  },
+  "workers": {
+   "active": 0,
+   "completed": 445,
+   "stale": 2,
+   "errors": 0
+  },
+  "render": {
+   "drawCalls": 1213,
+   "triangles": 541046,
+   "geometries": 1233,
+   "textures": 30
+  },
+  "chunks": {
+   "loaded": 171,
+   "visible": 466,
+   "dirty": 0
+  },
+  "memory": {
+   "jsHeapUsedMb": 124.44075393676758,
+   "jsHeapTotalMb": 182.86958694458008,
+   "geometryMb": 72.60269546508789
+  }
+ },
+ "F": {
+  "frame": {
+   "medianMs": 13.362916667262713,
+   "p95Ms": 18.300000190734863,
+   "p99Ms": 20.700000047683716,
+   "worstMs": 24.5,
+   "avgFps": 74.83396214314955,
+   "onePercentLowFps": 40.98360659742317,
+   "updateMs": 3.200000047683716,
+   "renderMs": 12.099999904632568,
+   "longFrames": 26
+  },
+  "queues": {
+   "generation": {
+    "current": 0,
+    "average": 0,
+    "maximum": 140
+   },
+   "meshing": {
+    "current": 0,
+    "average": 0.275,
+    "maximum": 96
+   },
+   "persistence": {
+    "current": 0,
+    "average": 0.2,
+    "maximum": 398
+   },
+   "lightingBfsMax": 4653
+  },
+  "drain": {
+   "generation": {
+    "peakDepth": 0,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": false,
+    "notDraining": false,
+    "episodes": 0
+   },
+   "meshing": {
+    "peakDepth": 4,
+    "lastDrainMs": 17.100000143051147,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": false,
+    "episodes": 18
+   },
+   "persistence": {
+    "peakDepth": 4,
+    "lastDrainMs": 0,
+    "currentDepth": 0,
+    "steadyStateDepth": 0,
+    "busy": true,
+    "notDraining": true,
+    "episodes": 0
+   }
+  },
+  "generationStages": {
+   "terrainMs": 1.7000000476837158,
+   "surfaceMs": 4.3999998569488525,
+   "cavesMs": 1.1000001430511475,
+   "decorationMs": 283.7000000476837,
+   "snowIceMs": 0,
+   "totalMs": 290.90000009536743
+  },
+  "lightingCumulative": {
+   "propagationMs": 0,
+   "initializationMs": 0,
+   "borderReconcileMs": 0,
+   "localRelightMs": 39.19999814033508,
+   "propagationCalls": 13,
+   "nodesProcessed": 87,
+   "remeshFanOutChunks": 13,
+   "maximumBfsQueueSize": 27
+  },
+  "streamBudget": {
+   "smoothedFrameMs": 12.638618786460079,
+   "integrations": 2,
+   "integrationMs": 2.9764749467863383,
+   "lightingMs": 1.984316631190892,
+   "reason": "idle-normalise"
+  },
+  "generation": {
+   "queueProcessMs": 0,
+   "workerDurationMs": 291.2999999523163,
+   "integrationMs": 12.700000047683716,
+   "chunksCompleted": 445,
+   "bytesReceived": 0,
+   "transferLatencyMs": 0,
+   "lightingInitMs": 0,
+   "borderReconcileMs": 1.2999999523162842,
+   "neighbourDirtyCount": 2
+  },
+  "meshing": {
+   "jobBuildMs": 0.19999980926513672,
+   "dispatchMs": 3.700000047683716,
+   "resultDrainMs": 0,
+   "workerDurationMs": 7.900000095367432,
+   "geometryCreationMs": 0,
+   "sceneInsertionMs": 0,
+   "bytesCopied": 786432,
+   "bytesTransferred": 786432,
+   "bytesReturned": 0,
+   "transferLatencyMs": 0
+  },
+  "lighting": {
+   "propagationMs": 0,
+   "averageBfsQueueSize": 0,
+   "maximumBfsQueueSize": 0,
+   "propagationCalls": 0,
+   "nodesProcessed": 0,
+   "initializationMs": 0,
+   "borderReconcileMs": 0,
+   "localRelightMs": 0.20000004768371582,
+   "blockReads": 4,
+   "lightReads": 329,
+   "lightWrites": 0,
+   "opacityQueries": 4,
+   "emissionQueries": 0,
+   "coordinateConversions": 335,
+   "chunkLookups": 335,
+   "missingChunkLookups": 0,
+   "boundaryTraversals": 0,
+   "queuePushes": 0,
+   "removeQueuePushes": 0,
+   "queueNodeAllocations": 0,
+   "remeshFanOutChunks": 0
+  },
+  "meshUpload": {
+   "gpuBufferUploadMs": 0,
+   "sceneInsertionMs": 0,
+   "totalUploadMs": 0,
+   "uploadsThisFrame": 0
+  },
+  "workers": {
+   "active": 0,
+   "completed": 445,
+   "stale": 2,
+   "errors": 0
+  },
+  "render": {
+   "drawCalls": 1143,
+   "triangles": 551796,
+   "geometries": 1123,
+   "textures": 31
+  },
+  "chunks": {
+   "loaded": 171,
+   "visible": 466,
+   "dirty": 2
+  },
+  "memory": {
+   "jsHeapUsedMb": 129.94824981689453,
+   "jsHeapTotalMb": 186.68937301635742,
+   "geometryMb": 73.64822006225586
+  }
+ }
+}
