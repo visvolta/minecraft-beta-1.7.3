@@ -168,13 +168,31 @@ export class Renderer {
     this.renderer.forceContextLoss();
   }
 
+  /**
+   * Draw-call/triangle totals for the WORLD scene pass of the last frame.
+   *
+   * `WebGLRenderer.info.render` is reset on every `render()` call, and with AA
+   * enabled the EffectComposer's fullscreen post passes run last — so sampling
+   * `info` after `render()` reported the post-processing quad (2 calls, 13
+   * triangles) instead of the terrain. Captured here, immediately after the
+   * scene pass, before any post/HUD pass can overwrite it.
+   */
+  public lastWorldDrawCalls = 0;
+  public lastWorldTriangles = 0;
+
   /** World render only — call HUD/UI after this so AA does not blur GUI. */
   public render(): void {
     if (this.aaMode === 'off') {
       this.renderer.render(this.scene, this.camera);
+      this.captureWorldStats();
       return;
     }
-    this.aaPipeline.render();
+    this.aaPipeline.render(() => this.captureWorldStats());
+  }
+
+  private captureWorldStats(): void {
+    this.lastWorldDrawCalls = this.renderer.info.render.calls;
+    this.lastWorldTriangles = this.renderer.info.render.triangles;
   }
 
   public setAaMode(mode: AaMode): void {

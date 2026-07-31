@@ -202,6 +202,21 @@ export interface PerformanceSnapshot {
   readonly longFrameThresholdMs: number;
   /** Per-stage generation attribution from the most recent chunk. */
   readonly generationStages: GenerationStageTimings;
+  /**
+   * Lighting cost accumulated over the measurement window. The per-frame
+   * `lighting` field is drained each frame and is near-zero at rest.
+   */
+  /** Adaptive streaming budget state (Wave 2 scheduler). */
+  readonly streamBudget: {
+    readonly smoothedFrameMs: number; readonly integrations: number;
+    readonly integrationMs: number; readonly lightingMs: number; readonly reason: string;
+  };
+  readonly lightingCumulative: {
+    readonly propagationMs: number; readonly initializationMs: number;
+    readonly borderReconcileMs: number; readonly localRelightMs: number;
+    readonly propagationCalls: number; readonly nodesProcessed: number;
+    readonly remeshFanOutChunks: number; readonly maximumBfsQueueSize: number;
+  };
   /** Drain behaviour for each pipeline queue. */
   readonly drain: {
     readonly generation: QueueDrainStats;
@@ -293,6 +308,13 @@ export class PerformanceProfiler {
   private updateStart = 0;
   private renderStart = 0;
   private lastFrameTime = 0;
+
+  /**
+   * Last frame's wall-clock delta. Exposed so the streaming scheduler can feed
+   * its EMA even when the profiler itself is disabled (the value is recorded
+   * unconditionally in endFrame).
+   */
+  public get lastFrameTimeMs(): number { return this.lastFrameTime; }
   private lastUpdateTime = 0;
   private lastRenderTime = 0;
   private meshUploadsThisFrame = 0;
@@ -340,8 +362,10 @@ export class PerformanceProfiler {
   }
 
   public beginFrame(): void {
-    if (!this.enabled) return;
+    // Always stamp the frame start so endFrame() can produce a valid delta
+    // for the streaming scheduler even with the profiler disabled.
     this.frameStart = performance.now();
+    if (!this.enabled) return;
     this.meshUploadsThisFrame = 0;
     this.profilerSelfMs = 0;
     this.debugCollectMs = 0;
@@ -349,9 +373,13 @@ export class PerformanceProfiler {
   }
 
   public endFrame(): void {
+    // The frame delta is recorded unconditionally: the streaming scheduler
+    // consumes it for its EMA and must behave identically whether or not the
+    // developer profiler is switched on.
+    const frameEnd = performance.now();
+    this.lastFrameTime = frameEnd - this.frameStart;
     if (!this.enabled) return;
-    const start = performance.now();
-    this.lastFrameTime = start - this.frameStart;
+    const start = frameEnd;
     this.frameSamples.push(this.lastFrameTime);
     if (this.frameSamples.length > FRAME_WINDOW) this.frameSamples.shift();
     this.captureLongFrame(start);
@@ -398,11 +426,43 @@ export class PerformanceProfiler {
   public recordGenerationTimings(t: GenerationSubTimings): void { if (this.enabled) this.generationTimings = t; }
   public recordMeshingTimings(t: MeshingSubTimings): void { if (this.enabled) this.meshingTimings = t; }
   public recordWeatherTimings(t: WeatherSubTimings): void { if (this.enabled) this.weatherTimings = t; }
-  public recordLightingTimings(t: LightingSubTimings): void { if (this.enabled) this.lightingTimings = t; }
+  public recordLightingTimings(t: LightingSubTimings): void {
+    if (!this.enabled) return;
+    this.lightingTimings = t;
+    // LightEngine.drainBfsMetrics() resets every frame, so the raw snapshot
+    // only ever shows the LAST frame — which reads as zero whenever the final
+    // frame did no lighting work. Accumulate so a benchmark leg reports the
+    // lighting cost actually incurred over the window.
+    this.lightingCumulative.propagationMs += t.propagationMs;
+    this.lightingCumulative.initializationMs += t.initializationMs;
+    this.lightingCumulative.borderReconcileMs += t.borderReconcileMs;
+    this.lightingCumulative.localRelightMs += t.localRelightMs;
+    this.lightingCumulative.propagationCalls += t.propagationCalls;
+    this.lightingCumulative.nodesProcessed += t.nodesProcessed;
+    this.lightingCumulative.remeshFanOutChunks += t.remeshFanOutChunks;
+    if (t.maximumBfsQueueSize > this.lightingCumulative.maximumBfsQueueSize) {
+      this.lightingCumulative.maximumBfsQueueSize = t.maximumBfsQueueSize;
+    }
+  }
+
+  /** Cumulative lighting cost since the last {@link resetDrainTracking}. */
+  private streamBudget = { smoothedFrameMs: 0, integrations: 0, integrationMs: 0, lightingMs: 0, reason: 'n/a' };
+  public recordStreamBudget(b: { smoothedFrameMs: number; integrations: number; integrationMs: number; lightingMs: number; reason: string }): void {
+    if (this.enabled) this.streamBudget = b;
+  }
+
+  private lightingCumulative = {
+    propagationMs: 0, initializationMs: 0, borderReconcileMs: 0, localRelightMs: 0,
+    propagationCalls: 0, nodesProcessed: 0, remeshFanOutChunks: 0, maximumBfsQueueSize: 0,
+  };
   public recordGenerationStages(t: GenerationStageTimings): void { if (this.enabled) this.generationStages = t; }
 
   /** Resets drain tracking; call at the start of a benchmark leg. */
   public resetDrainTracking(): void {
+    this.lightingCumulative = {
+      propagationMs: 0, initializationMs: 0, borderReconcileMs: 0, localRelightMs: 0,
+      propagationCalls: 0, nodesProcessed: 0, remeshFanOutChunks: 0, maximumBfsQueueSize: 0,
+    };
     this.generationDrain.reset();
     this.meshingDrain.reset();
     this.persistenceDrain.reset();
@@ -535,6 +595,8 @@ export class PerformanceProfiler {
       longFrameCount: this.longFrames.length,
       longFrameThresholdMs: this.longFrameThresholdMs,
       generationStages: this.generationStages,
+      streamBudget: this.streamBudget,
+      lightingCumulative: { ...this.lightingCumulative },
       drain: {
         generation: this.generationDrain.getStats(),
         meshing: this.meshingDrain.getStats(),

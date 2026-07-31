@@ -10,8 +10,20 @@ import { ChunkGenerationQueue, type ChunkGenerationStats } from './streaming/Chu
 import type { WorldContextIdentity } from './streaming/ChunkJobTypes';
 import type { WorldPersistenceService } from '../persistence2/WorldPersistenceService';
 import { RecordCorruptionError } from '../persistence2/codec/PersistenceError';
+import { AdaptiveStreamBudget } from './streaming/AdaptiveStreamBudget';
 
 /** A completed chunk result waiting to be adopted under the frame budget. */
+/** One integration candidate with its computed priority (reused each frame). */
+interface IntegrationCandidate {
+  key: number;
+  entry: PendingIntegration;
+  score: number;
+}
+
+function compareIntegrationScore(a: IntegrationCandidate, b: IntegrationCandidate): number {
+  return a.score - b.score;
+}
+
 interface PendingIntegration {
   readonly chunk: Chunk;
   /** Already-resident managed chunk for persisted reads; undefined for generated. */
@@ -57,12 +69,20 @@ export interface ChunkIntegrationStats {
  * Chunks inside CRITICAL_CHUNK_RADIUS bypass the budget so the area
  * immediately around the player can never visibly fail to appear.
  */
-const MAX_INTEGRATIONS_PER_FRAME = 2;
-const MAX_INTEGRATION_MS_PER_FRAME = 3;
+/*
+ * The former fixed integration budget (2 chunks / 3 ms) is now the BASE value
+ * inside AdaptiveStreamBudget, which scales it by smoothed frame time and
+ * pipeline pressure while guaranteeing a non-zero floor.
+ */
 
 const MAX_SYNC_GENERATION_JOBS_PER_FRAME = 1;
 const MAX_SYNC_GENERATION_MS_PER_FRAME = 6;
 const CRITICAL_CHUNK_RADIUS = 2;
+/**
+ * A queued integration older than this bypasses the budget. Guarantees no
+ * chunk can be starved indefinitely by a stream of closer arrivals.
+ */
+const INTEGRATION_STARVATION_MS = 1500;
 const GENERATION_BACKPRESSURE_MESH_QUEUE = 32;
 const GENERATION_BACKPRESSURE_UPLOAD_QUEUE = 8;
 
@@ -115,6 +135,13 @@ export class ChunkStreamer {
   private lastNeighbourDirtyCount = 0;
   /** Completed results awaiting budgeted adoption, keyed by chunk. */
   private readonly pendingIntegrations = new Map<number, PendingIntegration>();
+  /** Reused per-frame ordering scratch; avoids allocating in the hot path. */
+  private readonly integrationScratch: IntegrationCandidate[] = [];
+  /** Adaptive frame-time/pressure budget for integration and lighting. */
+  private readonly budget = new AdaptiveStreamBudget();
+  /** Latest camera/movement heading, for integration priority. */
+  private priorityDirX = 0;
+  private priorityDirZ = -1;
   private lastIntegrationQueueDepth = 0;
   private lastIntegrationLatencyMs = 0;
   private stalePendingIntegrations = 0;
@@ -291,6 +318,8 @@ export class ChunkStreamer {
     movementZ: number,
     downstreamMeshQueue: number,
     downstreamUploadQueue: number,
+    /** Last frame's wall-clock delta, for the adaptive budget. */
+    frameMs = 0,
   ): void {
     if (this.disposed || this.halted || this.quiescing) return;
     const chunkX = Math.floor(cameraWorldX / CHUNK_SIZE_X);
@@ -317,6 +346,22 @@ export class ChunkStreamer {
       this.lastPriorityHeadingZ = priorityHeading.z;
       this.started = true;
     }
+
+    // Priority heading: movement when actually moving, else where the camera
+    // looks. During a fast turn the travel direction still matters, so
+    // movement wins when present.
+    this.priorityDirX = priorityHeading.x;
+    this.priorityDirZ = priorityHeading.z;
+
+    // Drive the adaptive budget from smoothed frame time and total pipeline
+    // pressure. Called every frame; the budget itself rate-limits changes.
+    this.budget.sampleFrame(frameMs);
+    this.budget.update({
+      generationQueue: this.generationQueue.getStats().queued,
+      meshQueue: downstreamMeshQueue,
+      pendingUploads: downstreamUploadQueue,
+      pendingLighting: this.pendingIntegrations.size,
+    });
 
     const allowNonCriticalDispatch =
       downstreamMeshQueue < GENERATION_BACKPRESSURE_MESH_QUEUE &&
@@ -356,25 +401,37 @@ export class ChunkStreamer {
       return;
     }
 
-    const ordered = [...this.pendingIntegrations.entries()].sort((a, b) => {
-      const da = Math.max(Math.abs(a[1].chunk.chunkX - cameraChunkX), Math.abs(a[1].chunk.chunkZ - cameraChunkZ));
-      const db = Math.max(Math.abs(b[1].chunk.chunkX - cameraChunkX), Math.abs(b[1].chunk.chunkZ - cameraChunkZ));
-      return da - db;
-    });
+    // Reused scratch array: this runs every frame, and allocating a fresh
+    // array plus entry tuples here was pure garbage in the hot path.
+    const scratch = this.integrationScratch;
+    scratch.length = 0;
+    const nowMs = performance.now();
+    for (const [key, entry] of this.pendingIntegrations) {
+      scratch.push({ key, entry, score: this.integrationScore(entry, cameraChunkX, cameraChunkZ, nowMs) });
+    }
+    scratch.sort(compareIntegrationScore);
 
     const start = performance.now();
     let adopted = 0;
+    // Budget comes from the adaptive scheduler, which guarantees a non-zero
+    // floor so integration can never stall completely.
+    const budget = this.budget.budget;
 
-    for (const [key, entry] of ordered) {
+    for (const item of scratch) {
+      const key = item.key;
+      const entry = item.entry;
       const distance = Math.max(
         Math.abs(entry.chunk.chunkX - cameraChunkX),
         Math.abs(entry.chunk.chunkZ - cameraChunkZ),
       );
-      const critical = distance <= CRITICAL_CHUNK_RADIUS;
+      // Critical ring and starved jobs bypass the budget: the area around the
+      // player must always appear, and no chunk may wait indefinitely.
+      const starved = nowMs - entry.readyAtMs >= INTEGRATION_STARVATION_MS;
+      const critical = distance <= CRITICAL_CHUNK_RADIUS || starved;
 
       if (!critical) {
-        if (adopted >= MAX_INTEGRATIONS_PER_FRAME) break;
-        if (performance.now() - start >= MAX_INTEGRATION_MS_PER_FRAME) break;
+        if (adopted >= budget.integrations) break;
+        if (performance.now() - start >= budget.integrationMs) break;
       }
 
       this.pendingIntegrations.delete(key);
@@ -391,6 +448,50 @@ export class ChunkStreamer {
     }
 
     this.lastIntegrationQueueDepth = this.pendingIntegrations.size;
+  }
+
+  /**
+   * Integration priority.
+   *
+   * Lower is better. Combines, in order of influence:
+   *   - distance to the camera (dominant term)
+   *   - heading alignment: chunks ahead of the player's view/movement first
+   *   - pipeline completion: a generated+lit chunk waiting only for adoption
+   *     becomes visible far sooner than a fresh one, so it is worth more
+   *   - job age: a starvation credit so nothing waits forever
+   *
+   * Beta parity is unaffected — this is ordering only, never what gets loaded.
+   */
+  private integrationScore(
+    entry: PendingIntegration,
+    cameraChunkX: number,
+    cameraChunkZ: number,
+    nowMs: number,
+  ): number {
+    const dx = entry.chunk.chunkX - cameraChunkX;
+    const dz = entry.chunk.chunkZ - cameraChunkZ;
+    const distance = Math.max(Math.abs(dx), Math.abs(dz));
+    let score = distance * 100;
+
+    // Heading alignment (camera direction blended with movement upstream).
+    const len = Math.hypot(dx, dz);
+    if (len > 0.0001) {
+      const dot = (dx / len) * this.priorityDirX + (dz / len) * this.priorityDirZ;
+      if (dot > 0.55) score -= 220;        // straight ahead
+      else if (dot > 0.1) score -= 90;     // broadly ahead
+      else if (dot < -0.35) score += 120;  // behind the player
+    }
+
+    // Persisted chunks skip generation entirely and are nearly ready.
+    if (entry.persisted) score -= 60;
+    // Chunks whose lighting is already trusted need no initialisation pass.
+    if (entry.trustLighting) score -= 40;
+
+    // Starvation credit grows with age so old jobs eventually win.
+    const ageMs = nowMs - entry.readyAtMs;
+    if (ageMs > 0) score -= Math.min(600, ageMs * 0.5);
+
+    return score;
   }
 
   /** The single staged adoption path: light -> border reconcile -> notify. */
@@ -421,6 +522,11 @@ export class ChunkStreamer {
 
   public getGenerationStats(): ChunkGenerationStats {
     return this.generationQueue.getStats();
+  }
+
+  /** Adaptive budget diagnostics for the profiler/benchmark. */
+  public getBudgetStats(): ReturnType<AdaptiveStreamBudget['getStats']> {
+    return this.budget.getStats();
   }
 
   public getIntegrationStats(): ChunkIntegrationStats {

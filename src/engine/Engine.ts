@@ -234,6 +234,13 @@ interface EntityLightingUniforms {
 
 const MAX_DELTA_SECONDS = 0.1;
 const METADATA_AUTOSAVE_MS = 30_000;
+/**
+ * Hard ceiling on autosave deferral. However heavy streaming gets, metadata is
+ * never delayed beyond this: world integrity outranks frame time.
+ */
+const AUTOSAVE_MAX_DEFER_MS = 90_000;
+/** Pipeline depth at which autosave yields to streaming. */
+const AUTOSAVE_PRESSURE_QUEUE = 24;
 const CHUNK_SAVE_PUMP_INTERVAL_MS = 500;
 const CHUNK_SAVE_PUMP_MAX_CHUNKS = 2;
 const RAIN_COVER_OFFSETS = [-2, 0, 2] as const;
@@ -1169,6 +1176,8 @@ export class Engine {
       precipitationSimulator: this.precipitationSimulator,
       blockUpdateWorld: this.blockUpdateWorld,
       chestManager: this.chestManager,
+      player: this.player,
+      cameraController: this.cameraController,
       chunkRenderer: this.chunkRenderer,
       renderDistance: {
         getState: () => ({
@@ -1755,7 +1764,19 @@ export class Engine {
     }
     const now = performance.now();
     if (now - this.lastChunkSavePumpMs >= CHUNK_SAVE_PUMP_INTERVAL_MS) { this.lastChunkSavePumpMs = now; void this.pumpChunkSaves(); }
-    if (now - this.lastMetadataAutosaveMs >= METADATA_AUTOSAVE_MS) { this.lastMetadataAutosaveMs = now; void this.saveMetadata(false); }
+    // Autosave backs off while the streaming pipeline is under heavy load, so
+    // serialisation does not compete with chunk integration during
+    // exploration. Deferral is BOUNDED: past AUTOSAVE_MAX_DEFER_MS the save
+    // runs regardless of pressure. Dirty state is never discarded — only the
+    // timing of the write moves — and Save-and-Quit bypasses this entirely
+    // (it calls saveMetadata directly with WRITE_PRIORITY_FORCED).
+    if (now - this.lastMetadataAutosaveMs >= METADATA_AUTOSAVE_MS) {
+      const overdue = now - this.lastMetadataAutosaveMs >= AUTOSAVE_MAX_DEFER_MS;
+      if (overdue || !this.isStreamingUnderPressure()) {
+        this.lastMetadataAutosaveMs = now;
+        void this.saveMetadata(false);
+      }
+    }
     this.chatDisplay?.update(); this.chestManager.update(); this.chestRenderer.update(deltaSeconds); this.signTextRenderer.update(); this.furnaceManager.tick(this.blockUpdateWorld, this.smeltingRegistry, this.fuelRegistry);
     
     for (const drop of this.worldEventQueue.drainBlockDrops()) {
@@ -1871,7 +1892,7 @@ export class Engine {
     }
 
     const preStreamMeshingStats = this.chunkRenderer.getMeshingStats();
-    this.chunkStreamer.update(camera.position.x, camera.position.z, this.cameraController.getYaw(), this.player.velocity.x, this.player.velocity.z, preStreamMeshingStats.queued, preStreamMeshingStats.pendingUploads);
+    this.chunkStreamer.update(camera.position.x, camera.position.z, this.cameraController.getYaw(), this.player.velocity.x, this.player.velocity.z, preStreamMeshingStats.queued, preStreamMeshingStats.pendingUploads, this.performanceProfiler.lastFrameTimeMs);
     const generationStats = this.chunkStreamer.getGenerationStats();
     const integrationStats = this.chunkStreamer.getIntegrationStats();
     const meshingStats = this.chunkRenderer.getMeshingStats();
@@ -1889,6 +1910,7 @@ export class Engine {
       neighbourDirtyCount: integrationStats.lastNeighbourDirtyCount,
     });
     this.performanceProfiler.recordGenerationStages(generationStats.lastStageTimings);
+    this.performanceProfiler.recordStreamBudget(this.chunkStreamer.getBudgetStats());
     const persistenceDiag = this.persistence.getDiagnostics();
     this.performanceProfiler.setPersistenceQueueDepth(
       persistenceDiag.writeLane.active +
@@ -2092,7 +2114,18 @@ export class Engine {
     this.performanceProfiler.endUpdate();
     this.performanceProfiler.beginRender();
     this.renderer.renderer.clear(); this.renderer.render();
-    if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) { this.renderer.renderer.clearDepth(); this.renderer.renderer.render(this.firstPersonArmRenderer.scene, camera); }
+    // World-pass statistics, captured inside Renderer.render() right after the
+    // scene is drawn. Sampling `info.render` out here reported only the last
+    // pass — the AA composer's fullscreen quad (2 calls / 13 triangles) —
+    // which is why the baseline showed `drawCalls: 1` beside 1123 geometries.
+    let frameDrawCalls = this.renderer.lastWorldDrawCalls;
+    let frameTriangles = this.renderer.lastWorldTriangles;
+    if (this.cameraModeController.getMode() === CameraMode.FIRST_PERSON) {
+      this.renderer.renderer.clearDepth();
+      this.renderer.renderer.render(this.firstPersonArmRenderer.scene, camera);
+      frameDrawCalls += this.renderer.renderer.info.render.calls;
+      frameTriangles += this.renderer.renderer.info.render.triangles;
+    }
 
     this.hudRenderer.update(this.selectedSlot);
     const layoutScale = this.hotbarHudRenderer.getLayout().scale;
@@ -2104,8 +2137,9 @@ export class Engine {
     this.hudRenderer.render();
     const renderInfo = this.renderer.renderer.info;
     this.performanceProfiler.recordRenderStats({
-      drawCalls: renderInfo.render.calls,
-      triangles: renderInfo.render.triangles,
+      // Totals captured above, before later passes reset the counters.
+      drawCalls: frameDrawCalls,
+      triangles: frameTriangles,
       geometries: renderInfo.memory.geometries,
       textures: renderInfo.memory.textures,
     });
@@ -2126,6 +2160,16 @@ export class Engine {
    * them here made opening either one pause the world — chat is an overlay and
    * containers are in-game screens; neither is a pause state.
    */
+  /**
+   * True when the streaming pipeline is busy enough that background
+   * serialisation would visibly compete with chunk loading.
+   */
+  private isStreamingUnderPressure(): boolean {
+    const gen = this.chunkStreamer.getGenerationStats();
+    const mesh = this.chunkRenderer.getMeshingStats();
+    return gen.queued + mesh.queued + mesh.pendingUploads >= AUTOSAVE_PRESSURE_QUEUE;
+  }
+
   private isAnyMenuOpen(): boolean {
     return this.inventoryController.isOpen
       || this.creativeInventoryController.isOpen

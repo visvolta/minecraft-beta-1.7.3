@@ -114,6 +114,14 @@ function print(id, label, r) {
   console.log(`    genStage terrain=${g.terrainMs.toFixed(2)} surface=${g.surfaceMs.toFixed(2)} caves=${g.cavesMs.toFixed(2)} decor=${g.decorationMs.toFixed(2)} snow=${g.snowIceMs.toFixed(2)} total=${g.totalMs.toFixed(2)}ms`);
   console.log(`    render draws=${r.render?.drawCalls ?? '?'} tris=${r.render?.triangles ?? '?'} loaded=${r.chunks.loaded} visible=${r.chunks.visible} dirty=${r.chunks.dirty}`);
   console.log(`    memory heap=${r.memory.jsHeapUsedMb}/${r.memory.jsHeapTotalMb}MB geometry=${r.memory.geometryMb}MB`);
+  if (r.lightingCumulative) {
+    const lc = r.lightingCumulative;
+    console.log(`    lightCum prop=${lc.propagationMs.toFixed(1)}ms init=${lc.initializationMs.toFixed(1)}ms border=${lc.borderReconcileMs.toFixed(1)}ms relight=${lc.localRelightMs.toFixed(1)}ms calls=${lc.propagationCalls} nodes=${lc.nodesProcessed} bfsMax=${lc.maximumBfsQueueSize}`);
+  }
+  if (r.streamBudget) {
+    const sb = r.streamBudget;
+    console.log(`    budget ema=${sb.smoothedFrameMs.toFixed(2)}ms integrations=${sb.integrations} intMs=${sb.integrationMs.toFixed(2)} lightMs=${sb.lightingMs.toFixed(2)} reason=${sb.reason}`);
+  }
 }
 
 await createWorld();
@@ -164,6 +172,12 @@ if (COMPARE && fs.existsSync(COMPARE)) {
     if (!a?.frame || !b?.frame) continue;
     const dp = (x, y) => `${x.toFixed(1)} -> ${y.toFixed(1)} (${y - x >= 0 ? '+' : ''}${(y - x).toFixed(1)})`;
     console.log(`  ${k}: median ${dp(a.frame.medianMs, b.frame.medianMs)}ms | p95 ${dp(a.frame.p95Ms, b.frame.p95Ms)}ms | p99 ${dp(a.frame.p99Ms, b.frame.p99Ms)}ms`);
+    if (a.drain && b.drain) {
+      console.log(`      genDrain ${dp(a.drain.generation.lastDrainMs, b.drain.generation.lastDrainMs)}ms | meshDrain ${dp(a.drain.meshing.lastDrainMs, b.drain.meshing.lastDrainMs)}ms`);
+    }
+    if (a.memory && b.memory) {
+      console.log(`      heapMb ${dp(a.memory.jsHeapUsedMb, b.memory.jsHeapUsedMb)} | draws ${a.render?.drawCalls ?? '?'} -> ${b.render?.drawCalls ?? '?'}`);
+    }
   }
 }
 

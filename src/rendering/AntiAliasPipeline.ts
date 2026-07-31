@@ -50,9 +50,20 @@ export class AntiAliasPipeline {
     }
   }
 
-  public render(): void {
+  public render(afterScenePass?: () => void): void {
     if (this.mode === 'off' || this.composer === null) {
       this.renderer.render(this.scene, this.camera);
+      afterScenePass?.();
+      return;
+    }
+    // The scene pass is internal to the composer, and post passes run after
+    // it — so sampling here would report the fullscreen quad. `onAfterRender`
+    // fires immediately after the SCENE is drawn, which is the moment the
+    // world's draw-call/triangle counts are correct.
+    if (afterScenePass !== undefined) {
+      const previous = this.scene.onAfterRender;
+      this.scene.onAfterRender = () => { afterScenePass(); };
+      try { this.composer.render(); } finally { this.scene.onAfterRender = previous; }
       return;
     }
     this.composer.render();

@@ -66,6 +66,9 @@ export interface EngineDebugHookDependencies {
     placePlayer(x: number, y: number, z: number): void;
   };
   readonly chunkManager: ChunkManager;
+  /** Live player transform, for automated tests that must act near the player. */
+  readonly player: { readonly position: { readonly x: number; readonly y: number; readonly z: number } };
+  readonly cameraController: { setRotation(yaw: number, pitch: number): void };
   readonly fluidAnimationSystem: { getDebugInfo(): unknown };
   readonly fireAnimationSystem: { getDebugInfo(): unknown };
   readonly blockRegistry: BlockRegistry;
@@ -101,6 +104,13 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
     validateGenerationWorkers: () => deps.validationHarness.validateGenerationWorker(),
     validateMeshWorkers: () => deps.validationHarness.validateMeshWorker(),
     getTargetedEntity: () => deps.interactionController.getTargetedEntity(),
+    /** Block currently under the crosshair (automated testing / diagnostics). */
+    getTargetedBlock: () => {
+      const hit = deps.interactionController.getCurrentHit();
+      if (hit === undefined) return null;
+      return { x: hit.blockPos.x, y: hit.blockPos.y, z: hit.blockPos.z,
+               blockId: deps.blockUpdateWorld.getBlock(hit.blockPos.x, hit.blockPos.y, hit.blockPos.z) };
+    },
     getEntityMetrics: () => ({ active: deps.entityManager.activeCount, parked: deps.entityManager.parkedCount, tick: deps.entityManager.currentTick }),
     /**
      * Places a block through the normal world-mutation path (neighbour
@@ -134,6 +144,19 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
      * progress without guessing from visuals.
      */
     getPortalState: () => deps.portal.getState(),
+    /**
+     * Aims the camera deterministically (degrees). Automated tests cannot steer
+     * reliably with synthetic pointer-lock mouse deltas.
+     */
+    setCameraRotation: (yawDeg: number, pitchDeg: number) => {
+      deps.cameraController.setRotation((yawDeg * Math.PI) / 180, (pitchDeg * Math.PI) / 180);
+    },
+    /** Live player position (automated testing / diagnostics). */
+    getPlayerPosition: () => ({
+      x: deps.player.position.x,
+      y: deps.player.position.y,
+      z: deps.player.position.z,
+    }),
     /** Skylight at a world position (Chunk's LOW nibble). */
     getSkylight: (x: number, y: number, z: number) => deps.lightEngine.getSkylight(x, y, z),
     /** Block light at a world position (Chunk's HIGH nibble). */
@@ -239,6 +262,8 @@ export function installEngineDebugHooks(deps: EngineDebugHookDependencies): () =
         },
         drain: s.drain,
         generationStages: s.generationStages,
+        lightingCumulative: s.lightingCumulative,
+        streamBudget: s.streamBudget,
         generation: s.generation,
         meshing: s.meshing,
         lighting: s.lighting,
