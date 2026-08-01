@@ -30,7 +30,9 @@ export const DEFAULT_KEY_BINDINGS: Readonly<Record<InputAction, readonly string[
   left: ['KeyA'],
   right: ['KeyD'],
   jump: ['Space'],
-  sprint: ['ShiftLeft', 'ShiftRight'],
+  // Beta 1.7.3: sneak owns Shift; sprint is a project extension on Control.
+  sprint: ['ControlLeft', 'ControlRight'],
+  sneak: ['ShiftLeft', 'ShiftRight'],
   inventory: ['KeyE'],
   drop: ['KeyQ'],
   pause: ['Escape'],

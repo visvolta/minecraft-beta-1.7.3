@@ -72,6 +72,8 @@ export class Player extends Entity {
   public hunger=20;public saturation=5;public exhaustion=0;public foodTimer=0;public starvationTimer=0;
   public isEating=false;public foodUseTicks=0;public foodUseSlot=-1;public foodUseItem:string|number|undefined;
   public isSprinting=false;public inWater=false;public wasInWater=false;public enteredWaterThisTick=false;public inLava=false;public headUnderwater=false;public collidedHorizontally=false;public viewBobbingEnabled=true;
+  /** Beta sneak (Shift): slower, lowered eye, edge prevention, crouch pose. */
+  public isSneaking=false;
   private equipment: PlayerEquipment | undefined;
   private armourDamageRemainder = 0;
   private damageListener: ((event: PlayerDamageEvent) => void) | undefined;

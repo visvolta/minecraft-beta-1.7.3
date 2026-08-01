@@ -19,6 +19,8 @@ export const FIRST_PERSON_ARM_SCALE = .75;
 export const FIRST_PERSON_CAMERA_OFFSET_X = 0.0;
 export const FIRST_PERSON_CAMERA_OFFSET_Y = 1.62;
 export const FIRST_PERSON_CAMERA_OFFSET_Z = 0.0;
+/** Beta sneak lowers the eye from 1.62 to 1.54 blocks (0.08 block drop). */
+export const SNEAK_EYE_OFFSET = 0.08;
 
 // Third-person camera constants
 export const THIRD_PERSON_DISTANCE = 4.0;

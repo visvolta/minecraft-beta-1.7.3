@@ -126,7 +126,7 @@ export class PlayerPhysics {
 
     const wasInWater = player.inWater;
     const inWaterBeforeMove=isWaterInAABB(this.blockUpdateWorld,playerBox),inLavaBeforeMove=isLavaInAABB(this.blockUpdateWorld,playerBox);player.inLava=inLavaBeforeMove;if(inLavaBeforeMove)player.isSprinting=false;
-    if(inWaterBeforeMove||inLavaBeforeMove){this.applyFluidAcceleration(player,deltaSeconds,inLavaBeforeMove?0.2:0.38);const fx=Math.floor(player.position.x),fy=Math.floor(player.position.y),fz=Math.floor(player.position.z),fluidId=this.blockUpdateWorld.getBlock(fx,fy,fz),flow=computeFluidFlowVector({getBlock:(x,y,z)=>this.blockUpdateWorld.getBlock(x,y,z),getMetadata:(x,y,z)=>this.blockUpdateWorld.getBlockMetadata(x,y,z),isSolid:id=>this.blockRegistry.getById(id)?.solid??false},fx,fy,fz,fluidId);player.velocity.x+=flow.x*deltaSeconds*.8;player.velocity.z+=flow.z*deltaSeconds*.8;const before=player.velocity.y;if(isJumpPressed)player.velocity.y+=deltaSeconds*(inLavaBeforeMove?2:4);else player.velocity.y-=deltaSeconds*(inLavaBeforeMove?2.5:1.5);this.moveAndCollide(player,deltaSeconds,(before+player.velocity.y)/2);const drag=Math.pow(inLavaBeforeMove?0.5:0.8,deltaSeconds*20);player.velocity.x*=drag;player.velocity.y*=drag;player.velocity.z*=drag;if(inWaterBeforeMove&&isJumpPressed&&player.collidedHorizontally&&isWaterInAABB(this.blockUpdateWorld,player.getAABB()))player.velocity.y=Math.max(player.velocity.y,WATER_EXIT_VELOCITY);}else{this.applyHorizontalAcceleration(player,deltaSeconds);const velocityYBeforeGravity=player.velocity.y;if(!isClimbing)this.applyGravity(player,deltaSeconds);this.moveAndCollide(player,deltaSeconds,(velocityYBeforeGravity+player.velocity.y)/2);}
+    if(inWaterBeforeMove||inLavaBeforeMove){this.applyFluidAcceleration(player,deltaSeconds,inLavaBeforeMove?0.2:0.38);const fx=Math.floor(player.position.x),fy=Math.floor(player.position.y),fz=Math.floor(player.position.z),fluidId=this.blockUpdateWorld.getBlock(fx,fy,fz),flow=computeFluidFlowVector({getBlock:(x,y,z)=>this.blockUpdateWorld.getBlock(x,y,z),getMetadata:(x,y,z)=>this.blockUpdateWorld.getBlockMetadata(x,y,z),isSolid:id=>this.blockRegistry.getById(id)?.solid??false},fx,fy,fz,fluidId);player.velocity.x+=flow.x*deltaSeconds*.8;player.velocity.z+=flow.z*deltaSeconds*.8;const before=player.velocity.y;if(isJumpPressed)player.velocity.y+=deltaSeconds*(inLavaBeforeMove?2:4);else player.velocity.y-=deltaSeconds*(inLavaBeforeMove?2.5:1.5);this.moveAndCollide(player,deltaSeconds,(before+player.velocity.y)/2);const drag=Math.pow(inLavaBeforeMove?0.5:0.8,deltaSeconds*20);player.velocity.x*=drag;player.velocity.y*=drag;player.velocity.z*=drag;if(inWaterBeforeMove&&isJumpPressed&&player.collidedHorizontally&&isWaterInAABB(this.blockUpdateWorld,player.getAABB()))player.velocity.y=Math.max(player.velocity.y,WATER_EXIT_VELOCITY);}else{this.applySneakEdgePrevention(player);this.applyHorizontalAcceleration(player,deltaSeconds);const velocityYBeforeGravity=player.velocity.y;if(!isClimbing)this.applyGravity(player,deltaSeconds);this.moveAndCollide(player,deltaSeconds,(velocityYBeforeGravity+player.velocity.y)/2);}
     const inWaterAfterMove=isWaterInAABB(this.blockUpdateWorld,player.getAABB()),inLavaAfterMove=isLavaInAABB(this.blockUpdateWorld,player.getAABB());
     player.wasInWater=wasInWater;player.inWater=inWaterAfterMove;player.inLava=inLavaAfterMove;player.enteredWaterThisTick=!wasInWater&&inWaterAfterMove;
     const downwardEntrySpeed=deltaSeconds>0?(previousY-player.position.y)/deltaSeconds:0;
@@ -156,6 +156,46 @@ export class PlayerPhysics {
   }
 
   private applyFluidAcceleration(player:Player,deltaSeconds:number,speedFactor:number):void{const maxStep=3*deltaSeconds;player.velocity.x=this.stepToward(player.velocity.x,player.wishVelocity.x*speedFactor,maxStep);player.velocity.z=this.stepToward(player.velocity.z,player.wishVelocity.z*speedFactor,maxStep);}
+
+  /**
+   * Beta sneak edge prevention (`EntityPlayerSP`): while sneaking on solid
+   * ground, walking off an edge is disallowed. If the horizontal move would
+   * carry the player's centre over a cell whose block at foot level is air
+   * and whose block below is non-solid (i.e. a real drop), the wish velocity
+   * is zeroed so the player stops at the lip instead of stepping off.
+   */
+  private applySneakEdgePrevention(player: Player): void {
+    if (!player.isSneaking || !player.grounded) return;
+    if (player.wishVelocity.x === 0 && player.wishVelocity.z === 0) return;
+
+    const dirX = Math.sign(player.wishVelocity.x);
+    const dirZ = Math.sign(player.wishVelocity.z);
+    const feetX = Math.floor(player.position.x);
+    const feetY = Math.floor(player.position.y + 0.05);
+    const feetZ = Math.floor(player.position.z);
+
+    // Examine the cell the horizontal velocity points into (both axes
+    // independently so diagonal edge-walking is handled correctly).
+    const checkCell = (dx: number, dz: number): boolean => {
+      const aheadId = this.blockUpdateWorld.getBlock(feetX + dx, feetY, feetZ + dz);
+      const belowId = this.blockUpdateWorld.getBlock(feetX + dx, feetY - 1, feetZ + dz);
+      const belowSolid = this.blockRegistry.getById(belowId)?.solid === true;
+      // An edge is where the foot-level block ahead is air and there is no
+      // solid floor underneath that cell.
+      return aheadId === BlockIds.Air && !belowSolid;
+    };
+
+    let blocked = false;
+    if (dirX !== 0 && checkCell(dirX, 0)) blocked = true;
+    if (dirZ !== 0 && checkCell(0, dirZ)) blocked = true;
+
+    if (blocked) {
+      player.wishVelocity.x = 0;
+      player.wishVelocity.z = 0;
+      player.velocity.x = 0;
+      player.velocity.z = 0;
+    }
+  }
 
   private applyHorizontalAcceleration(player: Player, deltaSeconds: number): void {
     const acceleration = player.grounded ? GROUND_ACCELERATION : AIR_ACCELERATION;

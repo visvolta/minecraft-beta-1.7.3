@@ -47,9 +47,10 @@ export class NoteBlockBehaviour implements BlockBehaviour {
     const pitch = Math.pow(2, (note - 12) / 12);
     // Determine instrument from block below.
     const instrument = this.getInstrumentFromBlockBelow(ctx, x, y, z);
-    void instrument;
-    // Fallback: 'click' sound at the note's pitch (until note assets are added).
-    ctx.playBlockSound?.('click', x + 0.5, y + 0.5, z + 0.5, pitch, 0.3);
+    // Play the authentic Beta instrument sound at the note's pitch.
+    ctx.playNoteSound?.(instrument, x + 0.5, y + 0.5, z + 0.5, pitch, 1);
+    // Green note particle rises from the block.
+    ctx.spawnNoteParticle?.(x, y, z, note);
   }
 
   private getInstrumentFromBlockBelow(ctx: BlockBehaviourContext, x: number, y: number, z: number): string {

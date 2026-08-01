@@ -2,6 +2,7 @@ import type { SerializedFurnace } from '../furnace/FurnaceManager';
 import type { SerializedChest } from '../chest/ChestContainer';
 import type { SerializedSign } from '../sign/SignManager';
 import type { SerializedDispenser } from '../dispenser/DispenserManager';
+import type { SerializedJukeboxRecord } from '../jukebox/JukeboxManager';
 import { Difficulty, isDifficulty } from './Difficulty';
 import { GameMode, parseGameMode } from '../player/GameMode';
 
@@ -61,6 +62,8 @@ export interface WorldMetadata {
   readonly signs?: SerializedSign[];
   /** Dispenser inventories. Absent in older saves; they simply start empty. */
   readonly dispensers?: SerializedDispenser[];
+  /** Jukebox discs by position (per dimension). Absent in older saves. */
+  readonly records?: SerializedJukeboxRecord[];
 }
 export function validateWorldMetadata(value: unknown): WorldMetadata {
   if (typeof value !== 'object' || value === null) throw new Error('World metadata must be an object');

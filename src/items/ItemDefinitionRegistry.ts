@@ -163,9 +163,20 @@ const GENERIC_ITEMS: readonly ItemDefinition[] = [
   { id: 'minecart_furnace', numericId: 343, displayName: 'Minecart with Furnace', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'transportation', creativeOrder: 343 },
   { id: 'boat', numericId: 333, stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'transportation', creativeOrder: 333 },
 
-  // Music discs
+  // Music discs — 13 and cat are authentic Beta 1.7.3; the remaining ten are
+  // an intentional extension (documented in the Wave 5 report).
   { id: 'record_13', numericId: 2256, displayName: 'Music Disc 13', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2256 },
   { id: 'record_cat', numericId: 2257, displayName: 'Music Disc cat', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2257 },
+  { id: 'record_blocks', numericId: 2258, displayName: 'Music Disc blocks', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2258 },
+  { id: 'record_chirp', numericId: 2259, displayName: 'Music Disc chirp', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2259 },
+  { id: 'record_far', numericId: 2260, displayName: 'Music Disc far', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2260 },
+  { id: 'record_mall', numericId: 2261, displayName: 'Music Disc mall', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2261 },
+  { id: 'record_mellohi', numericId: 2262, displayName: 'Music Disc mellohi', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2262 },
+  { id: 'record_stal', numericId: 2263, displayName: 'Music Disc stal', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2263 },
+  { id: 'record_strad', numericId: 2264, displayName: 'Music Disc strad', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2264 },
+  { id: 'record_ward', numericId: 2265, displayName: 'Music Disc ward', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2265 },
+  { id: 'record_11', numericId: 2266, displayName: 'Music Disc 11', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2266 },
+  { id: 'record_wait', numericId: 2267, displayName: 'Music Disc wait', stackSize: 1, useAction: 'none', creativeVisible: true, creativeTab: 'misc', creativeOrder: 2267 },
 ];
 
 /**

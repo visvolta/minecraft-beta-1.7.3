@@ -63,7 +63,9 @@ export interface FogState {
  * the real fog colour comes from Beta's per-frame getFogColor.
  */
 export const OVERWORLD_FOG_COLOR = 0x70a0ff;
-const WATER_FOG_COLOR = 0x203a80;
+const WATER_FOG_COLOR_R = 0x20;
+const WATER_FOG_COLOR_G = 0x3a;
+const WATER_FOG_COLOR_B = 0x80;
 const LAVA_FOG_COLOR = 0x9a2f00;
 
 /**
@@ -79,19 +81,22 @@ export const VISIBLE_DISTANCE_CHUNK_BUFFER = 2.0;
  * is `1 - exp(-(density * d)²)`. Setting density = FACTOR / fogFar
  * makes the opacity at d = fogFar equal to `1 - exp(-FACTOR²)`:
  *
- *   FACTOR = 2.0  → opacity(fogFar)      ≈ 0.982
- *                    opacity(fogFar × 0.5) ≈ 0.632
+ *   FACTOR = 1.4  → opacity(fogFar)      ≈ 0.859
+ *                    opacity(fogFar × 0.5) ≈ 0.613
  *
- * That's the "gradual middle, near-total far" profile the brief asks
- * for. Chunks past `fogFar` are almost completely hidden; nearby
- * terrain remains readable.
+ * That's the "gradual middle, far-distant concealment" profile the brief
+ * asks for. The lower factor (vs the previous 2.0) pushes the dense fog
+ * further back and keeps nearby terrain clearer while still hiding the
+ * chunk boundary at the horizon.
  */
-export const CLEAR_WEATHER_FOG_DISTANCE_SCALE = 1.125;
-const FOG_DENSITY_FACTOR = 2.0;
+export const CLEAR_WEATHER_FOG_DISTANCE_SCALE = 1.3;
+const FOG_DENSITY_FACTOR = 1.4;
 
 /** Water/lava (linear) fog band retained from Stage 17. Never migrated to exp2. */
 const WATER_FOG_NEAR = 0;
 const WATER_FOG_FAR = 18;
+/** Water fog far distance when the eye is in near-darkness (caves/night). */
+const WATER_FOG_FAR_DARK = 4;
 const LAVA_FOG_NEAR = 0;
 const LAVA_FOG_FAR = 4;
 
@@ -190,13 +195,29 @@ export class FogController {
     }
 
     if (eyeBlockId === BlockIds.WaterFlowing || eyeBlockId === BlockIds.WaterStill) {
+      // Water fog responds to the local light. Effective brightness = the max
+      // of the block light and the skylight at the eye cell (skylight in
+      // caves is ~0, so underground and night water tightens naturally while
+      // a daytime surface stays bright and clear). Distance scales linearly
+      // between a tight cave far (4) and a bright surface far (18).
+      const skylight = this.lightEngine.getSkylight(eyeBlockX, eyeBlockY, eyeBlockZ);
+      const blocklight = this.lightEngine.getBlocklight(eyeBlockX, eyeBlockY, eyeBlockZ);
+      const brightness = Math.max(skylight, blocklight) / 15; // 0..1
+      const far = WATER_FOG_FAR_DARK + (WATER_FOG_FAR - WATER_FOG_FAR_DARK) * brightness;
+      // Colour darkens with the light too so caves read a deep, murky blue.
+      const dark = 1 - 0.55 * (1 - brightness);
+      const waterColor = packFogColor({
+        r: (WATER_FOG_COLOR_R * dark) / 255,
+        g: (WATER_FOG_COLOR_G * dark) / 255,
+        b: (WATER_FOG_COLOR_B * dark) / 255,
+      });
       return {
         mode: 'water',
         kind: 'linear',
         enabled: true,
-        colorHex: WATER_FOG_COLOR,
+        colorHex: waterColor,
         near: WATER_FOG_NEAR,
-        far: WATER_FOG_FAR,
+        far,
         density: 0,
       };
     }

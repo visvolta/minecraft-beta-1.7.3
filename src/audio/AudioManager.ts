@@ -84,6 +84,8 @@ export class AudioManager implements MobSoundSink {
   private musicContext: MusicContext = 'none';
   private musicTimer: number | undefined;
   private currentMusic: AudioBufferSourceNode | undefined;
+  /** Active jukebox disc source (plays globally through the music bus). */
+  private currentRecord: AudioBufferSourceNode | undefined;
   private musicGeneration = 0;
   private lastMusicKey: string | undefined;
   private worldSession = 0;
@@ -153,6 +155,7 @@ export class AudioManager implements MobSoundSink {
       case 'step': this.playStepMaterial(event.material, event.x, event.y, event.z, event.volume ?? 0.15, event.pitch ?? 1); break;
       case 'player.damage': { const key = event.kind === 'hurt' ? this.randomVariant('damage.hit', ['damage.hit1','damage.hit2','damage.hit3']) : event.kind === 'fall-big' ? 'damage.fallbig' : 'damage.fallsmall'; const pitch = event.kind === 'hurt' ? 1 + (Math.random() - Math.random()) * 0.2 : 1; this.playPositional(key, event.x, event.y, event.z, 1, pitch, 16, 'important', `player.damage.${event.kind}`); break; }
       case 'random.explode': this.playPositional(this.randomKey(['random.explode1','random.explode2','random.explode3']), event.x, event.y, event.z, 4, 0.7 + Math.random() * 0.2, 64, 'critical', 'random.explode'); break;
+      case 'note': this.playPositional(`note.${event.instrument}`, event.x, event.y, event.z, event.volume ?? 1, event.pitch, 24, 'player', `note.${event.instrument}`, WORLD_AUDIO_LIMITS.shortDedupeMs); break;
       case 'random.splash': this.playPositional('random.splash', event.x, event.y, event.z, event.volume ?? 0.7, 1 + (Math.random() - Math.random()) * 0.2, 16, 'ambient', 'random.splash', WORLD_AUDIO_LIMITS.splashDedupeMs); break;
       case 'weather.thunder': this.playPositional(this.randomKey(['ambient.weather.thunder1','ambient.weather.thunder2','ambient.weather.thunder3']), event.x, event.y, event.z, Math.max(4, 10 - event.distance / 32), 1, 256, 'important', 'weather.thunder'); break;
       case 'entity.legacy': this.playLegacy({ id: event.id, kind: event.kind as MobSoundEvent['kind'], x: event.x, y: event.y, z: event.z, volume: event.volume, pitch: event.pitch, attenuationDistance: event.attenuationDistance }); break;
@@ -501,6 +504,48 @@ export class AudioManager implements MobSoundSink {
   }
   private stopLoop(ownerKey: string): void { this.pendingLoopStarts.delete(ownerKey); const loop=this.activeLoops.get(ownerKey); if(!loop)return; loop.source.stop(); loop.source.disconnect(); loop.gain.disconnect(); loop.panner?.disconnect(); this.activeLoops.delete(ownerKey); }
   private stopCurrentMusic(): void { if (this.musicTimer !== undefined) window.clearTimeout(this.musicTimer); this.musicTimer = undefined; this.musicGeneration++; const source = this.currentMusic; this.currentMusic = undefined; if (source !== undefined) { source.onended = null; source.stop(); source.disconnect(); } }
+
+  /**
+   * Plays a jukebox disc. Beta records are music: they play globally at full
+   * volume regardless of distance, so this routes the `records.<name>` asset
+   * through the music bus and stops the ambient game music while it plays.
+   */
+  public playRecord(recordName: string): void {
+    this.stopRecord();
+    this.stopCurrentMusic();
+    const key = `records.${recordName}`;
+    void this.activate().then(async () => {
+      const ctx = this.context, dest = this.musicGain;
+      if (!ctx || !dest) return;
+      const buffer = await this.loadBuffer(key);
+      if (!buffer) return;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(dest);
+      source.onended = (): void => {
+        source.disconnect();
+        if (this.currentRecord === source) {
+          this.currentRecord = undefined;
+          // Resume ambient game music once the disc finishes.
+          if (this.musicContext !== 'none') this.scheduleNextMusic(0);
+        }
+      };
+      this.currentRecord = source;
+      source.start();
+    });
+  }
+
+  /** Stops any playing jukebox disc and lets ambient game music resume. */
+  public stopRecord(): void {
+    const source = this.currentRecord;
+    this.currentRecord = undefined;
+    if (source !== undefined) {
+      source.onended = null;
+      source.stop();
+      source.disconnect();
+    }
+    if (this.musicContext !== 'none') this.scheduleNextMusic(0);
+  }
   private scheduleNextMusic(delay: number): void { if (this.musicContext === 'none' || typeof window === 'undefined') return; if (this.musicTimer !== undefined) window.clearTimeout(this.musicTimer); this.musicTimer = window.setTimeout(() => void this.startMusic(), delay); }
   private async startMusic(): Promise<void> { if (this.context === undefined) return; const generation=this.musicGeneration; const keys=this.musicKeys(); if(keys.length===0)return; let key=this.randomKey(keys); if(keys.length>1 && key===this.lastMusicKey) key=this.randomKey(keys.filter(k=>k!==this.lastMusicKey)); this.lastMusicKey=key; await this.activate(); const ctx=this.context,dest=this.musicGain;if(!ctx||!dest||generation!==this.musicGeneration)return; const buffer=await this.loadBuffer(key); if(generation!==this.musicGeneration)return; if(!buffer){this.scheduleNextMusic(10_000);return;} const source=ctx.createBufferSource(); source.buffer=buffer; source.connect(dest); source.onended=()=>{source.disconnect(); if(this.currentMusic===source){this.currentMusic=undefined; const min=this.musicContext==='menu'?MENU_MUSIC_MIN_SILENCE_MS:GAME_MUSIC_MIN_SILENCE_MS; const max=this.musicContext==='menu'?MENU_MUSIC_MAX_SILENCE_MS:GAME_MUSIC_MAX_SILENCE_MS; this.scheduleNextMusic(min+Math.random()*(max-min));}}; this.currentMusic=source; source.start(); }
   private musicKeys(): string[] { if(this.musicContext==='menu')return ['music.menu.menu1','music.menu.menu2','music.menu.menu3','music.menu.menu4']; if(this.musicContext==='creative')return ['music.game.creative.creative1','music.game.creative.creative2','music.game.creative.creative3','music.game.creative.creative4','music.game.creative.creative5','music.game.creative.creative6']; if(this.musicContext==='nether')return ['music.game.nether.nether1','music.game.nether.nether2','music.game.nether.nether3','music.game.nether.nether4']; if(this.musicContext==='survival')return ['music.game.calm1','music.game.calm2','music.game.calm3','music.game.hal1','music.game.hal2','music.game.hal3','music.game.hal4','music.game.nuance1','music.game.nuance2','music.game.piano1','music.game.piano2','music.game.piano3']; return []; }

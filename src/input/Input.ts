@@ -9,6 +9,7 @@ export type InputAction =
   | 'right'
   | 'jump'
   | 'sprint'
+  | 'sneak'
   | 'inventory'
   | 'drop'
   | 'pause'
@@ -21,7 +22,11 @@ const DEFAULT_BINDINGS: Record<InputAction, readonly string[]> = {
   left: ['KeyA'],
   right: ['KeyD'],
   jump: ['Space'],
-  sprint:['ShiftLeft','ShiftRight'],
+  // Beta 1.7.3: sneak is bound to Shift. Sprinting did not exist in Beta
+  // 1.7.3; the project's sprint is an extension, so it moves off Shift to
+  // Control so sneak owns the Shift keys.
+  sprint:['ControlLeft','ControlRight'],
+  sneak:['ShiftLeft','ShiftRight'],
   inventory: ['KeyE'],
   drop: ['KeyQ'],
   pause: ['Escape'],

@@ -91,6 +91,7 @@ export class PlayerAnimator {
     this.applyAirborneAndFlying(player, pose, state);
     this.applyHeldItemPose(player, pose, heldPose);
     this.applyUsePose(player, pose, heldPose, clampedHeadPitch);
+    this.applySneakPose(player, model, pose, state);
     this.applyAttackOverlay(player, pose, clampedHeadPitch, partialTick);
     this.commitPose(model, pose, state);
   }
@@ -201,6 +202,26 @@ export class PlayerAnimator {
     pose.rightArmX = Math.min(pose.rightArmX, -1.1 + headPitch * 0.25);
     pose.rightArmY -= 0.1;
     pose.rightArmZ += 0.12;
+  }
+
+  /**
+   * Beta `ModelBiped` sneaking pose: the torso leans forward, the arms swing
+   * slightly forward, and the whole model crouches down by lowering the
+   * head/body/arm pivots a couple of model units. Not applied while flying
+   * or seated in a vehicle.
+   */
+  private applySneakPose(player: Player, model: PlayerModel, pose: PoseAccumulator, state: PlayerAnimationState): void {
+    if (!player.isSneaking || state === 'minecart_sitting' || state === 'flying') return;
+
+    pose.bodyX += 0.5;
+    pose.rightArmX += 0.4;
+    pose.leftArmX += 0.4;
+
+    const px = PLAYER_MODEL_SCALE;
+    model.headGroup.position.y = 22 * px;
+    model.bodyGroup.position.y = 22 * px;
+    model.rightArmGroup.position.y = 22 * px;
+    model.leftArmGroup.position.y = 22 * px;
   }
 
   private applyAttackOverlay(player: Player, pose: PoseAccumulator, headPitch: number, partialTick: number): void {

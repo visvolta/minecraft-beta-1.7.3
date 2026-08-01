@@ -28,6 +28,13 @@ export interface BlockBehaviourContext {
    * Optional so worker-side and headless callers can omit audio entirely.
    */
   readonly playBlockSound?: (id: 'door_open' | 'door_close' | 'chestopen' | 'chestclosed' | 'click', x: number, y: number, z: number, pitch?: number, volume?: number) => void;
+  /**
+   * Note block instrument playback (`note.<instrument>`). Optional so worker /
+   * headless callers can omit it. Pitch is the Beta `2^((note-12)/12)` value.
+   */
+  readonly playNoteSound?: (instrument: string, x: number, y: number, z: number, pitch: number, volume?: number) => void;
+  /** Spawns the green note-block particle at a position (Beta `note` particle). */
+  readonly spawnNoteParticle?: (x: number, y: number, z: number, note: number) => void;
 }
 
 export interface BlockBehaviour {

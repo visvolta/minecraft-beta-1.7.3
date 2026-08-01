@@ -112,6 +112,7 @@ import { registerNoteBlockBehaviour } from '../world/behaviours/NoteBlockBehavio
 import { registerPistonBehaviour } from '../world/behaviours/PistonBaseBehaviour';
 import { registerDispenserBehaviour } from '../world/behaviours/DispenserBehaviour';
 import { registerJukeboxBehaviour } from '../world/behaviours/JukeboxBehaviour';
+import { JukeboxManager, itemIdToDisc } from '../jukebox/JukeboxManager';
 import { registerTntBehaviour } from '../world/behaviours/TntBehaviour';
 import { registerPoweredRailBehaviour } from '../world/behaviours/PoweredRailBehaviour';
 import { registerRailBehaviour } from '../world/behaviours/RailBehaviour';
@@ -124,6 +125,7 @@ import { EntityFireOverlayRenderer } from '../rendering/EntityFireOverlay';
 import { applyLivingVisualState } from '../rendering/LivingRenderTransform';
 import { PortalAnimationSystem } from '../rendering/portal/PortalAnimationSystem';
 import { PortalParticleSystem } from '../rendering/portal/PortalParticleSystem';
+import { ParticleManager } from '../rendering/particles/ParticleManager';
 import { PortalTravelState } from '../world/portal/PortalTravelState';
 import { isInsidePortal } from '../world/portal/PortalContact';
 import { PortalIndex, scanChunkForPortals, PORTAL_INDEX_RECORD_KEY } from '../world/portal/PortalIndex';
@@ -415,6 +417,8 @@ export class Engine {
   private readonly entityFireOverlay: EntityFireOverlayRenderer;
   private readonly portalAnimation = new PortalAnimationSystem();
   private portalParticles: PortalParticleSystem | undefined;
+  private particleManager: ParticleManager | undefined;
+  private jukeboxManager: JukeboxManager | undefined;
   /** Beta portal charge/cooldown state, ticked at the fixed 20 Hz rate. */
   private readonly portalTravel = new PortalTravelState();
   /** Single owner of any in-flight dimension switch. */
@@ -566,6 +570,11 @@ export class Engine {
     this.redstonePowerEngine = new RedstonePowerEngine(this.blockUpdateWorld, blockRegistry, this.blockBehaviourRegistry);
     this.blockUpdateWorld.setPowerEngine(this.redstonePowerEngine);
     this.blockUpdateWorld.setBlockSoundSink((id, x, y, z, pitch, volume) => this.audioManager.play({ type: 'block.action', id, x, y, z, ...(pitch === undefined ? {} : { pitch }), ...(volume === undefined ? {} : { volume }) }));
+    this.blockUpdateWorld.setNoteSoundSink((instrument, x, y, z, pitch, volume) => this.audioManager.play({ type: 'note', instrument, x, y, z, pitch, ...(volume === undefined ? {} : { volume }) }));
+    this.blockUpdateWorld.setNoteParticleSink((x, y, z, note) => {
+      this.particleManager?.spawn('note', { x: x + 0.5, y: y + 1.2, z: z + 0.5, vy: 0.8, vx: (Math.random() - 0.5) * 0.5, vz: (Math.random() - 0.5) * 0.5, green: 1, red: 0.35, blue: 0.5, lifetime: 1, size: 0.5 });
+      void note;
+    });
     this.playerPhysics=new PlayerPhysics(blockRegistry,this.blockBehaviourRegistry,this.blockUpdateWorld);
     this.playerSurvivalController=new PlayerSurvivalController(this.player,this.blockUpdateWorld,blockRegistry,()=>metadata.difficulty);
     this.playerSurvivalController.setLandingSoundListener((event)=>{this.audioManager.play({type:'step',material:event.material,x:event.x,y:event.y,z:event.z,volume:event.volume,pitch:event.pitch});});
@@ -598,7 +607,8 @@ export class Engine {
     const worldRng = new JavaRandom(worldSeed);
     const entityTypeRegistry = createDefaultEntityTypeRegistry();
     registerEntityTypes(entityTypeRegistry);
-    this.entityParticles = new SimpleEntityParticleSink(this.renderer.scene);
+    this.particleManager = new ParticleManager(this.renderer.scene);
+    this.entityParticles = new SimpleEntityParticleSink(this.renderer.scene, this.particleManager);
     this.entityManager = new EntityManager({
       blockRegistry,
       behaviourRegistry: this.blockBehaviourRegistry,
@@ -677,7 +687,16 @@ export class Engine {
     this.dispenserManager.setDimension(this.activeDimensionId);
     this.dispenserManager.deserialize(metadata.dispensers);
     this.dispenserBehaviour = registerDispenserBehaviour(this.blockBehaviourRegistry, this.dispenserManager);
-    registerJukeboxBehaviour(this.blockBehaviourRegistry);
+    this.jukeboxManager = new JukeboxManager();
+    this.jukeboxManager.setDimension(this.activeDimensionId);
+    this.jukeboxManager.deserialize(metadata.records);
+    registerJukeboxBehaviour(this.blockBehaviourRegistry, this.jukeboxManager, {
+      playRecord: (disc) => this.audioManager.playRecord(disc),
+      stopRecord: () => this.audioManager.stopRecord(),
+      getHeldDisc: () => itemIdToDisc(String(this.inventory?.getStack(this.interactionController?.getSelectedSlotIndex())?.identity.id ?? '') ?? '') ?? null,
+      consumeHeldDisc: () => { if (this.player !== undefined && !this.player.isCreativeMode()) this.inventory?.decrementSlot(this.interactionController?.getSelectedSlotIndex() ?? 0, 1); },
+      spawnDiscItem: (x, y, z, itemId) => this.itemEntityManager?.spawnItem(x, y, z, { type: 'item', id: itemId, count: 1, metadata: 0 }, 10),
+    });
     registerTntBehaviour(this.blockBehaviourRegistry);
     registerRailBehaviour(this.blockBehaviourRegistry);
     registerPoweredRailBehaviour(this.blockBehaviourRegistry);
@@ -1676,6 +1695,9 @@ export class Engine {
       this.sleepOverlay.dispose();
       this.entityManager.dispose();
       this.entityParticles.dispose();
+      this.particleManager?.dispose();
+      this.particleManager = undefined;
+      this.audioManager.stopRecord();
     });
 
     measureSaveSync('save.engine.dispose_world_systems', {
@@ -2124,6 +2146,7 @@ export class Engine {
     }
     this.entityFireOverlay.endFrame();
     this.entityParticles.update(deltaSeconds);
+    this.particleManager?.update(deltaSeconds);
     this.debugStatsCollector.recordFrame(deltaSeconds);
     if (this.debugOverlay.isVisible()) {
       const debugCollectStart = performance.now();
@@ -2292,7 +2315,7 @@ export class Engine {
   private snapshotMetadata(): WorldMetadata {
     const weather = this.weatherController.getState(); const serialized = InventorySerializer.serialize(this.inventory, this.selectedSlot);
     const saved = this.currentMetadata();
-    return { ...saved, player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, cheatsEnabled: this.commandService?.cheats.isEnabled() ?? saved.cheatsEnabled ?? false, furnaces: this.mergeContainerRecords(saved.furnaces, this.furnaceManager.serialize()), chests: this.mergeContainerRecords(saved.chests, this.chestManager.serialize()), signs: this.mergeContainerRecords(saved.signs, this.signManager.serialize()), dispensers: this.mergeContainerRecords(saved.dispensers, this.dispenserManager.serialize()) };
+    return { ...saved, player: { x: this.player.position.x, y: this.player.position.y, z: this.player.position.z, yaw: this.cameraController.getYaw(), pitch: this.cameraController.getPitch() }, playerHealth:{health:this.player.health,maxHealth:this.player.maxHealth},playerFood:{hunger:this.player.hunger,saturation:this.player.saturation,exhaustion:this.player.exhaustion}, gameMode:this.player.gameMode, timeTicks: this.worldTime.getTotalTicks(), weather: { raining: weather.raining, thundering: weather.thundering, rainTime: weather.rainTime, thunderTime: weather.thunderTime }, inventory: serialized.inventory, armour: serialized.armour, selectedHotbarSlot: serialized.selectedHotbarSlot, cheatsEnabled: this.commandService?.cheats.isEnabled() ?? saved.cheatsEnabled ?? false, furnaces: this.mergeContainerRecords(saved.furnaces, this.furnaceManager.serialize()), chests: this.mergeContainerRecords(saved.chests, this.chestManager.serialize()), signs: this.mergeContainerRecords(saved.signs, this.signManager.serialize()), dispensers: this.mergeContainerRecords(saved.dispensers, this.dispenserManager.serialize()), records: this.mergeContainerRecords(saved.records, this.jukeboxManager?.serialize() ?? []) };
   }
 
   /**
@@ -2863,6 +2886,10 @@ export class Engine {
     this.signManager.deserialize(rebound?.signs);
     this.dispenserManager.setDimension(dimensionId);
     this.dispenserManager.deserialize(rebound?.dispensers);
+    // Jukebox records are dimension-scoped: rebind and rehydrate.
+    this.audioManager.stopRecord();
+    this.jukeboxManager?.setDimension(dimensionId);
+    this.jukeboxManager?.deserialize(rebound?.records);
 
     const metadata = this.persistence.getMetadata();
     const trustPersistedLighting =

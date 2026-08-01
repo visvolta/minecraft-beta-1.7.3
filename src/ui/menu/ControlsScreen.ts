@@ -2,8 +2,8 @@ import { DEFAULT_KEY_BINDINGS, updateBinding, type GameSettings } from '../../se
 import type { InputAction } from '../../input/Input';
 import { applyDirtBackground, guiHeight, guiWidth, GuiButton, Screen } from './MenuWidgets';
 
-const ACTIONS: readonly InputAction[] = ['forward','back','left','right','jump','sprint','inventory','drop','pause','perspective'];
-const LABELS: Readonly<Record<InputAction,string>> = { forward:'Forward', back:'Back', left:'Left', right:'Right', jump:'Jump', sprint:'Sneak/Descend', inventory:'Inventory', drop:'Drop', pause:'Pause', perspective:'Perspective' };
+const ACTIONS: readonly InputAction[] = ['forward','back','left','right','jump','sprint','sneak','inventory','drop','pause','perspective'];
+const LABELS: Readonly<Record<InputAction,string>> = { forward:'Forward', back:'Back', left:'Left', right:'Right', jump:'Jump', sprint:'Sprint/Descend', sneak:'Sneak', inventory:'Inventory', drop:'Drop', pause:'Pause', perspective:'Perspective' };
 
 export class ControlsScreen extends Screen {
   private capture: InputAction | null = null;

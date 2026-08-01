@@ -38,6 +38,11 @@ const RIDER_PUSH = 0.2;
 /** Beta breaks the boat on a hard horizontal collision above this speed. */
 const CRASH_SPEED = 0.15;
 
+/** Player drive acceleration per tick in the boat's forward direction. */
+const BOAT_DRIVE_ACCEL = 0.05;
+/** Boat yaw change (degrees) per tick while the rider steers. */
+const BOAT_STEER_RATE_DEG = 4.5;
+
 export class BoatEntity extends Entity {
   public override readonly typeId = EntityTypeIds.Boat;
   public override readonly typeStringId = 'Boat';
@@ -48,6 +53,14 @@ export class BoatEntity extends Entity {
   public timeSinceHit = 0;
   /** Beta `boatRockDirection`, flips on each hit. */
   public rockDirection = 1;
+
+  /**
+   * Player drive input set by PlayerController each tick while the player
+   * rides this boat: `driveForward` in [-1, 1] (W/S) and `steer` in [-1, 1]
+   * (A/D). Applied in onTick for propulsion and turning.
+   */
+  public driveForward = 0;
+  public steer = 0;
 
   private ctx: EntityWorldContext;
   private destroyed = false;
@@ -72,6 +85,11 @@ export class BoatEntity extends Entity {
     this.ctx = tickCtx.world;
     this.age += 1;
 
+    // Drive input is owned by the current rider and set per frame; clear it
+    // so a dismounted/abandoned boat coasts rather than continuing to thrust.
+    this.driveForward = 0;
+    this.steer = 0;
+
     if (this.timeSinceHit > 0) this.timeSinceHit -= 1;
     if (this.damage > 0) this.damage -= 1;
 
@@ -82,6 +100,19 @@ export class BoatEntity extends Entity {
     this.velocity.y += BUOYANCY * submerged;
     if (this.velocity.y < 0) this.velocity.y /= 2;
     this.velocity.y += SURFACE_LIFT;
+
+    // Player drive input propels and steers the boat (Beta boat control).
+    if (this.riddenByEntity !== null) {
+      const yawRad = this.yaw * Math.PI / 180;
+      const forwardX = -Math.sin(yawRad);
+      const forwardZ = -Math.cos(yawRad);
+      this.velocity.x += forwardX * this.driveForward * BOAT_DRIVE_ACCEL;
+      this.velocity.z += forwardZ * this.driveForward * BOAT_DRIVE_ACCEL;
+      if (this.steer !== 0) {
+        this.yaw += this.steer * BOAT_STEER_RATE_DEG;
+        this.previousYaw = this.yaw;
+      }
+    }
 
     // The rider's own motion pushes the boat (Beta's only steering input).
     const rider = this.riddenByEntity;

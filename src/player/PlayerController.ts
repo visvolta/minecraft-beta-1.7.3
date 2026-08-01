@@ -2,6 +2,7 @@ import type { CameraController } from '../camera/CameraController';
 import type { Input } from '../input/Input';
 import { GRAVITY } from '../physics/physicsConstants';
 import type { Player } from './Player';
+import { BoatEntity } from '../entities/BoatEntity';
 import {
   CREATIVE_DOUBLE_JUMP_WINDOW_SECONDS,
   CREATIVE_FLIGHT_MAX_SPEED,
@@ -9,6 +10,12 @@ import {
 
 /** Beta 1.7.3 walk speed, blocks per second. */
 export const WALK_SPEED = 4.317;
+
+/**
+ * Beta sneak walk speed ≈ 1.31 blocks/s, expressed as a fraction of walk
+ * speed (≈ 0.303). Sneaking moves the player much slower than walking.
+ */
+export const SNEAK_SPEED_FACTOR = 1.31 / WALK_SPEED;
 
 /** Target jump apex height, blocks. */
 export const JUMP_HEIGHT = 1.2522;
@@ -49,9 +56,22 @@ export class PlayerController {
       this.player.wishVelocity.x = 0;
       this.player.wishVelocity.z = 0;
       this.player.isSprinting = false;
+      if (this.player.ridingEntity instanceof BoatEntity) {
+        // Drive the boat: W/S propel along its facing, A/D steer its yaw.
+        const boat = this.player.ridingEntity;
+        boat.driveForward = (this.input.isActionActive('forward') ? 1 : 0) - (this.input.isActionActive('back') ? 1 : 0);
+        boat.steer = (this.input.isActionActive('right') ? 1 : 0) - (this.input.isActionActive('left') ? 1 : 0);
+      }
       return;
     }
     const yaw = this.camera.getYaw();
+
+    // Beta sneak: set from the held Shift key. Sneak cancels sprint and is
+    // ignored while flying (creative flight is a separate extension).
+    const sneakHeld = this.input.isActionActive('sneak');
+    const isSneaking = sneakHeld && !this.player.isFlying;
+    this.player.isSneaking = isSneaking;
+    if (isSneaking) this.player.isSprinting = false;
 
     // Camera-relative forward/right on the horizontal plane only.
     const forwardX = -Math.sin(yaw);
@@ -86,7 +106,9 @@ export class PlayerController {
 
     if (lengthSq > 0) {
       const length = Math.sqrt(lengthSq);
-      const speed=this.player.isFlying?CREATIVE_FLIGHT_MAX_SPEED:WALK_SPEED*(this.player.isSprinting?1.3:1);this.player.wishVelocity.x=moveX/length*speed;this.player.wishVelocity.z=moveZ/length*speed;
+      // Beta sneak speed ≈ 1.31 blocks/s vs walk ≈ 4.317 → ≈ 0.303× walk.
+      const sneakFactor = this.player.isSneaking ? SNEAK_SPEED_FACTOR : 1;
+      const speed=this.player.isFlying?CREATIVE_FLIGHT_MAX_SPEED:WALK_SPEED*(this.player.isSprinting?1.3:sneakFactor);this.player.wishVelocity.x=moveX/length*speed;this.player.wishVelocity.z=moveZ/length*speed;
     } else {
       this.player.wishVelocity.x = 0;
       this.player.wishVelocity.z = 0;

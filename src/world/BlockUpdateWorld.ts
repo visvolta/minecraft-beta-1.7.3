@@ -39,6 +39,8 @@ export class BlockUpdateWorld {
   private entityManager: EntityManager | undefined;
   private powerEngine: RedstonePowerEngine | undefined;
   private blockSoundSink: BlockBehaviourContext['playBlockSound'] | undefined;
+  private noteSoundSink: BlockBehaviourContext['playNoteSound'] | undefined;
+  private noteParticleSink: BlockBehaviourContext['spawnNoteParticle'] | undefined;
   private behaviourPlayer: unknown;
   private getGameTick: (() => number) | undefined;
   private getNextInt: ((bound: number) => number) | undefined;
@@ -78,6 +80,14 @@ export class BlockUpdateWorld {
 
   public setBlockSoundSink(sink: BlockBehaviourContext['playBlockSound']): void {
     this.blockSoundSink = sink;
+  }
+
+  public setNoteSoundSink(sink: BlockBehaviourContext['playNoteSound']): void {
+    this.noteSoundSink = sink;
+  }
+
+  public setNoteParticleSink(sink: BlockBehaviourContext['spawnNoteParticle']): void {
+    this.noteParticleSink = sink;
   }
 
   public setBehaviourPlayer(player: unknown): void {
@@ -321,6 +331,8 @@ export class BlockUpdateWorld {
       ...(this.behaviourPlayer === undefined ? {} : { player: this.behaviourPlayer }),
       ...(this.powerEngine === undefined ? {} : { power: this.powerEngine }),
       ...(this.blockSoundSink === undefined ? {} : { playBlockSound: this.blockSoundSink }),
+      ...(this.noteSoundSink === undefined ? {} : { playNoteSound: this.noteSoundSink }),
+      ...(this.noteParticleSink === undefined ? {} : { spawnNoteParticle: this.noteParticleSink }),
     };
   }
 
@@ -397,6 +409,8 @@ export class BlockUpdateWorld {
       ...(this.behaviourPlayer === undefined ? {} : { player: this.behaviourPlayer }),
       ...(this.powerEngine === undefined ? {} : { power: this.powerEngine }),
       ...(this.blockSoundSink === undefined ? {} : { playBlockSound: this.blockSoundSink }),
+      ...(this.noteSoundSink === undefined ? {} : { playNoteSound: this.noteSoundSink }),
+      ...(this.noteParticleSink === undefined ? {} : { spawnNoteParticle: this.noteParticleSink }),
       ...(player === undefined ? {} : { player }),
     } as BlockBehaviourContext;
   }

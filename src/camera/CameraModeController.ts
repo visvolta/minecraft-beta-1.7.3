@@ -9,7 +9,8 @@ import {
   THIRD_PERSON_TARGET_OFFSET_Y,
   FIRST_PERSON_CAMERA_OFFSET_X,
   FIRST_PERSON_CAMERA_OFFSET_Y,
-  FIRST_PERSON_CAMERA_OFFSET_Z
+  FIRST_PERSON_CAMERA_OFFSET_Z,
+  SNEAK_EYE_OFFSET
 } from '../player/PlayerConstants.ts';
 
 export enum CameraMode {
@@ -37,8 +38,10 @@ export class CameraModeController {
   }
 
   public applyTransform(camera: PerspectiveCamera, player: Player, yaw: number, pitch: number): void {
+    // Beta sneak lowers the eye from 1.62 to ~1.54 (0.08 blocks).
+    const sneakEyeOffset = player.isSneaking ? SNEAK_EYE_OFFSET : 0;
     const eyeX = player.position.x + FIRST_PERSON_CAMERA_OFFSET_X;
-    const eyeY = player.position.y + FIRST_PERSON_CAMERA_OFFSET_Y + (this.mode === CameraMode.THIRD_PERSON_REAR ? THIRD_PERSON_TARGET_OFFSET_Y : 0.0);
+    const eyeY = player.position.y + FIRST_PERSON_CAMERA_OFFSET_Y - sneakEyeOffset + (this.mode === CameraMode.THIRD_PERSON_REAR ? THIRD_PERSON_TARGET_OFFSET_Y : 0.0);
     const eyeZ = player.position.z + FIRST_PERSON_CAMERA_OFFSET_Z;
 
     if (this.mode === CameraMode.FIRST_PERSON) {

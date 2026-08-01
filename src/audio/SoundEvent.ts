@@ -16,4 +16,10 @@ export type SemanticSoundEvent =
   | { readonly type: 'player.damage'; readonly kind: 'hurt' | 'fall-small' | 'fall-big'; readonly x: number; readonly y: number; readonly z: number }
   | { readonly type: 'random.explode'; readonly x: number; readonly y: number; readonly z: number }
   | { readonly type: 'random.splash'; readonly x: number; readonly y: number; readonly z: number; readonly volume?: number }
-  | { readonly type: 'weather.thunder'; readonly x: number; readonly y: number; readonly z: number; readonly distance: number };
+  | { readonly type: 'weather.thunder'; readonly x: number; readonly y: number; readonly z: number; readonly distance: number }
+  /**
+   * Note block playback: positional one-shot of a `note.<instrument>` key at
+   * the given pitch (Beta `BlockNote` uses instruments selected from the
+   * block beneath). `volume` defaults to 1.
+   */
+  | { readonly type: 'note'; readonly instrument: string; readonly x: number; readonly y: number; readonly z: number; readonly pitch: number; readonly volume?: number };

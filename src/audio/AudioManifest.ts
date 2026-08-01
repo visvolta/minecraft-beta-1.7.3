@@ -103,6 +103,20 @@ export const WEATHER_SOUNDS = [...numbered('ambient.weather.rain','/audio/sounds
 export const DAMAGE_SOUNDS = ['fallbig','fallsmall','hit1','hit2','hit3'].map((name)=>sound(`damage.${name}`,`/audio/sounds/damage/${name}.ogg`,'damage'));
 export const MINECART_SOUNDS = ['base','inside'].map((name)=>sound(`minecart.${name}`,`/audio/sounds/minecart/${name}.ogg`,'minecart'));
 
+/**
+ * The twelve music discs supported by the Jukebox. The first two (13, cat)
+ * are authentic Beta 1.7.3; the remaining ten are an intentional extension
+ * (documented in the Wave 5 report). Asset keys are `records.<name>`.
+ */
+export const RECORD_SOUNDS = [
+  '13','cat','blocks','chirp','far','mall','mellohi','stal','strad','ward','11','wait',
+].map((name) => sound(`records.${name}`, `/audio/sounds/records/${name}.ogg`, 'records'));
+
+/** Note block instrument sounds (Beta 1.7.3 `note.*` assets). */
+export const NOTE_SOUNDS = [
+  'bass','bassattack','bd','harp','hat','pling','snare',
+].map((name) => sound(`note.${name}`, `/audio/sounds/note/${name}.ogg`, 'note'));
+
 export const DIG_SOUND_MATERIALS: Readonly<Record<Exclude<DigSoundMaterial,'glass'>, readonly AudioEntry[]>> = {
   cloth: numbered('dig.cloth','/audio/sounds/dig/cloth',1,4,'dig'), grass: numbered('dig.grass','/audio/sounds/dig/grass',1,4,'dig'), gravel: numbered('dig.gravel','/audio/sounds/dig/gravel',1,4,'dig'), sand: numbered('dig.sand','/audio/sounds/dig/sand',1,4,'dig'), snow: numbered('dig.snow','/audio/sounds/dig/snow',1,4,'dig'), stone: numbered('dig.stone','/audio/sounds/dig/stone',1,4,'dig'), wood: numbered('dig.wood','/audio/sounds/dig/wood',1,4,'dig'),
 };
@@ -112,7 +126,7 @@ export const STEP_SOUND_MATERIALS: Readonly<Record<StepSoundMaterial, readonly A
 
 export const DIG_SOUNDS = Object.values(DIG_SOUND_MATERIALS).flat();
 export const STEP_SOUNDS = Object.values(STEP_SOUND_MATERIALS).flat();
-export const AUDIO_MANIFEST = [...MUSIC_GAME,...MUSIC_CREATIVE,...MUSIC_NETHER,...MUSIC_MENU,...PORTAL_SOUNDS,...FIRE_SOUNDS,...LIQUID_SOUNDS,...RANDOM_SOUNDS,...MOB_SOUNDS,...CAVE_SOUNDS,...WEATHER_SOUNDS,...DAMAGE_SOUNDS,...MINECART_SOUNDS,...DIG_SOUNDS,...STEP_SOUNDS] as const;
+export const AUDIO_MANIFEST = [...MUSIC_GAME,...MUSIC_CREATIVE,...MUSIC_NETHER,...MUSIC_MENU,...PORTAL_SOUNDS,...FIRE_SOUNDS,...LIQUID_SOUNDS,...RANDOM_SOUNDS,...MOB_SOUNDS,...CAVE_SOUNDS,...WEATHER_SOUNDS,...DAMAGE_SOUNDS,...MINECART_SOUNDS,...RECORD_SOUNDS,...NOTE_SOUNDS,...DIG_SOUNDS,...STEP_SOUNDS] as const;
 
 export function entriesForKeys(keys: readonly string[]): AudioEntry[] { return keys.map((key) => { const entry = AUDIO_MANIFEST.find((candidate) => candidate.key === key); if (!entry) throw new Error(`Unknown audio key ${key}`); return entry; }); }
 export function manifestByKey(): Map<string, AudioEntry> { return new Map(AUDIO_MANIFEST.map((entry) => [entry.key, entry])); }
